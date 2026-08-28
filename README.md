@@ -35,7 +35,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 9 | Run 指标：token/耗时/模型与工具调用数（callbacks 全链路统计） | ✅ |
 | 10 | 团队编排：协调者规划 + 多子代理原生并行 + 显式 fan-out + SUBAGENT 事件 | ✅ |
 | 11 | 评测基准：多类型任务端到端对比（时间/token/调用数，markdown+JSON 报告） | ✅ |
-| 12 | 原生中间件接入：summarization / 调用上限 / 重试 / 降级 | ⬜ |
+| 12 | 原生中间件接入：summarization / 调用上限 / 重试 / 降级（ResiliencePolicy → LangChain AgentMiddleware） | ✅ |
 
 ## 快速开始
 
@@ -120,6 +120,19 @@ agent-core events <run_id>                            # 单 Run 事件流，终�
 agent-core mcp-connect demo / mcp-disconnect demo
 ```
 
+## 可靠性策略（Phase 12）
+
+`AgentSpec.resilience`（`ResiliencePolicy`）把可靠性/成本控制声明为纯数据，构建时映射到 LangChain **原生** AgentMiddleware（不重复造轮子）：
+
+| 策略字段 | 映射的原生中间件 | 作用 |
+|---|---|---|
+| `summarization`（trigger_tokens/messages/fraction + keep_messages） | `SummarizationMiddleware` | 上下文接近触发线时自动摘要历史，省 token |
+| `model_call_limit` + `call_limit_exit` | `ModelCallLimitMiddleware` | 限制单次 Run 的模型调用数，防失控（end 优雅收尾 / error 报错） |
+| `tool_retries` / `model_retries` | `ToolRetryMiddleware` / `ModelRetryMiddleware` | 瞬时失败自动退避重试 |
+| `model_fallbacks` | `ModelFallbackMiddleware` | 主模型失败后按序降级到备选模型 |
+
+已实测：调用上限在 1 次模型调用后优雅终止；首个工具调用抛错后重试自愈；summarization 策略下多轮工具任务正常完成（`scripts/smoke_middleware.py`）。
+
 ## 示例
 
 见 [examples/](examples/README.md)：`examples/quickstart.py`（最小程序化闭环）与 `scripts/smoke_*.py`（Runtime / HITL / MCP / HTTP API 四条端到端冒烟链路）。
@@ -139,7 +152,7 @@ src/agent_core/
 ├── orchestration/   # 编排：compose_team（模型驱动团队）、run_parallel（代码驱动并发）
 ├── permissions/     # ActionPolicy、ActionGate、ApprovalManager（工具执行必经闸门）
 ├── registries/      # Agent / Tool / Skill / MCP / Team 注册中心（内存实现）
-└── runtime/         # 模型工厂、AgentBuilder、AgentExecutor、AgentRuntime（DeepAgents）
+└── runtime/         # 模型工厂、AgentBuilder、AgentExecutor、AgentRuntime（DeepAgents）、native middleware 映射
 
 cli.py               # agent-core 命令行（serve / demo / API 客户端）
 tests/unit/          # 单元测试

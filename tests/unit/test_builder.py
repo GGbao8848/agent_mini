@@ -6,6 +6,7 @@ import pytest
 from langchain_openai import ChatOpenAI
 
 from agent_core.domain.agent import AgentLimits, AgentSpec, SubAgentRef
+from agent_core.domain.resilience import ResiliencePolicy, SummarizationPolicy
 from agent_core.domain.skill import SkillManifest
 from agent_core.domain.tool import ToolDefinition
 from agent_core.errors.exceptions import ConfigurationError, RegistryError, SkillError
@@ -128,3 +129,17 @@ class TestBuild:
 
         with pytest.raises(SkillError):
             builder.build(base_spec(skills=["gone"]))
+
+    def test_resilience_policy_builds_with_middleware(self) -> None:
+        spec = base_spec(
+            resilience=ResiliencePolicy(
+                summarization=SummarizationPolicy(trigger_messages=10),
+                model_call_limit=5,
+                tool_retries=1,
+            )
+        )
+        builder = make_builder()
+
+        graph = builder.build(spec)
+
+        assert hasattr(graph, "ainvoke")

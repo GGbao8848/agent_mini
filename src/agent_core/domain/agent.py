@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agent_core.domain.permission import PermissionSpec
+from agent_core.domain.resilience import ResiliencePolicy
 
 
 class SubAgentRef(BaseModel):
@@ -46,4 +47,5 @@ class AgentSpec(BaseModel):
     subagents: list[SubAgentRef] = Field(default_factory=list)
     permissions: PermissionSpec | None = None
     limits: AgentLimits = Field(default_factory=AgentLimits)
+    resilience: ResiliencePolicy | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
