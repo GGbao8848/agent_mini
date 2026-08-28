@@ -28,7 +28,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 2 | Agent / Tool / Skill / MCP Registry（内存实现） | ✅ |
 | 3 | 接入 DeepAgents：AgentRuntime / AgentExecutor / SubAgent | ✅ |
 | 4 | Permission / ActionPolicy / ActionGate / ApprovalRequest | ✅ |
-| 5 | Trace / Events / Streaming | ⬜ |
+| 5 | Trace / Events / Streaming（Run 级事件流） | ✅ |
 | 6 | MCP Adapter / Client / Registry | ⬜ |
 | 7 | FastAPI（Run / Agent / Skill / MCP / Action API） | ⬜ |
 | 8 | Tests / README / Docs / Examples / CLI 完善 | ⬜ |
