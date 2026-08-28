@@ -19,6 +19,10 @@ logger = get_logger(__name__)
 class Tracer(Protocol):
     def emit(self, event: TraceEvent) -> None: ...
 
+    def get_events(self, run_id: str) -> list[TraceEvent]:
+        """Recorded events for ``run_id`` (read side used by the API layer)."""
+        ...
+
 
 class InMemoryTracer:
     """Keeps trace events in process memory, bounded per run."""

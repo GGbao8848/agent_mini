@@ -30,7 +30,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 4 | Permission / ActionPolicy / ActionGate / ApprovalRequest | ✅ |
 | 5 | Trace / Events / Streaming（Run 级事件流） | ✅ |
 | 6 | MCP Adapter / Client / Registry | ✅ |
-| 7 | FastAPI（Run / Agent / Skill / MCP / Action API） | ⬜ |
+| 7 | FastAPI（Run / Agent / Skill / MCP / Action API） | ✅ |
 | 8 | Tests / README / Docs / Examples / CLI 完善 | ⬜ |
 
 ## 快速开始
@@ -50,10 +50,37 @@ uv run mypy
 cp .env.example .env   # 按需修改；模型 provider 的 API key 交给 OPENAI_API_KEY 等标准变量
 ```
 
+## HTTP API（Phase 7）
+
+```bash
+uv run --env-file .env uvicorn agent_core.api.app:app --port 8000
+# 交互式文档: http://localhost:8000/docs
+```
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/healthz` | 存活探针 |
+| GET | `/v1/agents` `/v1/agents/{id}` | Agent 注册表（只读） |
+| GET | `/v1/skills` `/v1/skills/{id}` `/v1/skills/{id}/versions` | Skill 注册表（只读） |
+| GET | `/v1/tools` | 工具注册表（MCP 连接后自动出现） |
+| GET/POST | `/v1/mcp/servers` | MCP 服务器注册表 |
+| POST | `/v1/mcp/servers/{id}/connect` `/disconnect` | 连接生命周期（失败 → 503 retryable） |
+| POST | `/v1/runs?wait=true` | 创建并执行 Run（默认后台执行） |
+| GET | `/v1/runs` `/v1/runs/{id}` | Run 查询（含最终 output） |
+| POST | `/v1/runs/{id}/cancel` | 取消 Run（终态 → 409） |
+| GET | `/v1/approvals/pending` | 待人工审批列表 |
+| POST | `/v1/approvals/{id}/resolve` | 批准/拒绝/编辑参数（唤醒等待中的 Run） |
+| GET | `/v1/runs/{id}/events` | SSE 事件流（回放历史 + 实时，Run 终态自动关闭） |
+| GET | `/v1/events` | 全局事件流（长连） |
+
+错误统一为 `{"error": {code, message, retryable, details}}`，由领域异常一次性映射（RegistryError→404/409、StateError→409、PermissionDeniedError→403、MCPUnavailableError→503、超时→504）。
+
 ## 项目结构
 
 ```text
 src/agent_core/
+├── api/             # FastAPI 传输层：路由、DTO、错误映射、SSE 事件流（/v1）
+├── application/     # 用例层：AgentCoreService（API/CLI 共用的唯一入口）、组装根
 ├── config/          # 环境变量配置（AGENT_CORE_ 前缀）
 ├── domain/          # 领域模型：Agent / Task / Run / Action / Tool / Skill / MCP / Trace
 ├── errors/          # 统一异常体系（带 retryable 标记）

@@ -70,10 +70,12 @@ class ApprovalManager:
         """Resolve a pending request and wake the waiting gate."""
         request = self._pending.pop(approval_id, None)
         if request is None:
-            raise ApprovalError(
-                f"Approval '{approval_id}' is not pending",
-                details={"approval_id": approval_id},
-            )
+            if approval_id in self._resolved:
+                raise ApprovalError(
+                    f"Approval '{approval_id}' is not pending",
+                    details={"approval_id": approval_id},
+                )
+            raise RegistryError(kind="approval", key=approval_id, detail="not found")
         if status is ApprovalStatus.PENDING:
             raise ApprovalError(
                 "Cannot resolve an approval to PENDING",
