@@ -19,3 +19,4 @@ build/
 .idea/
 .vscode/
 .DS_Store
+bench_results/
