@@ -1,0 +1,61 @@
+"""Unit tests for the model factory (no network access)."""
+
+import pytest
+from langchain_openai import ChatOpenAI
+
+from agent_core.errors.exceptions import ConfigurationError
+from agent_core.runtime.model import build_model, parse_model_spec
+
+
+class TestParseModelSpec:
+    def test_provider_and_model(self) -> None:
+        assert parse_model_spec("openrouter:minimax/minimax-m3:free") == (
+            "openrouter",
+            "minimax/minimax-m3:free",
+        )
+
+    def test_bare_model_defaults_to_openai(self) -> None:
+        assert parse_model_spec("gpt-4o-mini") == ("openai", "gpt-4o-mini")
+
+    def test_model_containing_colons(self) -> None:
+        assert parse_model_spec("openai:gpt-4o-mini:latest") == ("openai", "gpt-4o-mini:latest")
+
+    @pytest.mark.parametrize("spec", [":missing-provider", "openai:"])
+    def test_malformed_spec_raises(self, spec: str) -> None:
+        with pytest.raises(ConfigurationError):
+            parse_model_spec(spec)
+
+
+class TestBuildModel:
+    def test_openai_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+        model = build_model("openai:gpt-4o-mini")
+
+        assert isinstance(model, ChatOpenAI)
+        assert model.model_name == "gpt-4o-mini"
+
+    def test_openrouter_model_uses_openai_compatible_base_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+
+        model = build_model("openrouter:minimax/minimax-m3:free")
+
+        assert isinstance(model, ChatOpenAI)
+        assert model.model_name == "minimax/minimax-m3:free"
+        assert model.openai_api_base == "https://openrouter.ai/api/v1"
+
+    def test_missing_api_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        with pytest.raises(ConfigurationError) as excinfo:
+            build_model("openai:gpt-4o-mini")
+        assert excinfo.value.details["env_var"] == "OPENAI_API_KEY"
+
+    def test_unsupported_provider_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+        with pytest.raises(ConfigurationError) as excinfo:
+            build_model("anthropic:claude-3")
+        assert excinfo.value.details["provider"] == "anthropic"
