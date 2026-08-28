@@ -31,7 +31,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 5 | Trace / Events / Streaming（Run 级事件流） | ✅ |
 | 6 | MCP Adapter / Client / Registry | ✅ |
 | 7 | FastAPI（Run / Agent / Skill / MCP / Action API） | ✅ |
-| 8 | Tests / README / Docs / Examples / CLI 完善 | ⬜ |
+| 8 | Tests / README / Docs / Examples / CLI 完善 | ✅ |
 
 ## 快速开始
 
@@ -75,6 +75,35 @@ uv run --env-file .env uvicorn agent_core.api.app:app --port 8000
 
 错误统一为 `{"error": {code, message, retryable, details}}`，由领域异常一次性映射（RegistryError→404/409、StateError→409、PermissionDeniedError→403、MCPUnavailableError→503、超时→504）。
 
+## CLI（Phase 8）
+
+安装后提供 `agent-core` 命令（也可 `uv run agent-core ...`）：
+
+```bash
+# 启动 HTTP API 服务
+agent-core serve --port 8000
+
+# 自包含本地演示：注册本地工具 + Agent，真实模型执行
+agent-core demo
+
+# 操作一台运行中的服务器（--api 默认 http://127.0.0.1:8000，可放在子命令前后）
+agent-core --api http://127.0.0.1:8000 agents
+agent-core run calculator "What is 19 + 23?"          # 等待完成并打印输出
+agent-core run assistant "hi" --no-wait               # 异步启动
+agent-core runs [--agent assistant]
+agent-core approvals                                  # 待审批列表
+agent-core resolve <approval_id> --decision approved --by alice
+agent-core resolve <approval_id> --decision edited --edit input='new text'
+agent-core cancel <run_id>
+agent-core events                                     # 实时事件流（Ctrl-C 退出）
+agent-core events <run_id>                            # 单 Run 事件流，终态自动结束
+agent-core mcp-connect demo / mcp-disconnect demo
+```
+
+## 示例
+
+见 [examples/](examples/README.md)：`examples/quickstart.py`（最小程序化闭环）与 `scripts/smoke_*.py`（Runtime / HITL / MCP / HTTP API 四条端到端冒烟链路）。
+
 ## 项目结构
 
 ```text
@@ -90,6 +119,7 @@ src/agent_core/
 ├── registries/      # Agent / Tool / Skill / MCP 注册中心（内存实现）
 └── runtime/         # 模型工厂、AgentBuilder、AgentExecutor、AgentRuntime（DeepAgents）
 
+cli.py               # agent-core 命令行（serve / demo / API 客户端）
 tests/unit/          # 单元测试
 docs/architecture.md # 架构文档（含 Mermaid 图）
 ```

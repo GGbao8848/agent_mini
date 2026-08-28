@@ -1,6 +1,6 @@
 # Agent Core 架构
 
-> 状态：Phase 1（Domain / 配置 / 异常 / 可观测性基础已落地；Runtime、Registry、Gate 在后续 Phase 实现）
+> 状态：全部核心 Phase 已落地（Domain / Registry / Runtime / Gate / 事件流 / MCP / HTTP API / CLI）。
 
 ## 分层
 
@@ -104,6 +104,7 @@ CREATED → PLANNING → RUNNING ⇄ WAITING_APPROVAL → COMPLETED
 ## 关键决策记录
 
 - **复用 DeepAgents**：agent loop、subagents、skills 加载、HITL interrupt/checkpoint 全部复用；Agent Core 只做 Registry、Policy、Gate、Trace、API。
-- **错误模型**：所有异常继承 `AgentError`，携带 `retryable` 标记；工具层不向 Agent 泄漏原始 Python 异常。
-- **安全**：MCP 凭据只存 `auth_ref` 引用；模型 API key 由 provider SDK 标准环境变量管理。
+- **错误模型**：所有异常继承 `AgentError`，携带 `retryable` 标记；工具层不向 Agent 泄漏原始 Python 异常。API 层一次性把异常映射为 `{"error": {code, message, retryable, details}}`。
+- **安全**：MCP 凭据只存 `auth_ref` 引用，连接时经 `CredentialResolver` 从环境解析；模型 API key 由 provider SDK 标准环境变量管理。所有工具（本地 Python 与 MCP）都经同一条 Permission → Action Gate 链路。
+- **传输层极薄**：`AgentCoreService` 是 API/CLI 共用的唯一用例入口；`create_app` 支持注入自定义 service，路由无状态。
 - **第一版不引入**：Kafka / Redis / PostgreSQL / 向量库 / 微服务，单进程可运行。
