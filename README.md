@@ -25,7 +25,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | Phase | 内容 | 状态 |
 |---|---|---|
 | 1 | 项目结构、配置、Domain Model、Error Model、日志、Trace 抽象 | ✅ |
-| 2 | Agent / Tool / Skill / MCP Registry（内存实现） | ⬜ |
+| 2 | Agent / Tool / Skill / MCP Registry（内存实现） | ✅ |
 | 3 | 接入 DeepAgents：AgentRuntime / AgentExecutor / SubAgent | ⬜ |
 | 4 | Permission / ActionPolicy / ActionGate / ApprovalRequest | ⬜ |
 | 5 | Trace / Events / Streaming | ⬜ |
@@ -57,7 +57,8 @@ src/agent_core/
 ├── config/          # 环境变量配置（AGENT_CORE_ 前缀）
 ├── domain/          # 领域模型：Agent / Task / Run / Action / Tool / Skill / MCP / Trace
 ├── errors/          # 统一异常体系（带 retryable 标记）
-└── observability/   # 日志、Tracer、EventBus
+├── observability/   # 日志、Tracer、EventBus
+└── registries/      # Agent / Tool / Skill / MCP 注册中心（内存实现）
 
 tests/unit/          # 单元测试
 docs/architecture.md # 架构文档（含 Mermaid 图）
