@@ -34,7 +34,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 8 | Tests / README / Docs / Examples / CLI 完善 | ✅ |
 | 9 | Run 指标：token/耗时/模型与工具调用数（callbacks 全链路统计） | ✅ |
 | 10 | 团队编排：协调者规划 + 多子代理原生并行 + 显式 fan-out + SUBAGENT 事件 | ✅ |
-| 11 | 评测基准：多类型任务端到端对比（时间/token/质量） | ⬜ |
+| 11 | 评测基准：多类型任务端到端对比（时间/token/调用数，markdown+JSON 报告） | ✅ |
 | 12 | 原生中间件接入：summarization / 调用上限 / 重试 / 降级 | ⬜ |
 
 ## 快速开始
@@ -79,6 +79,22 @@ uv run --env-file .env uvicorn agent_core.api.app:app --port 8000
 
 错误统一为 `{"error": {code, message, retryable, details}}`，由领域异常一次性映射（RegistryError→404/409、StateError→409、PermissionDeniedError→403、MCPUnavailableError→503、超时→504）。
 
+## 评测基准（Phase 11）
+
+`src/agent_core/bench/` 提供可复用的基准套件：4 类常见任务（工具问答、多文档摘要、多主题简报、结构化抽取），每个任务可用三种执行模式跑通并自动对比——
+
+- `single`：单 agent 一次性完成（对照组）
+- `team`：协调者 + 工人团队，由模型分析任务后自行决定是否委派/并行（模型驱动，DeepAgents 原生并行 `task` 调用）
+- `fanout`：代码显式拆分子任务并发执行 + 汇总（代码驱动，`orchestration.run_parallel`）
+
+指标来自 Phase 9 的 usage 统计：耗时、输入/输出 token、模型与工具调用数，报告输出 markdown 对比表 + 各任务最快/最省策略结论，另附 JSON 便于追踪趋势。
+
+```bash
+uv run --env-file .env python scripts/bench_run.py   # 结果写入 bench_results/
+```
+
+已验证的行为：小任务上协调者会正确判断"无需委派、直接作答"（更省 token 与时间）；任务越重（子任务越多、越长），team/fanout 的并行收益越明显——这正是基准要量化的决策依据。
+
 ## CLI（Phase 8）
 
 安装后提供 `agent-core` 命令（也可 `uv run agent-core ...`）：
@@ -114,13 +130,15 @@ agent-core mcp-connect demo / mcp-disconnect demo
 src/agent_core/
 ├── api/             # FastAPI 传输层：路由、DTO、错误映射、SSE 事件流（/v1）
 ├── application/     # 用例层：AgentCoreService（API/CLI 共用的唯一入口）、组装根
+├── bench/           # 评测基准：任务集、执行模式（single/team/fanout）、报告渲染
 ├── config/          # 环境变量配置（AGENT_CORE_ 前缀）
-├── domain/          # 领域模型：Agent / Task / Run / Action / Tool / Skill / MCP / Trace
+├── domain/          # 领域模型：Agent / Task / Run / Action / Tool / Skill / MCP / Trace / Team / Metrics
 ├── errors/          # 统一异常体系（带 retryable 标记）
 ├── mcp/             # MCP 适配：凭证解析、SDK 会话、连接生命周期、工具注册
 ├── observability/   # 日志、Tracer、EventBus、事件扇出、Run 级事件流（SSE 数据源）
+├── orchestration/   # 编排：compose_team（模型驱动团队）、run_parallel（代码驱动并发）
 ├── permissions/     # ActionPolicy、ActionGate、ApprovalManager（工具执行必经闸门）
-├── registries/      # Agent / Tool / Skill / MCP 注册中心（内存实现）
+├── registries/      # Agent / Tool / Skill / MCP / Team 注册中心（内存实现）
 └── runtime/         # 模型工厂、AgentBuilder、AgentExecutor、AgentRuntime（DeepAgents）
 
 cli.py               # agent-core 命令行（serve / demo / API 客户端）
