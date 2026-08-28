@@ -19,23 +19,14 @@ from agent_core.domain.task import Run, Task
 from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import AgentError, AgentExecutionError, RunTimeoutError
 from agent_core.observability.emitter import EventFanout
+from agent_core.runtime.subagent_trace import SubagentTraceHandler
+from agent_core.runtime.text import extract_text
 from agent_core.runtime.usage import UsageCollector
 
 CompiledGraph = CompiledStateGraph[Any, Any, Any, Any]
 """Fully parameterized alias; concrete state types are DeepAgents internals."""
 
-
-def extract_text(content: str | list[Any]) -> str:
-    """Flatten LLM message content (string or content blocks) into plain text."""
-    if isinstance(content, str):
-        return content
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict) and block.get("type") == "text":
-            parts.append(str(block.get("text", "")))
-    return "".join(parts)
+__all__ = ["AgentExecutor", "extract_text"]
 
 
 class AgentExecutor:
@@ -53,11 +44,18 @@ class AgentExecutor:
         )
         started = time.monotonic()
         collector = UsageCollector()
+        callbacks: list[Any] = [collector]
+        if spec.subagents:
+            callbacks.append(
+                SubagentTraceHandler(
+                    self._fanout, run, {ref.agent_id for ref in spec.subagents}
+                )
+            )
         try:
             state = await asyncio.wait_for(
                 graph.ainvoke(
                     {"messages": [{"role": "user", "content": task.input}]},
-                    config={"callbacks": [collector]},
+                    config={"callbacks": callbacks},
                 ),
                 timeout=spec.limits.timeout_seconds,
             )
