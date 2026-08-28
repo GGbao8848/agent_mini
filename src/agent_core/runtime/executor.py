@@ -19,6 +19,7 @@ from agent_core.domain.task import Run, Task
 from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import AgentError, AgentExecutionError, RunTimeoutError
 from agent_core.observability.emitter import EventFanout
+from agent_core.runtime.usage import UsageCollector
 
 CompiledGraph = CompiledStateGraph[Any, Any, Any, Any]
 """Fully parameterized alias; concrete state types are DeepAgents internals."""
@@ -51,9 +52,13 @@ class AgentExecutor:
             EventType.AGENT_STARTED, run=run, agent_id=run.agent_id, input=task.input
         )
         started = time.monotonic()
+        collector = UsageCollector()
         try:
             state = await asyncio.wait_for(
-                graph.ainvoke({"messages": [{"role": "user", "content": task.input}]}),
+                graph.ainvoke(
+                    {"messages": [{"role": "user", "content": task.input}]},
+                    config={"callbacks": [collector]},
+                ),
                 timeout=spec.limits.timeout_seconds,
             )
         except asyncio.CancelledError:
@@ -66,14 +71,19 @@ class AgentExecutor:
             raise AgentExecutionError(
                 f"Agent execution failed: {exc}", details={"run_id": run.id}
             ) from exc
+        finally:
+            # Partial usage survives failures; consumers still see the cost.
+            run.usage = collector.usage
 
         output = self._final_output(state, run_id=run.id)
+        run.usage.duration_ms = (time.monotonic() - started) * 1000
         self._fanout.emit(
             EventType.AGENT_FINISHED,
             run=run,
             agent_id=run.agent_id,
             output=output,
-            duration_ms=(time.monotonic() - started) * 1000,
+            duration_ms=run.usage.duration_ms,
+            metadata={"usage": run.usage.model_dump()},
         )
         return output
 

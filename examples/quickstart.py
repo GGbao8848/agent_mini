@@ -51,6 +51,13 @@ async def main() -> int:
     run = await service.submit_run("assistant", "What time is it right now?", wait=True)
     print(f"run {run.id}: {run.status.value}")
     print(f"output: {service.final_output(run.id)}")
+    if run.usage:
+        print(
+            f"usage: {run.usage.total_tokens} tokens "
+            f"(in={run.usage.input_tokens}, out={run.usage.output_tokens}), "
+            f"{run.usage.model_calls} model calls, {run.usage.tool_calls} tool calls, "
+            f"{run.usage.duration_ms:.0f} ms"
+        )
     print("events:")
     for event in service.trace_events(run.id):
         print(f"  {event.event_type.value:<18} tool={event.tool or '-'}")
