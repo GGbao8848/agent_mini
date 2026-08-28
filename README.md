@@ -36,6 +36,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 10 | 团队编排：协调者规划 + 多子代理原生并行 + 显式 fan-out + SUBAGENT 事件 | ✅ |
 | 11 | 评测基准：多类型任务端到端对比（时间/token/调用数，markdown+JSON 报告） | ✅ |
 | 12 | 原生中间件接入：summarization / 调用上限 / 重试 / 降级（ResiliencePolicy → LangChain AgentMiddleware） | ✅ |
+| 13 | 真实任务评估：5 类真实任务（实时 API/结构化抽取/代码执行验证/编排对比/多步工具链）+ 客观校验器 | ✅ |
 
 ## 快速开始
 
@@ -120,6 +121,24 @@ agent-core events <run_id>                            # 单 Run 事件流，终�
 agent-core mcp-connect demo / mcp-disconnect demo
 ```
 
+## 真实任务评估（Phase 13）
+
+`src/agent_core/eval/` 用 5 个**真实任务**端到端评估框架，每个答案由确定性校验器客观打分（不是目测）：
+
+| 任务 | 覆盖维度 | 校验方式 |
+|---|---|---|
+| 实时天气问答（open-meteo 地理编码+预报真实 HTTP 工具） | 实时工具、单跳问答 | 工具确实被调用；答案温度与实测值 ±3°C |
+| 客服记录 → 严格 JSON（4 笔订单） | 结构化抽取、指令遵循 | JSON 解析、条数、字段完整、金额合计=2236、日期 ISO 化 |
+| 修复 off-by-one bug 的 Python 函数 | 代码能力 | **实际 exec 模型输出的代码**，跑 4 组用例 |
+| 三币种汇率简报（frankfurter 真实汇率 API）× single/team/fanout | 编排对比、实时数据 | 三组汇率数值落在合理区间 |
+| 2026 节假日查询 + calculator 拼假（nager.date 真实 API） | 多步规划、工具链、计算 | 关键词 + 具体天数 |
+
+```bash
+uv run --env-file .env python scripts/eval_real.py   # 结果写入 eval_results/
+```
+
+首轮实测（minimax-m3:free）：6/7 通过——天气答案与实测完全一致（18.4°C）、JSON 抽取全对（含合计金额）、修复代码通过全部 4 组执行用例、fanout 与 single 的汇率简报数值全部正确。**team 模式失败案例**：协调者确实并行委派了 3 个 worker 且 worker 返回了正确汇率，但汇总时混入了错误数字、耗时与 token 均为 single 的 ~1.3/3.4 倍——印证"小任务不值得委派"，也暴露了团队汇总的幻觉风险（这是需要 LLM-as-judge 或引用校验进一步治理的方向）。
+
 ## 可靠性策略（Phase 12）
 
 `AgentSpec.resilience`（`ResiliencePolicy`）把可靠性/成本控制声明为纯数据，构建时映射到 LangChain **原生** AgentMiddleware（不重复造轮子）：
@@ -147,6 +166,7 @@ src/agent_core/
 ├── config/          # 环境变量配置（AGENT_CORE_ 前缀）
 ├── domain/          # 领域模型：Agent / Task / Run / Action / Tool / Skill / MCP / Trace / Team / Metrics
 ├── errors/          # 统一异常体系（带 retryable 标记）
+├── eval/            # 真实任务评估：任务集、确定性校验器、执行器
 ├── mcp/             # MCP 适配：凭证解析、SDK 会话、连接生命周期、工具注册
 ├── observability/   # 日志、Tracer、EventBus、事件扇出、Run 级事件流（SSE 数据源）
 ├── orchestration/   # 编排：compose_team（模型驱动团队）、run_parallel（代码驱动并发）
