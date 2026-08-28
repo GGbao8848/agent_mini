@@ -1,0 +1,313 @@
+"""API layer tests: every router, the error funnel, and SSE, over ASGI.
+
+The service under test is the real one (real runtime with a stub graph, real
+MCP manager with a fake session opener) so the tests exercise the full
+transport → application → runtime path without a model provider.
+"""
+
+import asyncio
+import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+
+import httpx
+import pytest
+from langchain_core.messages import AIMessage
+
+from agent_core.api.app import create_app
+from agent_core.application.service import AgentCoreService
+from agent_core.domain.action import Action, RiskLevel
+from agent_core.domain.agent import AgentSpec
+from agent_core.domain.skill import SkillManifest
+from agent_core.domain.tool import ToolDefinition
+from agent_core.mcp.manager import MCPManager
+from agent_core.observability.stream import EventStreamBroker
+from agent_core.observability.trace import InMemoryTracer
+from agent_core.registries import AgentRegistry, MCPRegistry, SkillRegistry, ToolRegistry
+from agent_core.runtime.context import current_run
+from agent_core.runtime.runtime import AgentRuntime
+
+
+class FakeGraph:
+    async def ainvoke(self, state: Any, config: Any = None) -> dict[str, Any]:
+        assert current_run.get() is not None
+        return {"messages": [AIMessage(content=f"echo: {state['messages'][-1]['content']}")]}
+
+
+class SlowGraph:
+    async def ainvoke(self, state: Any, config: Any = None) -> dict[str, Any]:
+        await asyncio.sleep(30)
+        return {"messages": [AIMessage(content="late")]}
+
+
+class StubBuilder:
+    def __init__(self, graph: Any) -> None:
+        self._graph = graph
+
+    def build(self, spec: Any) -> Any:
+        return self._graph
+
+
+class FakeSession:
+    async def list_tools(self) -> list[ToolDefinition]:
+        return [
+            ToolDefinition(
+                name="demo_echo",
+                description="Echo",
+                input_schema={"type": "object"},
+                source="mcp",
+                metadata={"mcp_server": "demo", "mcp_tool": "echo"},
+            )
+        ]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        return json.dumps(arguments)
+
+
+def fake_opener(session: Any) -> Any:
+    @asynccontextmanager
+    async def opener(definition: Any, credential: str | None) -> AsyncIterator[Any]:
+        yield session
+
+    return opener
+
+
+def broken_opener() -> Any:
+    @asynccontextmanager
+    async def opener(definition: Any, credential: str | None) -> AsyncIterator[Any]:
+        raise RuntimeError("connection refused")
+        yield  # pragma: no cover
+
+    return opener
+
+
+SERVER_PAYLOAD = {"id": "demo", "name": "Demo", "transport": "stdio", "endpoint": "python demo.py"}
+
+
+def make_service(graph: Any = None, *, broken_mcp: bool = False) -> AgentCoreService:
+    agents = AgentRegistry()
+    agents.register(AgentSpec(id="helper", name="Helper"))
+    agents.register(AgentSpec(id="greeter", name="Greeter"))
+    tools = ToolRegistry()
+    skills = SkillRegistry()
+    skills.register(SkillManifest(id="greet", name="Greet", description="Say hello"))
+    tracer = InMemoryTracer()
+    runtime = AgentRuntime(
+        agents, tools, skills, tracer=tracer, builder=StubBuilder(graph or FakeGraph())
+    )
+    mcp_registry = MCPRegistry()
+    opener = broken_opener() if broken_mcp else fake_opener(FakeSession())
+    mcp = MCPManager(mcp_registry, tools, credentials=None, opener=opener)
+    broker = EventStreamBroker(runtime.bus)
+    return AgentCoreService(runtime=runtime, mcp=mcp, mcp_registry=mcp_registry, broker=broker)
+
+
+@pytest.fixture()
+def service() -> AgentCoreService:
+    return make_service()
+
+
+@pytest.fixture()
+def client(service: AgentCoreService) -> Any:
+    app = create_app(service)
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def test_healthz(client: Any) -> None:
+    response = await client.get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+class TestRegistryRoutes:
+    async def test_list_and_get_agents(self, client: Any) -> None:
+        response = await client.get("/v1/agents")
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()] == ["helper", "greeter"]
+
+        response = await client.get("/v1/agents/helper")
+        assert response.status_code == 200
+        assert response.json()["name"] == "Helper"
+
+    async def test_get_unknown_agent_maps_to_404(self, client: Any) -> None:
+        response = await client.get("/v1/agents/nope")
+        assert response.status_code == 404
+        body = response.json()["error"]
+        assert body["code"] == "RegistryError"
+        assert body["retryable"] is False
+
+    async def test_list_skills(self, client: Any) -> None:
+        response = await client.get("/v1/skills")
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()] == ["greet"]
+
+
+class TestMCPRoutes:
+    async def test_register_and_get_server(self, client: Any) -> None:
+        payload = {
+            "id": "demo",
+            "name": "Demo",
+            "transport": "streamable_http",
+            "endpoint": "http://localhost:9000/mcp",
+            "auth_ref": "DEMO_TOKEN",
+        }
+        response = await client.post("/v1/mcp/servers", json=payload)
+        assert response.status_code == 201
+        assert response.json()["status"] == "unknown"
+
+        response = await client.get("/v1/mcp/servers/demo")
+        assert response.json()["auth_ref"] == "DEMO_TOKEN"
+
+    async def test_duplicate_registration_maps_to_409(self, client: Any) -> None:
+        await client.post("/v1/mcp/servers", json=SERVER_PAYLOAD)
+        response = await client.post("/v1/mcp/servers", json=SERVER_PAYLOAD)
+        assert response.status_code == 409
+
+    async def test_connect_disconnect_cycle(self, client: Any) -> None:
+        await client.post("/v1/mcp/servers", json=SERVER_PAYLOAD)
+
+        response = await client.post("/v1/mcp/servers/demo/connect")
+        assert response.json()["status"] == "healthy"
+        names = [tool["name"] for tool in (await client.get("/v1/tools")).json()]
+        assert "demo_echo" in names
+
+        response = await client.post("/v1/mcp/servers/demo/disconnect")
+        assert response.json()["status"] == "unknown"
+        names = [tool["name"] for tool in (await client.get("/v1/tools")).json()]
+        assert "demo_echo" not in names
+
+    async def test_connect_unknown_server_maps_to_404(self, client: Any) -> None:
+        response = await client.post("/v1/mcp/servers/ghost/connect")
+        assert response.status_code == 404
+
+    async def test_unreachable_server_maps_to_503_retryable(self) -> None:
+        app = create_app(make_service(broken_mcp=True))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            await client.post("/v1/mcp/servers", json=SERVER_PAYLOAD)
+            response = await client.post("/v1/mcp/servers/demo/connect")
+            assert response.status_code == 503
+            assert response.json()["error"]["retryable"] is True
+
+
+class TestRunRoutes:
+    async def test_create_run_wait_returns_completed_with_output(self, client: Any) -> None:
+        response = await client.post(
+            "/v1/runs", params={"wait": "true"}, json={"agent_id": "helper", "input": "hi"}
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["status"] == "completed"
+        assert body["output"] == "echo: hi"
+        assert body["finished_at"] is not None
+
+    async def test_create_run_unknown_agent_maps_to_404(self, client: Any) -> None:
+        response = await client.post("/v1/runs", json={"agent_id": "ghost", "input": "hi"})
+        assert response.status_code == 404
+
+    async def test_get_run_and_list_filter(self, client: Any) -> None:
+        body = (
+            await client.post(
+                "/v1/runs", params={"wait": "true"}, json={"agent_id": "helper", "input": "yo"}
+            )
+        ).json()
+
+        response = await client.get(f"/v1/runs/{body['id']}")
+        assert response.json()["task_id"] == body["task_id"]
+
+        response = await client.get("/v1/runs", params={"agent_id": "greeter"})
+        assert response.json() == []
+
+    async def test_cancel_running_run(self) -> None:
+        app = create_app(make_service(SlowGraph()))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            body = (await client.post("/v1/runs", json={"agent_id": "helper", "input": "x"})).json()
+            response = await client.post(f"/v1/runs/{body['id']}/cancel")
+            assert response.status_code == 200
+
+            status = "running"
+            for _ in range(100):
+                status = (await client.get(f"/v1/runs/{body['id']}")).json()["status"]
+                if status == "cancelled":
+                    break
+                await asyncio.sleep(0.02)
+            assert status == "cancelled"
+
+    async def test_cancel_terminal_run_maps_to_409(self, client: Any) -> None:
+        body = (
+            await client.post(
+                "/v1/runs", params={"wait": "true"}, json={"agent_id": "helper", "input": "x"}
+            )
+        ).json()
+        response = await client.post(f"/v1/runs/{body['id']}/cancel")
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "StateError"
+
+
+class TestApprovalRoutes:
+    async def test_resolve_flow(self, client: Any, service: AgentCoreService) -> None:
+        run = service.runtime.create_run("helper", "hi")
+        action = Action(
+            run_id=run.id, agent_id="helper", tool_name="delete_all", risk_level=RiskLevel.HIGH
+        )
+        request = service.runtime.approvals.create(action, reason="risky")
+
+        pending = (await client.get("/v1/approvals/pending")).json()
+        assert [item["id"] for item in pending] == [request.id]
+        assert pending[0]["risk_level"] == "high"
+
+        response = await client.post(
+            f"/v1/approvals/{request.id}/resolve",
+            json={"decision": "approved", "resolved_by": "alice"},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "approved"
+        assert response.json()["resolved_by"] == "alice"
+
+        response = await client.post(
+            f"/v1/approvals/{request.id}/resolve", json={"decision": "rejected"}
+        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "ApprovalError"
+
+    async def test_resolve_unknown_maps_to_404(self, client: Any) -> None:
+        response = await client.post("/v1/approvals/ghost/resolve", json={"decision": "approved"})
+        assert response.status_code == 404
+
+    async def test_edited_decision_requires_arguments(self, client: Any) -> None:
+        response = await client.post("/v1/approvals/whatever/resolve", json={"decision": "edited"})
+        assert response.status_code == 422
+
+    async def test_invalid_decision_rejected_by_schema(self, client: Any) -> None:
+        response = await client.post(
+            "/v1/approvals/whatever/resolve", json={"decision": "expired"}
+        )
+        assert response.status_code == 422
+
+
+class TestSSEEvents:
+    async def test_run_stream_replays_then_closes(self, client: Any) -> None:
+        body = (
+            await client.post(
+                "/v1/runs", params={"wait": "true"}, json={"agent_id": "helper", "input": "hi"}
+            )
+        ).json()
+
+        async with client.stream("GET", f"/v1/runs/{body['id']}/events") as response:
+            assert response.headers["content-type"].startswith("text/event-stream")
+            text = "".join([chunk async for chunk in response.aiter_text()])
+
+        lines = text.splitlines()
+        assert "event: run_started" in lines
+        assert "event: run_finished" in lines
+        data_line = lines[lines.index("event: run_finished") + 1]
+        assert data_line.startswith("data: ")
+        assert json.loads(data_line.removeprefix("data: "))["output"] == "echo: hi"
+
+    async def test_stream_unknown_run_maps_to_404(self, client: Any) -> None:
+        response = await client.get("/v1/runs/ghost/events")
+        assert response.status_code == 404
