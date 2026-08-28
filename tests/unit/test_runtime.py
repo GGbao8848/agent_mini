@@ -12,7 +12,7 @@ from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import AgentError, RegistryError, StateError
 from agent_core.observability.trace import InMemoryTracer
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
-from agent_core.runtime.context import current_agent_id, current_run_id
+from agent_core.runtime.context import current_run
 from agent_core.runtime.runtime import AgentRuntime
 
 
@@ -27,8 +27,9 @@ class FakeGraph:
         self.last_input: Any = None
 
     async def ainvoke(self, state: Any, config: Any = None) -> dict[str, Any]:
-        self.seen_run_id = current_run_id.get()
-        self.seen_agent_id = current_agent_id.get()
+        run_ctx = current_run.get()
+        self.seen_run_id = run_ctx.id if run_ctx else None
+        self.seen_agent_id = run_ctx.agent_id if run_ctx else None
         self.last_input = state
         if self.error is not None:
             raise self.error
