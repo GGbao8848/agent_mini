@@ -88,6 +88,21 @@ class SkillError(AgentError):
     """A skill could not be loaded, resolved, or executed."""
 
 
+class AgentExecutionError(AgentError):
+    """An agent run failed inside the harness (model error, graph crash)."""
+
+
+class RunTimeoutError(AgentError):
+    """A run exceeded its time budget. Transient, so retryable."""
+
+    def __init__(self, run_id: str, timeout_seconds: float) -> None:
+        super().__init__(
+            f"Run '{run_id}' timed out after {timeout_seconds}s",
+            retryable=True,
+            details={"run_id": run_id, "timeout_seconds": timeout_seconds},
+        )
+
+
 class PermissionDeniedError(AgentError):
     """A permission policy denied the action. Retrying will not change the outcome."""
 
