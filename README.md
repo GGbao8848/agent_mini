@@ -33,7 +33,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 7 | FastAPI（Run / Agent / Skill / MCP / Action API） | ✅ |
 | 8 | Tests / README / Docs / Examples / CLI 完善 | ✅ |
 | 9 | Run 指标：token/耗时/模型与工具调用数（callbacks 全链路统计） | ✅ |
-| 10 | 团队编排：协调者规划 + 多子代理原生并行 + 显式 fan-out | ⬜ |
+| 10 | 团队编排：协调者规划 + 多子代理原生并行 + 显式 fan-out + SUBAGENT 事件 | ✅ |
 | 11 | 评测基准：多类型任务端到端对比（时间/token/质量） | ⬜ |
 | 12 | 原生中间件接入：summarization / 调用上限 / 重试 / 降级 | ⬜ |
 
