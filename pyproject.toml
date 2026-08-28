@@ -11,6 +11,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "deepagents>=0.7.10",
     "langchain-openai>=1.6.0",
+    "mcp>=2.1.1",
 ]
 
 [dependency-groups]

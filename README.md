@@ -29,7 +29,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 3 | 接入 DeepAgents：AgentRuntime / AgentExecutor / SubAgent | ✅ |
 | 4 | Permission / ActionPolicy / ActionGate / ApprovalRequest | ✅ |
 | 5 | Trace / Events / Streaming（Run 级事件流） | ✅ |
-| 6 | MCP Adapter / Client / Registry | ⬜ |
+| 6 | MCP Adapter / Client / Registry | ✅ |
 | 7 | FastAPI（Run / Agent / Skill / MCP / Action API） | ⬜ |
 | 8 | Tests / README / Docs / Examples / CLI 完善 | ⬜ |
 
@@ -57,7 +57,8 @@ src/agent_core/
 ├── config/          # 环境变量配置（AGENT_CORE_ 前缀）
 ├── domain/          # 领域模型：Agent / Task / Run / Action / Tool / Skill / MCP / Trace
 ├── errors/          # 统一异常体系（带 retryable 标记）
-├── observability/   # 日志、Tracer、EventBus、事件扇出
+├── mcp/             # MCP 适配：凭证解析、SDK 会话、连接生命周期、工具注册
+├── observability/   # 日志、Tracer、EventBus、事件扇出、Run 级事件流（SSE 数据源）
 ├── permissions/     # ActionPolicy、ActionGate、ApprovalManager（工具执行必经闸门）
 ├── registries/      # Agent / Tool / Skill / MCP 注册中心（内存实现）
 └── runtime/         # 模型工厂、AgentBuilder、AgentExecutor、AgentRuntime（DeepAgents）
