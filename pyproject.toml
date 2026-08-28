@@ -1,0 +1,47 @@
+[project]
+name = "agent-core"
+version = "0.1.0"
+description = "A minimal, decoupled multi-agent core (runtime, registries, permission, action gate) built on DeepAgents / LangGraph."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Agent Core Maintainers" }]
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "deepagents>=0.7.10",
+    "langchain-openai>=1.6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+packages = ["agent_core"]
