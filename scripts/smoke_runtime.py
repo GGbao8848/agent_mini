@@ -11,14 +11,13 @@ import asyncio
 import sys
 
 from agent_core.config.settings import get_settings
-
-get_settings()  # applies AGENT_CORE_PROXY_URL to HTTP(S)_PROXY
-
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.task import RunStatus
 from agent_core.domain.tool import ToolDefinition
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime import AgentRuntime
+
+get_settings()  # applies AGENT_CORE_PROXY_URL to HTTP(S)_PROXY before any HTTP client is built
 
 MODEL = "openrouter:minimax/minimax-m3:free"
 
@@ -53,7 +52,11 @@ def main() -> int:
     run = runtime.create_run("weather-agent", "北京今天天气怎么样？")
     result = asyncio.run(runtime.execute_run(run))
 
-    finished = [e for e in runtime.tracer.get_events(run.id) if e.event_type.value == "run_finished"]
+    finished = [
+        e
+        for e in runtime.tracer.get_events(run.id)
+        if e.event_type.value == "run_finished"
+    ]
     output = finished[-1].output if finished else None
     print(f"\nstatus: {result.status.value}  error: {result.error}")
     print(f"output: {str(output)[:300]}")

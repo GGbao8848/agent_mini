@@ -11,15 +11,14 @@ import asyncio
 import sys
 
 from agent_core.config.settings import get_settings
-
-get_settings()  # applies AGENT_CORE_PROXY_URL to HTTP(S)_PROXY
-
 from agent_core.domain.action import ApprovalStatus, RiskLevel
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.task import RunStatus
 from agent_core.domain.tool import ToolDefinition
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime import AgentRuntime
+
+get_settings()  # applies AGENT_CORE_PROXY_URL to HTTP(S)_PROXY before any HTTP client is built
 
 MODEL = "openrouter:minimax/minimax-m3:free"
 
