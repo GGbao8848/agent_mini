@@ -1,13 +1,14 @@
-"""Context variables identifying the Run / Agent for the current async task.
+"""Context variable identifying the Run for the current async task.
 
 DeepAgents (and LangGraph) invoke tools deep inside their own execution;
-context vars are the only reliable way for a tool wrapper to know which run it
-serves — including nested sub-agent invocations, which inherit the context.
+the context var is the only reliable way for the Action Gate wrapper to know
+which run it serves — sub-agent invocations inherit the context automatically.
 """
 
 from __future__ import annotations
 
 from contextvars import ContextVar
 
-current_run_id: ContextVar[str | None] = ContextVar("current_run_id", default=None)
-current_agent_id: ContextVar[str | None] = ContextVar("current_agent_id", default=None)
+from agent_core.domain.task import Run
+
+current_run: ContextVar[Run | None] = ContextVar("current_run", default=None)

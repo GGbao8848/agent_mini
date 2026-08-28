@@ -9,6 +9,7 @@ is emitted as a trace event.
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 
 from agent_core.domain.task import Run, RunStatus, Task
 from agent_core.domain.trace import EventType
@@ -16,12 +17,16 @@ from agent_core.errors.exceptions import AgentError, RegistryError, RunTimeoutEr
 from agent_core.observability.emitter import EventFanout
 from agent_core.observability.events import EventBus
 from agent_core.observability.trace import InMemoryTracer, Tracer
+from agent_core.permissions.approval import ApprovalManager
+from agent_core.permissions.gate import ActionGate
+from agent_core.permissions.policy import ActionPolicy
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.builder import AgentBuilder
-from agent_core.runtime.context import current_agent_id, current_run_id
+from agent_core.runtime.context import current_run
 from agent_core.runtime.executor import AgentExecutor
 from agent_core.runtime.model import ModelFactory
-from agent_core.runtime.tooling import ToolFactory
+from agent_core.runtime.tool_executor import ToolExecutor
+from agent_core.runtime.tooling import ToolFactory, make_gated_tool
 
 
 class AgentRuntime:
@@ -37,6 +42,8 @@ class AgentRuntime:
         bus: EventBus | None = None,
         model_factory: ModelFactory | None = None,
         tool_factory: ToolFactory | None = None,
+        policy: ActionPolicy | None = None,
+        approvals: ApprovalManager | None = None,
         builder: AgentBuilder | None = None,
     ) -> None:
         self.agents = agents
@@ -45,12 +52,18 @@ class AgentRuntime:
         self.tracer = tracer or InMemoryTracer()
         self.bus = bus or EventBus()
         self.fanout = EventFanout(self.tracer, self.bus)
+        self.policy = policy or ActionPolicy()
+        self.approvals = approvals or ApprovalManager()
+        self.tool_executor = ToolExecutor()
+        self.gate = ActionGate(
+            agents, tools, self.policy, self.approvals, self.tool_executor, self.fanout
+        )
         self.builder = builder or AgentBuilder(
             agents,
             tools,
             skills,
             model_factory=model_factory,
-            tool_factory=tool_factory,
+            tool_factory=tool_factory or partial(make_gated_tool, gate=self.gate),
         )
         self.executor = AgentExecutor(self.fanout)
         self._runs: dict[str, Run] = {}
@@ -96,8 +109,7 @@ class AgentRuntime:
         self.fanout.emit(
             EventType.RUN_STARTED, run=run, agent_id=run.agent_id, input=task.input
         )
-        run_token = current_run_id.set(run.id)
-        agent_token = current_agent_id.set(run.agent_id)
+        run_token = current_run.set(run)
         try:
             graph = self.builder.build(spec)
             output = await self.executor.execute(graph, run=run, task=task, spec=spec)
@@ -115,8 +127,7 @@ class AgentRuntime:
         except AgentError as exc:
             self._finish_with_error(run, exc, RunStatus.FAILED)
         finally:
-            current_run_id.reset(run_token)
-            current_agent_id.reset(agent_token)
+            current_run.reset(run_token)
         return run
 
     def submit_run(self, run: Run) -> asyncio.Task[Run]:

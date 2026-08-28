@@ -17,8 +17,10 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field, create_model
 
 from agent_core.domain.tool import ToolDefinition
-from agent_core.errors.exceptions import ConfigurationError
+from agent_core.errors.exceptions import ConfigurationError, StateError
+from agent_core.permissions.gate import ActionGate
 from agent_core.registries import ToolHandler
+from agent_core.runtime.context import current_run
 
 _JSON_TYPES: dict[str, type[Any]] = {
     "string": str,
@@ -112,4 +114,36 @@ def make_direct_tool(definition: ToolDefinition, handler: ToolHandler | None) ->
         description=definition.description or definition.name,
         args_schema=args_model,
         func=handler,
+    )
+
+
+def make_gated_tool(
+    definition: ToolDefinition,
+    handler: ToolHandler | None = None,
+    *,
+    gate: ActionGate,
+) -> BaseTool:
+    """Build a LangChain tool that routes every invocation through the gate.
+
+    The registry ``handler`` argument is deliberately ignored: the gate resolves
+    the executable from the ToolRegistry at call time, so the factory signature
+    stays uniform with :func:`make_direct_tool`.
+    """
+    del handler
+    args_model = schema_to_pydantic(definition.name, definition.input_schema)
+
+    async def _gated_run(**kwargs: Any) -> Any:
+        run = current_run.get()
+        if run is None:
+            raise StateError(
+                f"Tool '{definition.name}' invoked outside a run; "
+                "the Action Gate requires run context",
+            )
+        return await gate.execute(run=run, tool_name=definition.name, arguments=kwargs)
+
+    return StructuredTool(
+        name=definition.name,
+        description=definition.description or definition.name,
+        args_schema=args_model,
+        coroutine=_gated_run,
     )
