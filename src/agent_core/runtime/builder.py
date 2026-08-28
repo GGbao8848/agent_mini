@@ -21,6 +21,7 @@ from agent_core.config.settings import Settings, get_settings
 from agent_core.domain.agent import AgentSpec, SubAgentRef
 from agent_core.errors.exceptions import ConfigurationError, SkillError
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
+from agent_core.runtime.middleware import build_middleware
 from agent_core.runtime.model import ModelFactory, build_model
 from agent_core.runtime.tooling import ToolFactory, make_direct_tool
 
@@ -65,6 +66,7 @@ class AgentBuilder:
             system_prompt=spec.system_prompt or None,
             subagents=[self._resolve_subagent(ref, parent_id=spec.id) for ref in spec.subagents]
             or None,
+            middleware=build_middleware(spec, self._model_factory),
             name=spec.name,
             **self._resolve_skills(spec.skills),
         )
