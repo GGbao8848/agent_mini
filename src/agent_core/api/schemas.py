@@ -32,6 +32,17 @@ class RunCreateRequest(BaseModel):
     parent_run_id: str | None = None
 
 
+class RunUsageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    model_calls: int
+    tool_calls: int
+    duration_ms: float | None
+
+
 class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -44,6 +55,7 @@ class RunOut(BaseModel):
     finished_at: Any
     error: str | None
     metadata: dict[str, Any]
+    usage: RunUsageOut | None
     # Not on the domain model: filled from the run's AGENT_FINISHED event.
     output: Any | None = None
 

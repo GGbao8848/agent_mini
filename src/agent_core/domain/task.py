@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from agent_core.domain.metrics import RunUsage
 from agent_core.errors.exceptions import StateError
 
 
@@ -83,6 +84,7 @@ class Run(BaseModel):
     finished_at: datetime | None = None
     error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    usage: RunUsage | None = None
 
     def transition_to(self, new_status: RunStatus) -> None:
         """Move the run to ``new_status``, enforcing the lifecycle state machine."""
