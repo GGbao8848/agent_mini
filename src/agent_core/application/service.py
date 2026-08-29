@@ -17,6 +17,7 @@ from agent_core.domain.trace import EventType, TraceEvent
 from agent_core.errors.exceptions import ApprovalError
 from agent_core.mcp.manager import MCPManager
 from agent_core.observability.stream import EventStream, EventStreamBroker
+from agent_core.persistence.store import SqliteStore
 from agent_core.registries import MCPRegistry
 from agent_core.runtime.runtime import AgentRuntime
 
@@ -42,11 +43,13 @@ class AgentCoreService:
         mcp: MCPManager,
         mcp_registry: MCPRegistry,
         broker: EventStreamBroker,
+        store: SqliteStore | None = None,
     ) -> None:
         self.runtime = runtime
         self.mcp = mcp
         self.mcp_registry = mcp_registry
         self.broker = broker
+        self.store = store
 
     # ------------------------------------------------------------------ runs
 

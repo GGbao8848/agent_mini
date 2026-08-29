@@ -31,6 +31,11 @@ class InMemoryTracer:
         self._max_events_per_run = max_events_per_run
         self._events: dict[str, list[TraceEvent]] = defaultdict(list)
 
+    @property
+    def max_events_per_run(self) -> int:
+        """Buffer bound per run (used by restoring backends to match it)."""
+        return self._max_events_per_run
+
     def emit(self, event: TraceEvent) -> None:
         events = self._events[event.run_id]
         if len(events) >= self._max_events_per_run:

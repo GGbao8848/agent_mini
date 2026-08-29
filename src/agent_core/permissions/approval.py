@@ -2,7 +2,10 @@
 
 The gate creates a request and awaits :meth:`ApprovalManager.wait`; the API
 layer (Phase 7) resolves it via :meth:`ApprovalManager.resolve`, which wakes
-the waiting gate. v1 keeps everything in memory with no TTL.
+the waiting gate. The pending/resolved dicts are the read side; with an
+optional :class:`~agent_core.persistence.store.SqliteStore` every change is
+mirrored so a restart keeps the records (requests left pending by a previous
+process are rejected — their run cannot resume across a restart).
 """
 
 from __future__ import annotations
@@ -13,15 +16,17 @@ from typing import Any
 
 from agent_core.domain.action import Action, ApprovalRequest, ApprovalStatus
 from agent_core.errors.exceptions import ApprovalError, RegistryError
+from agent_core.persistence.store import SqliteStore
 
 
 class ApprovalManager:
     """In-memory store of approval requests keyed by id."""
 
-    def __init__(self) -> None:
+    def __init__(self, store: SqliteStore | None = None) -> None:
         self._pending: dict[str, ApprovalRequest] = {}
         self._resolved: dict[str, ApprovalRequest] = {}
-        self._wakeups: dict[str, asyncio.Event] = {}
+        self._wakeups: dict[str, asyncio.Event] = {}  # process-local; not persistable
+        self._store = store
 
     def create(self, action: Action, *, reason: str = "") -> ApprovalRequest:
         """Create a pending request for ``action``."""
@@ -36,7 +41,26 @@ class ApprovalManager:
         )
         self._pending[request.id] = request
         self._wakeups[request.id] = asyncio.Event()
+        self._save(request)
         return request
+
+    def hydrate(self) -> None:
+        """Restore persisted approvals (no-op without a store).
+
+        Requests still pending when the previous process ended are moved to
+        ``REJECTED`` with ``resolved_by="restart"``: the run that awaited them
+        is marked failed by the runtime, so there is nothing left to wake.
+        """
+        if self._store is None:
+            return
+        for data in self._store.load_approvals():
+            request = ApprovalRequest.model_validate_json(data)
+            if request.status is ApprovalStatus.PENDING:
+                request.status = ApprovalStatus.REJECTED
+                request.resolved_by = "restart"
+                request.resolved_at = datetime.now(UTC)
+                self._save(request)
+            self._resolved[request.id] = request
 
     def get(self, approval_id: str) -> ApprovalRequest:
         """Return a pending or resolved request by id."""
@@ -88,4 +112,9 @@ class ApprovalManager:
             request.edited_arguments = dict(edited_arguments)
         self._resolved[approval_id] = request
         self._wakeups[approval_id].set()
+        self._save(request)
         return request
+
+    def _save(self, request: ApprovalRequest) -> None:
+        if self._store is not None:
+            self._store.save_approval(request.id, request.status.value, request.model_dump_json())

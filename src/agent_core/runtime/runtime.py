@@ -9,6 +9,7 @@ is emitted as a trace event.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from functools import partial
 
 from agent_core.domain.task import Run, RunStatus, Task
@@ -20,6 +21,7 @@ from agent_core.observability.trace import InMemoryTracer, Tracer
 from agent_core.permissions.approval import ApprovalManager
 from agent_core.permissions.gate import ActionGate
 from agent_core.permissions.policy import ActionPolicy
+from agent_core.persistence.store import SqliteStore
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.builder import AgentBuilder
 from agent_core.runtime.context import current_run
@@ -45,6 +47,7 @@ class AgentRuntime:
         policy: ActionPolicy | None = None,
         approvals: ApprovalManager | None = None,
         builder: AgentBuilder | None = None,
+        store: SqliteStore | None = None,
     ) -> None:
         self.agents = agents
         self.tools = tools
@@ -69,6 +72,7 @@ class AgentRuntime:
         self._runs: dict[str, Run] = {}
         self._tasks: dict[str, Task] = {}
         self._running: dict[str, asyncio.Task[Run]] = {}
+        self._store = store
 
     # ---------------------------------------------------------------- queries
 
@@ -83,6 +87,30 @@ class AgentRuntime:
         """Snapshot of all runs, in creation order."""
         return list(self._runs.values())
 
+    # ---------------------------------------------------------------- restore
+
+    def hydrate(self) -> None:
+        """Restore run/task facts persisted by a previous process.
+
+        Facts are restored as records, not live executions: runs that were not
+        terminal when the process ended are marked FAILED directly (restore is
+        not a lifecycle transition, so the state machine is bypassed) — their
+        graph state and any in-process approval wait cannot be serialized.
+        """
+        if self._store is None:
+            return
+        for data in self._store.load_tasks():
+            task = Task.model_validate_json(data)
+            self._tasks[task.id] = task
+        for data in self._store.load_runs():
+            run = Run.model_validate_json(data)
+            if not run.status.is_terminal:
+                run.status = RunStatus.FAILED
+                run.error = "interrupted by process restart"
+                run.finished_at = datetime.now(UTC)
+                self._save_run(run)
+            self._runs[run.id] = run
+
     # -------------------------------------------------------------- lifecycle
 
     def create_run(
@@ -94,6 +122,9 @@ class AgentRuntime:
         run = Run(task_id=task.id, agent_id=spec.id, parent_run_id=parent_run_id)
         self._tasks[task.id] = task
         self._runs[run.id] = run
+        if self._store is not None:
+            self._store.save_task(task.id, task.model_dump_json())
+            self._save_run(run)
         return run
 
     async def execute_run(self, run: Run) -> Run:
@@ -161,12 +192,20 @@ class AgentRuntime:
     def _transition(self, run: Run, status: RunStatus) -> None:
         previous = run.status
         run.transition_to(status)
+        # The transition is the last mutation point of a run (usage/error are
+        # set by the executor/gate before it), so persisting here captures the
+        # full record for every lifecycle change.
+        self._save_run(run)
         self.fanout.emit(
             EventType.RUN_STATUS_CHANGED,
             run=run,
             agent_id=run.agent_id,
             metadata={"from": previous.value, "to": status.value},
         )
+
+    def _save_run(self, run: Run) -> None:
+        if self._store is not None:
+            self._store.save_run(run.id, run.status.value, run.model_dump_json())
 
     def _finish_with_error(self, run: Run, exc: AgentError, status: RunStatus) -> None:
         run.error = exc.message

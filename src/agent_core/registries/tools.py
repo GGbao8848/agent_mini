@@ -13,6 +13,7 @@ from typing import Any
 
 from agent_core.domain.tool import ToolDefinition
 from agent_core.errors.exceptions import RegistryError
+from agent_core.persistence.store import SqliteStore
 from agent_core.registries.base import BaseRegistry
 
 ToolHandler = Callable[..., Any]
@@ -20,12 +21,19 @@ ToolHandler = Callable[..., Any]
 
 
 class ToolRegistry(BaseRegistry[ToolDefinition]):
-    """Tool metadata + handler store, keyed by tool name."""
+    """Tool metadata + handler store, keyed by tool name.
+
+    Only the definition is persistable; handlers are process-local callables
+    and must be re-registered by code (hydrating a registry restores tool
+    metadata but leaves invocation to fail until a handler is attached — the
+    same contract as MCP tools discovered ahead of their connection).
+    """
 
     kind = "tool"
+    model_cls = ToolDefinition
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, store: SqliteStore | None = None) -> None:
+        super().__init__(store)
         self._handlers: dict[str, ToolHandler] = {}
 
     def key_for(self, item: ToolDefinition) -> str:

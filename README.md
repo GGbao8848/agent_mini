@@ -39,6 +39,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 13 | 真实任务评估：5 类真实任务（实时 API/结构化抽取/代码执行验证/编排对比/多步工具链）+ 客观校验器 | ✅ |
 | 14 | Team 模式调优：汇总保真硬规则 + worker 汇报紧凑化 + `TeamSpec.merge_instructions` + 校验器加固 | ✅ |
 | 15 | 评估进阶：LLM-as-judge 四维质量评分 + 基线快照与回归对比（时间/token/质量漂移可见化） | ✅ |
+| 16 | 持久化：SQLite 写穿透（注册中心/Run/审批/事件）+ 重启恢复，`AGENT_CORE_DATABASE_URL` 可选启用 | ✅ |
 
 ## 快速开始
 
@@ -169,6 +170,19 @@ uv run --env-file .env python scripts/eval_real.py --suite fx --judge --compare 
 
 实测（minimax-m3:free）：judge 稳定输出 6.5–7.6/10 的合理评分与中肯点评；基线对比把运行间漂移显式化——同一 fx 任务相邻两次运行即得到 `single 📈 improved (wall -55%, tokens -70%)` 与 `team 📉 regressed (wall +90%)` 的结论（team 质量未退、checks 3/3，速度波动被准确捕获）。附带的 team 调优延续：COORDINATOR_PROMPT 的 DELEGATE 步骤新增"实时数据必须来自 worker 自己的工具调用，不得凭记忆回答"，堵住 worker 跳过工具直接编数的路径。
 
+## 持久化（Phase 16）
+
+设置 `AGENT_CORE_DATABASE_URL=sqlite:///./agent_core.db` 后，所有可持久化事实经由 `persistence/`（仅标准库 `sqlite3`，WAL 模式）**写穿透**到 SQLite，进程重启后自动恢复：
+
+| 持久化对象 | 机制 | 重启后语义 |
+|---|---|---|
+| 注册中心（Agent/Tool 定义/Skill/MCP/Team） | `BaseRegistry` 写穿透 + `hydrate()` | 原样恢复；Tool 只恢复定义，handler 由代码重新注册；MCP 服务器恢复为待重连 |
+| Run / Task 记录 | `AgentRuntime` 在 create/transition 时保存 | 终态 run 原样可查；非终态 run 标记 `FAILED`（interrupted by process restart） |
+| Trace 事件 | `PersistingTracer` 双写（内存读 + 库镜像） | 重启后 SSE 回放与 `final_output` 仍然可用 |
+| 审批请求 | `ApprovalManager` 写穿透 | 已决审批原样保留；遗留 pending 自动置 `REJECTED`（resolved_by=restart，其 run 已无法恢复） |
+
+设计要点：内存 dict 始终是读侧唯一来源（读性能不变、契约不变），库只是镜像；不设置该变量时行为与纯内存 v1 完全一致。**不解决执行恢复**——WAITING_APPROVAL 的 run 其图状态与进程内唤醒句柄不可序列化，跨重启恢复执行需接入 LangGraph checkpointer（远期）。
+
 ## 可靠性策略（Phase 12）
 
 `AgentSpec.resilience`（`ResiliencePolicy`）把可靠性/成本控制声明为纯数据，构建时映射到 LangChain **原生** AgentMiddleware（不重复造轮子）：
@@ -201,6 +215,7 @@ src/agent_core/
 ├── observability/   # 日志、Tracer、EventBus、事件扇出、Run 级事件流（SSE 数据源）
 ├── orchestration/   # 编排：compose_team（模型驱动团队）、run_parallel（代码驱动并发）
 ├── permissions/     # ActionPolicy、ActionGate、ApprovalManager（工具执行必经闸门）
+├── persistence/     # 可选 SQLite 写穿透：注册中心/Run/审批/事件 + 重启恢复
 ├── registries/      # Agent / Tool / Skill / MCP / Team 注册中心（内存实现）
 └── runtime/         # 模型工厂、AgentBuilder、AgentExecutor、AgentRuntime（DeepAgents）、native middleware 映射
 

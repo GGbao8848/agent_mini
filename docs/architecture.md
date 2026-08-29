@@ -108,3 +108,4 @@ CREATED → PLANNING → RUNNING ⇄ WAITING_APPROVAL → COMPLETED
 - **安全**：MCP 凭据只存 `auth_ref` 引用，连接时经 `CredentialResolver` 从环境解析；模型 API key 由 provider SDK 标准环境变量管理。所有工具（本地 Python 与 MCP）都经同一条 Permission → Action Gate 链路。
 - **传输层极薄**：`AgentCoreService` 是 API/CLI 共用的唯一用例入口；`create_app` 支持注入自定义 service，路由无状态。
 - **第一版不引入**：Kafka / Redis / PostgreSQL / 向量库 / 微服务，单进程可运行。
+- **持久化（Phase 16）**：可选 SQLite（标准库 `sqlite3`，WAL）作为**写穿透镜像**——内存 dict 始终是读侧唯一来源，`AGENT_CORE_DATABASE_URL` 设置后注册中心/Run/审批/Trace 事件落库并在启动时恢复；跨重启的执行恢复（LangGraph checkpointer）仍属远期。
