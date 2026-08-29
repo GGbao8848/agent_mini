@@ -26,3 +26,4 @@ logs/
 .zcode/
 logs/
 agent_core.db*
+agent_core-checkpoints.db*
