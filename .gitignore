@@ -25,3 +25,4 @@ workspace/
 logs/
 .zcode/
 logs/
+agent_core.db*
