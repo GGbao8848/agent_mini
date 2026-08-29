@@ -35,10 +35,18 @@ def build_checkpointer(database_url: str | None) -> BaseCheckpointSaver[Any]:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     raw = database_url.removeprefix("sqlite:///")
-    # timeout → sqlite busy timeout: the store holds a second connection to
-    # this file, so overlapping writes wait instead of failing.
-    if raw == ":memory:":
-        return AsyncSqliteSaver(aiosqlite.connect(":memory:", timeout=15))
-    path = Path(raw)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    # Checkpoints live in their OWN file: the store holds the business
+    # database, and two writer connections to one file fight over the write
+    # lock on every graph step (multi-MB checkpoints with image history).
+    # timeout → sqlite busy timeout as a last-resort guard.
+    path = _sibling_checkpoints_file(raw)
     return AsyncSqliteSaver(aiosqlite.connect(str(path), timeout=15))
+
+
+def _sibling_checkpoints_file(raw: str) -> Path:
+    """``sqlite:///dir/agent_core.db`` → ``dir/agent_core-checkpoints.db``."""
+    file = Path(raw)
+    stem = file.stem + "-checkpoints"
+    path = file.with_stem(stem)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path

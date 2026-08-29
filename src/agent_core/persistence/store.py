@@ -99,7 +99,7 @@ class SqliteStore:
         # connection is created on the main thread — cross-thread use must be
         # opted into, and a lock serializes writes across those threads.
         self._conn = sqlite3.connect(
-            parse_sqlite_url(database_url), check_same_thread=False
+            parse_sqlite_url(database_url), check_same_thread=False, timeout=20.0
         )
         self._lock = threading.Lock()
         self._conn.execute("PRAGMA journal_mode=WAL")
