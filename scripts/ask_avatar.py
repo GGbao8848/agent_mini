@@ -19,10 +19,10 @@ import contextlib
 from pathlib import Path
 from typing import Any
 
+from e2e_autonomy import avatar_spec  # same spec as the long-task harness
+
 from agent_core.application.bootstrap import default_service
 from agent_core.observability.stream import EventStream
-
-from e2e_autonomy import avatar_spec  # same spec as the long-task harness
 
 
 async def echo_events(service: Any, run_id: str) -> None:

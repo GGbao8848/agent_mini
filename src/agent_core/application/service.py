@@ -80,6 +80,10 @@ class AgentCoreService:
     def cancel_run(self, run_id: str) -> Run:
         return self.runtime.cancel_run(run_id)
 
+    def task_input(self, run_id: str) -> str:
+        run = self.get_run(run_id)
+        return self.runtime.task_input(run)
+
     def final_output(self, run_id: str) -> Any | None:
         """Output payload of the run's AGENT_FINISHED event, if it has one."""
         for event in self.trace_events(run_id):

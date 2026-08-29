@@ -56,13 +56,15 @@ class RunOut(BaseModel):
     error: str | None
     metadata: dict[str, Any]
     usage: RunUsageOut | None
-    # Not on the domain model: filled from the run's AGENT_FINISHED event.
+    # Not on the domain model: filled by the routes layer.
     output: Any | None = None
+    input: str = ""
 
     @classmethod
-    def of(cls, run: Run, output: Any | None = None) -> RunOut:
+    def of(cls, run: Run, output: Any | None = None, input: str = "") -> RunOut:
         data = run.model_dump()
         data["output"] = output
+        data["input"] = input
         return cls.model_validate(data)
 
 
