@@ -157,6 +157,11 @@ class TestFxVerifier:
         checks = self.task.verifier("USD/CNY 71.2，EUR/CNY 8.02，JPY/CNY 0.048", {})
         assert not next(c for c in checks if "USD" in c.name).passed
 
+    def test_per_hundred_quote_is_normalized(self) -> None:
+        output = "JPY 汇率 0.04209；趋势：100 JPY ≈ ¥4.21。"
+        checks = self.task.verifier(output, {})
+        assert next(c for c in checks if "JPY" in c.name).passed
+
 
 class TestHolidayVerifier:
     task = next(t for t in ALL_TASKS if t.id == "holiday_planner")

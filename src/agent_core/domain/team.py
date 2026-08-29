@@ -28,4 +28,11 @@ class TeamSpec(BaseModel):
     guidance: str = Field(
         default="", description="Extra coordination instructions appended to the lead prompt"
     )
+    merge_instructions: str = Field(
+        default="",
+        description=(
+            "Team-specific MERGE rules injected into the generated coordinator prompt, "
+            "e.g. 'transcribe every figure verbatim from worker output'"
+        ),
+    )
     metadata: dict[str, str] = Field(default_factory=dict)

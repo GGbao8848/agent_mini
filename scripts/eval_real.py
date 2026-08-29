@@ -11,6 +11,7 @@ Usage: uv run --env-file .env python scripts/eval_real.py
 
 from __future__ import annotations
 
+import argparse
 import ast
 import asyncio
 import json
@@ -250,7 +251,15 @@ def build_runtime() -> tuple[AgentRuntime, AgentRegistry]:
 
 
 def _team_spec(team_id: str, name: str) -> TeamSpec:
-    return TeamSpec(id=team_id, name=name, worker_agent_ids=["worker-1", "worker-2", "worker-3"])
+    return TeamSpec(
+        id=team_id,
+        name=name,
+        worker_agent_ids=["worker-1", "worker-2", "worker-3"],
+        merge_instructions=(
+            "最终答案中的每个汇率数值必须逐字复制对应子任务结果 JSON 里的 rate 字段，"
+            "禁止重新计算、换算或修正；每个数值后标注来源 worker。"
+        ),
+    )
 
 
 def render_report(results: list[EvalResult]) -> str:
@@ -275,6 +284,7 @@ def render_report(results: list[EvalResult]) -> str:
 
 
 def main() -> int:
+    args = _parse_args()
     runtime, _ = build_runtime()
     runner = EvalRunner(runtime)
     fx_task = _TASK_BY_ID["fx_briefing"]
@@ -282,6 +292,13 @@ def main() -> int:
     async def run_all() -> list[EvalResult]:
         results: list[EvalResult] = []
         context = {"weather_readings": weather_readings}
+
+        if args.suite == "fx":
+            for mode, agent_id in (("single", "solo"), ("team", "fx-team")):
+                result = await runner.run_task(fx_task, agent_id, context)
+                result.aspects = [*result.aspects, mode]
+                results.append(result)
+            return results
 
         results.append(await runner.run_task(_TASK_BY_ID["live_weather"], "solo", context))
         results.append(await runner.run_task(_TASK_BY_ID["orders_to_json"], "solo", context))
@@ -314,6 +331,17 @@ def main() -> int:
     )
     print(f"reports written to {RESULTS_DIR}/")
     return 0 if passed == len(results) else 1
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Real-task evaluation driver")
+    parser.add_argument(
+        "--suite",
+        choices=("full", "fx"),
+        default="full",
+        help="fx runs only fx_briefing single+team (fast team-tuning loop)",
+    )
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
