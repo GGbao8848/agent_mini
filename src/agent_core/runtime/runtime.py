@@ -14,12 +14,14 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
+
 from agent_core.artifacts import scan_workspace_artifacts
 from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
 from agent_core.domain.metrics import RunUsage
-from agent_core.domain.task import Run, RunStatus, Task
+from agent_core.domain.task import Run, RunStatus, Task, new_id
 from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import (
     AgentError,
@@ -35,6 +37,7 @@ from agent_core.permissions.approval import ApprovalManager
 from agent_core.permissions.gate import ActionGate
 from agent_core.permissions.loop_guard import LoopGuard
 from agent_core.permissions.policy import ActionPolicy
+from agent_core.persistence.checkpointer import build_checkpointer
 from agent_core.persistence.store import SqliteStore
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.builder import AgentBuilder
@@ -79,6 +82,7 @@ class AgentRuntime:
         approvals: ApprovalManager | None = None,
         builder: AgentBuilder | None = None,
         store: SqliteStore | None = None,
+        checkpointer: BaseCheckpointSaver[Any] | None = None,
     ) -> None:
         self.agents = agents
         self.tools = tools
@@ -99,6 +103,8 @@ class AgentRuntime:
             self.fanout,
             loop_guard=self.loop_guard,
         )
+        self._checkpointer = checkpointer
+        self._checkpointer_ready = False
         self.builder = builder or AgentBuilder(
             agents,
             tools,
@@ -107,6 +113,7 @@ class AgentRuntime:
             tool_factory=tool_factory or partial(make_gated_tool, gate=self.gate),
             usage_provider=self._live_usage,
             help_tool=make_help_tool(self.gate),
+            checkpointer_provider=lambda: self.checkpointer,
         )
         self.executor = AgentExecutor(self.fanout)
         self._runs: dict[str, Run] = {}
@@ -114,6 +121,14 @@ class AgentRuntime:
         self._running: dict[str, asyncio.Task[Run]] = {}
         self._collectors: dict[str, UsageCollector] = {}
         self._store = store
+
+    @property
+    def checkpointer(self) -> BaseCheckpointSaver[Any]:
+        """Conversation-state saver, built lazily (AsyncSqliteSaver requires
+        a running loop at construction; execute paths always have one)."""
+        if self._checkpointer is None:
+            self._checkpointer = build_checkpointer(get_settings().database_url)
+        return self._checkpointer
 
     def _live_usage(self) -> RunUsage | None:
         """Live usage of the run executing in the current context (budget middleware)."""
@@ -168,12 +183,26 @@ class AgentRuntime:
     # -------------------------------------------------------------- lifecycle
 
     def create_run(
-        self, agent_id: str, task_input: str, *, parent_run_id: str | None = None
+        self,
+        agent_id: str,
+        task_input: str,
+        *,
+        parent_run_id: str | None = None,
+        thread_id: str | None = None,
     ) -> Run:
-        """Create (but do not start) a run of ``agent_id`` for ``task_input``."""
+        """Create (but do not start) a run of ``agent_id`` for ``task_input``.
+
+        Root runs own a conversation thread (their own id) unless the caller
+        continues an existing one; nested runs never carry a thread.
+        """
         spec = self.agents.get(agent_id)  # fail fast on unknown agents
         task = Task(input=task_input)
-        run = Run(task_id=task.id, agent_id=spec.id, parent_run_id=parent_run_id)
+        run = Run(
+            task_id=task.id,
+            agent_id=spec.id,
+            parent_run_id=parent_run_id,
+            thread_id=thread_id or (new_id() if parent_run_id is None else None),
+        )
         self._tasks[task.id] = task
         self._runs[run.id] = run
         if self._store is not None:
@@ -198,9 +227,15 @@ class AgentRuntime:
         collector = UsageCollector()
         self._collectors[run.id] = collector
         try:
+            await self._ensure_checkpointer_ready()
             graph = self.builder.build(spec)
             output = await self.executor.execute(
-                graph, run=run, task=task, spec=spec, collector=collector
+                graph,
+                run=run,
+                task=task,
+                spec=spec,
+                collector=collector,
+                thread_id=run.thread_id if run.parent_run_id is None else None,
             )
             output = await self._self_verify(run, task, spec, graph, output, collector)
             self._transition(run, RunStatus.COMPLETED)
@@ -250,6 +285,17 @@ class AgentRuntime:
         return run
 
     # --------------------------------------------------------------- internal
+
+    async def _ensure_checkpointer_ready(self) -> None:
+        """Run the saver's one-time setup (migrations) before the first use."""
+        if self._checkpointer_ready:
+            return
+        setup = getattr(self.checkpointer, "setup", None)
+        if setup is not None:
+            result = setup()
+            if asyncio.iscoroutine(result):
+                await result
+        self._checkpointer_ready = True
 
     def _collect_artifacts(self, run: Run) -> None:
         """Record the workspace files this run created (the console's 产物窗口).

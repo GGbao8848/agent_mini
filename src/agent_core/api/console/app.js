@@ -55,11 +55,19 @@ function fmtTime(iso) { return new Date(iso).toLocaleTimeString(); }
 function renderRuns() {
   const el = document.getElementById("runList");
   el.innerHTML = "";
+  const threadSize = {};
+  for (const r of runs.values()) {
+    if (r.parent_run_id === null) {
+      const t = r.thread_id || r.id;
+      threadSize[t] = (threadSize[t] || 0) + 1;
+    }
+  }
   for (const run of runs.values()) {
     const div = document.createElement("div");
     div.className = "run" + (run.id === selectedId ? " selected" : "");
+    const linked = (threadSize[run.thread_id || run.id] || 0) > 1 ? "🔗 " : "";
     div.innerHTML = `<div class="top">${statusBadge(run.status)}
-        <strong>${run.agent_id}</strong>
+        <strong>${linked}${run.agent_id}</strong>
         <span class="muted" style="margin-left:auto">${fmtTime(run.created_at)}</span></div>
       <div class="task">${escapeHtml(run.input || run.id.slice(0, 8)).slice(0, 160)}</div>`;
     div.onclick = () => selectRun(run.id);
@@ -80,8 +88,56 @@ async function selectRun(runId) {
   const run = await api(`/v1/runs/${runId}`);
   runs.set(runId, run);
   renderHead(run);
+  renderThread(run);
   await renderArtifacts(runId, run);
   openEventStream(runId, run.status);
+}
+
+function threadRuns(run) {
+  const thread = run.thread_id || run.id;
+  return [...runs.values()]
+    .filter(r => r.parent_run_id === null && (r.thread_id || r.id) === thread)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
+function bubble(role, text) {
+  const div = document.createElement("div");
+  div.className = "bubble " + role;
+  div.innerHTML = `<div class="who">${role === "user" ? "🧑 你" : "🤖 分身"}</div>
+    <div class="txt">${escapeHtml(String(text))}</div>`;
+  return div;
+}
+
+function renderThread(run) {
+  const el = document.getElementById("thread");
+  const chain = threadRuns(run);
+  el.innerHTML = "";
+  if (!chain.length) {
+    el.innerHTML = '<span class="muted">（旧任务没有对话线程——发一条消息即可开启）</span>';
+    return;
+  }
+  for (const r of chain) {
+    el.appendChild(bubble("user", r.input || "（无文本）"));
+    if (r.output) {
+      el.appendChild(bubble("avatar", r.output));
+    } else {
+      el.appendChild(bubble("avatar", `（${r.status}${r.error ? "：" + r.error : ""}）`));
+    }
+  }
+}
+
+async function sendFollowup() {
+  const inputEl = document.getElementById("followupInput");
+  const text = inputEl.value.trim();
+  if (!text || !selectedId) return;
+  inputEl.value = "";
+  const run = await api(`/v1/runs/${selectedId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({input: text}),
+  });
+  runs.set(run.id, run);
+  dirtyRuns = true;
+  selectRun(run.id);
 }
 
 function renderHead(run) {
