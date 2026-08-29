@@ -7,12 +7,14 @@ environment at connect time and never cross the API.
 
 from __future__ import annotations
 
+import contextlib
+
 from fastapi import APIRouter
 
 from agent_core.api.deps import ServiceDep
 from agent_core.api.schemas import MCPServerCreateRequest, MCPServerOut
-from agent_core.domain.mcp import MCPServerDefinition
-from agent_core.errors.exceptions import StateError
+from agent_core.domain.mcp import MCPServerDefinition, MCPServerStatus
+from agent_core.errors.exceptions import AgentError
 
 router = APIRouter(prefix="/mcp/servers", tags=["mcp"])
 
@@ -29,14 +31,18 @@ async def register_server(payload: MCPServerCreateRequest, service: ServiceDep) 
 
 
 @router.delete("/{server_id}", response_model=MCPServerOut)
-def remove_server(server_id: str, service: ServiceDep) -> MCPServerOut:
-    """Remove a server definition; disconnect it first when still connected."""
+async def remove_server(server_id: str, service: ServiceDep) -> MCPServerOut:
+    """Remove a server definition, best-effort disconnecting it first.
+
+    A stale "healthy" status (persisted by a previous process) must not block
+    deletion — a live connection is closed, a stale one is simply cleared.
+    """
     definition = service.mcp_registry.get(server_id)
     if definition.status.value == "healthy":
-        raise StateError(
-            f"MCP server '{server_id}' is still connected — disconnect it first",
-            details={"server_id": server_id},
-        )
+        with contextlib.suppress(AgentError):
+            await service.disconnect_server(server_id)
+    definition = service.mcp_registry.get(server_id)
+    definition.status = MCPServerStatus.UNKNOWN
     return MCPServerOut.of(service.mcp_registry.remove(server_id))
 
 

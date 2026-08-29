@@ -301,7 +301,7 @@ class TestMcpRemoveApi:
         assert (await client.get("/v1/mcp/servers/demo")).status_code == 404
         await client.aclose()
 
-    async def test_remove_connected_server_maps_to_409(
+    async def test_remove_connected_server_disconnects_then_removes(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         client = toolbox_client(tmp_path, monkeypatch)
@@ -310,8 +310,10 @@ class TestMcpRemoveApi:
             "endpoint": "http://127.0.0.1:8931/mcp",
         })
         await client.post("/v1/mcp/servers/demo/connect")
+        healthy = (await client.get("/v1/mcp/servers/demo")).json()
+        assert healthy["status"] == "healthy"
 
-        conflict = await client.delete("/v1/mcp/servers/demo")
-        assert conflict.status_code == 409
-        assert "disconnect" in conflict.json()["error"]["message"]
+        removed = await client.delete("/v1/mcp/servers/demo")
+        assert removed.status_code == 200
+        assert (await client.get("/v1/mcp/servers/demo")).status_code == 404
         await client.aclose()
