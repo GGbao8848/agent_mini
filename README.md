@@ -41,6 +41,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 15 | 评估进阶：LLM-as-judge 四维质量评分 + 基线快照与回归对比（时间/token/质量漂移可见化） | ✅ |
 | 16 | 持久化：SQLite 写穿透（注册中心/Run/审批/事件）+ 重启恢复，`AGENT_CORE_DATABASE_URL` 可选启用 | ✅ |
 | 17 | 自治与预算治理：RunBudget 硬上限、循环/无进展检测、NEEDS_INPUT 任务级求助、执行后自检自修回路 | ✅ |
+| 18 | 本地模型接入（`local:` provider，任意 OpenAI 兼容端点）+ 多模态内置工具（generate_image/view_image）+ 模型能力矩阵冒烟 | ✅ |
 
 ## 快速开始
 
@@ -183,6 +184,49 @@ uv run --env-file .env python scripts/eval_real.py --suite fx --judge --compare 
 | 审批请求 | `ApprovalManager` 写穿透 | 已决审批原样保留；遗留 pending 自动置 `REJECTED`（resolved_by=restart，其 run 已无法恢复） |
 
 设计要点：内存 dict 始终是读侧唯一来源（读性能不变、契约不变），库只是镜像；不设置该变量时行为与纯内存 v1 完全一致。**不解决执行恢复**——WAITING_APPROVAL 的 run 其图状态与进程内唤醒句柄不可序列化，跨重启恢复执行需接入 LangGraph checkpointer（远期）。
+
+## 本地模型与多模态工具（Phase 18）
+
+### 模型工厂：`local:` provider
+
+任意自托管 OpenAI 兼容端点（vLLM / llama.cpp server / LMDeploy…）与 `openai:` / `openrouter:` 走同一工厂路径，fallbacks / resilience / judge 全部兼容：
+
+```bash
+# .env（凭据走标准环境变量，不入库）
+LOCAL_LLM_BASE_URL=http://10.0.0.5:8000/v1
+LOCAL_LLM_API_KEY=optional          # 本地服务常无鉴权，可省略
+```
+
+```python
+AgentSpec(id="avatar", model="local:qwen3.8-27b", ...)
+AgentSpec(id="avatar", resilience=ResiliencePolicy(
+    model_fallbacks=["local:qwen3.8-27b", "openrouter:minimax/minimax-m3:free"]), ...)
+```
+
+### 内置多模态工具（`agent_core/builtins/`）
+
+| 工具 | 启用条件 | 说明 |
+|---|---|---|
+| `generate_image(prompt, width, height, steps, cfg_scale)` | `AGENT_CORE_IMAGE_API_BASE_URL`（A1111/Forge 兼容 `/sdapi/v1/txt2img`） | 生成 PNG 存入 `AGENT_CORE_WORKSPACE_DIR`（默认 ./workspace），返回绝对路径 |
+| `view_image(path)` | 始终注册 | 返回多模态内容块（text + image_url data URI），视觉模型可直接"看到"图片——包括查看自己刚生成的图 |
+
+工具照常走 Tool Registry → Permission → Action Gate，agent 按 `spec.tools` 白名单选用。
+
+### 模型能力矩阵冒烟
+
+```bash
+uv run --env-file .env python scripts/smoke_model_matrix.py [--strict]
+```
+
+所有探测走**本项目的 `build_model()` 工厂**（即生产适配路径）：补全 / 工具调用 / 严格 JSON / 用户消息视觉 / **工具结果视觉**（agent 看图链路）五项，输出矩阵表；`--strict` 任一失败退出非零可直接接 CI。实测（qwen3.8-27b 本地）：5/5 全过，含工具结果带图路径。
+
+端到端演示（画图 → 看图自查 → 描述确认）：
+
+```bash
+uv run --env-file .env python scripts/demo_multimodal.py
+```
+
+**附带修复的适配器 bug**：gated 工具路径此前未应用"模型省略的可选参数回退 handler 默认值"规则，`None` 会直接传给 handler（generate_image 收到 `width: null` 即 500）。现已统一在执行链路处理并有回归测试覆盖。
 
 ## 自治与预算治理（Phase 17）
 

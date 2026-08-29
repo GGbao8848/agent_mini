@@ -59,3 +59,36 @@ class TestBuildModel:
         with pytest.raises(ConfigurationError) as excinfo:
             build_model("anthropic:claude-3")
         assert excinfo.value.details["provider"] == "anthropic"
+
+
+class TestLocalProvider:
+    def test_local_model_uses_configured_base_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://10.0.0.5:8000/v1")
+        monkeypatch.setenv("LOCAL_LLM_API_KEY", "local-secret")
+
+        model = build_model("local:qwen3.8-27b")
+
+        assert isinstance(model, ChatOpenAI)
+        assert model.model_name == "qwen3.8-27b"
+        assert model.openai_api_base == "http://10.0.0.5:8000/v1"
+
+    def test_local_model_without_key_uses_placeholder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://10.0.0.5:8000/v1")
+        monkeypatch.delenv("LOCAL_LLM_API_KEY", raising=False)
+
+        model = build_model("local:qwen3.8-27b")
+
+        assert isinstance(model, ChatOpenAI)  # builds fine: key is optional locally
+
+    def test_local_model_without_base_url_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOCAL_LLM_BASE_URL", raising=False)
+
+        with pytest.raises(ConfigurationError) as excinfo:
+            build_model("local:qwen3.8-27b")
+        assert excinfo.value.details["env_var"] == "LOCAL_LLM_BASE_URL"

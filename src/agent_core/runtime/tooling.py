@@ -16,7 +16,7 @@ from typing import Any
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field, create_model
 
-from agent_core.domain.tool import ToolDefinition
+from agent_core.domain.tool import ToolDefinition, adapt_handler_arguments
 from agent_core.errors.exceptions import ConfigurationError, StateError
 from agent_core.permissions.gate import ActionGate
 from agent_core.registries import ToolHandler
@@ -56,37 +56,9 @@ def schema_to_pydantic(tool_name: str, schema: dict[str, Any]) -> type[BaseModel
 
 
 def _omit_unset_optionals(definition: ToolDefinition, handler: ToolHandler) -> ToolHandler:
-    """Optional args the model omitted keep the handler's own Python defaults.
-
-    The generated args schema gives optional fields an explicit ``None``
-    default, so a plain-Python handler would otherwise see ``days=None``
-    instead of its own ``days=1`` default. Explicit schema defaults are passed
-    through unchanged.
-    """
-    schema = definition.input_schema
-    required = set(schema.get("required") or [])
-    droppable = {
-        name
-        for name, prop in (schema.get("properties") or {}).items()
-        if isinstance(prop, dict) and name not in required and "default" not in prop
-    }
-    if not droppable:
-        return handler
-
-    def drop(kwargs: dict[str, Any]) -> dict[str, Any]:
-        return {k: v for k, v in kwargs.items() if not (k in droppable and v is None)}
-
-    if asyncio.iscoroutinefunction(handler):
-
-        async def async_wrapper(**kwargs: Any) -> Any:
-            return await handler(**drop(kwargs))
-
-        return async_wrapper
-
-    def sync_wrapper(**kwargs: Any) -> Any:
-        return handler(**drop(kwargs))
-
-    return sync_wrapper
+    """Kept as an alias: the shared implementation lives in the domain layer."""
+    wrapped: ToolHandler = adapt_handler_arguments(definition, handler)
+    return wrapped
 
 
 def make_direct_tool(definition: ToolDefinition, handler: ToolHandler | None) -> BaseTool:
