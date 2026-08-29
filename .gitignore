@@ -23,3 +23,5 @@ bench_results/
 eval_results/
 workspace/
 logs/
+.zcode/
+logs/
