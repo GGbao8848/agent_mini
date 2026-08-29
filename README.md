@@ -46,6 +46,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 20 | run_code 内置工具 + workspace 真实文件 backend + 双长任务端到端自治验证（30 页 PPT / 网页画册） | ✅ |
 | 21 | Podman Sandbox：run_code 容器内执行（仅挂载 workspace、资源上限、rootless），宿主机密钥不可达 | ✅ |
 | 22 | Agent Console：局域网 Web 控制台——Run 时间线（持久化历史+实时 SSE）、事件详情、产物预览/下载、审批面板、派任务 | ✅ |
+| 23 | 多轮对话：LangGraph checkpointer + thread_id，**任意 run 可续聊**（AsyncSqliteSaver 持久化，跨重启保留上下文） | ✅ |
 
 ## 快速开始
 
@@ -227,6 +228,21 @@ bash scripts/sandbox_build.sh                   # 构建镜像（python:3.13-sli
 ```
 
 启用后 `run_code` 的每条命令都在容器内执行：**只有 workspace 挂载进容器**（`/work`）——宿主机的 `.env` 密钥、SSH、git 历史全部不可达；路径穿越（`/work/../..`）只到容器自己的根；内存/CPU/进程数有硬上限；代理环境变量透传（pip 装包走代理）。workspace 成为 agent 与宿主机之间的唯一交换点。已实测验证：边界四项检查全过 + 沙箱模式下真实任务（mini pptx + Telegram 汇报）端到端完成。
+
+## 多轮对话（Phase 23）
+
+**每个 run 天生自带对话线程**（`thread_id` = 自己的 id，对话状态经 LangGraph checkpointer 持久化到 `agent_core.db`）。在 Console 的任意 run 详情页输入框直接续聊——"把第 5 页改成……"、"刚才那个文件再补充一点"——agent 带着该 thread 的全部历史继续干活，产物实时进产物窗口。跨重启后依然记得全部上下文（AsyncSqliteSaver）。
+
+```bash
+# 程序化续聊
+curl -X POST "http://<server>:8000/v1/runs/<run_id>/messages" \
+  -H 'Content-Type: application/json' -H "X-Console-Token: $TOKEN" \
+  -d '{"input": "把标题页日期改成今天"}'
+```
+
+- 根 run 拥有线程；子 run（验证器等）不携带，避免污染对话历史
+- 同一 thread 的多次 run 在时间线上标 🔗，详情页显示完整对话转录
+- 已知语义变化：`ResiliencePolicy.model_call_limit`（thread_limit）从"每 run 归零"变为"跨轮累计"（阶段预算 RunBudget 不受影响，仍按 run 记账）
 
 ## Agent Console（Phase 22）
 
