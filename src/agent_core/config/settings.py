@@ -51,14 +51,27 @@ class Settings(BaseSettings):
     # Applied to the standard HTTP_PROXY / HTTPS_PROXY env vars so every HTTP
     # client in the process (OpenAI SDK, langchain, MCP) picks it up.
     proxy_url: str | None = None
+    # Hosts that must bypass the proxy (NO_PROXY), comma-separated. When a
+    # proxy is configured, localhost/127.0.0.1 are always exempt by default;
+    # add LAN service hosts (local model, txt2img...) so they stay direct.
+    no_proxy: str | None = None
 
 
 def apply_proxy(settings: Settings) -> None:
-    """Export ``settings.proxy_url`` as standard proxy env vars (no override)."""
+    """Export ``settings.proxy_url`` as standard proxy env vars (no override).
+
+    ``NO_PROXY`` always exempts loopback hosts; ``settings.no_proxy`` appends
+    more (LAN services must not be tunneled through the proxy).
+    """
     if not settings.proxy_url:
         return
     for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
         os.environ.setdefault(var, settings.proxy_url)
+    no_proxy = "localhost,127.0.0.1,::1"
+    if settings.no_proxy:
+        no_proxy = f"{no_proxy},{settings.no_proxy}"
+    for var in ("NO_PROXY", "no_proxy"):
+        os.environ.setdefault(var, no_proxy)
 
 
 @lru_cache
