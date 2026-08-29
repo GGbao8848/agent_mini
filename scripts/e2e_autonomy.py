@@ -83,32 +83,41 @@ def avatar_spec() -> AgentSpec:
 
 
 async def log_stream(service: Any, run_id: str, log_path: Path) -> None:
-    """Write every event of one run to its log file (and echo milestones)."""
+    """Write every event of one run to its log file."""
     stream = service.subscribe_events(run_id)
-    with log_path.open("w") as fh:
-        try:
-            async for event in stream.events():
-                line = (
-                    f"{event.timestamp:%H:%M:%S} {event.event_type.value:<18} "
-                    f"{event.tool or ''} {str(event.output or event.error or '')[:120]}"
-                )
-                fh.write(line + "\n")
-                fh.flush()
-                if event.event_type.value in ("run_finished", "run_failed", "run_cancelled"):
-                    break
-        finally:
-            service.unsubscribe_events(stream)
+    seen: set[str] = set()
+
+    def write(event: Any) -> None:
+        seen.add(event.id)
+        line = (
+            f"{event.timestamp:%H:%M:%S} {event.event_type.value:<18} "
+            f"{event.tool or ''} {str(event.output or event.error or '')[:120]}"
+        )
+        with log_path.open("a") as fh:
+            fh.write(line + "\n")
+
+    try:
+        with log_path.open("w"):
+            pass
+        for event in service.trace_events(run_id):  # replay history, dedupe live
+            write(event)
+        async for event in stream.events():
+            if event.id not in seen:
+                write(event)
+            if event.event_type.value in ("run_finished", "run_failed", "run_cancelled"):
+                break
+    finally:
+        service.unsubscribe_events(stream)
 
 
 async def run_task(service: Any, task_input: str, log_path: Path) -> Any:
-    run = service.runtime.create_run("avatar", task_input)
+    run = await service.submit_run("avatar", task_input, wait=False)
     logger = asyncio.create_task(log_stream(service, run.id, log_path))
-    try:
-        finished = await service.submit_run("avatar", task_input, wait=True)
-    finally:
-        with contextlib.suppress(asyncio.CancelledError):
-            logger.cancel()
-    return finished
+    while not run.status.is_terminal:
+        await asyncio.sleep(2)
+    with contextlib.suppress(asyncio.CancelledError):
+        await logger
+    return run
 
 
 async def main() -> None:
