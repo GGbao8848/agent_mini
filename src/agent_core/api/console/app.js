@@ -302,3 +302,190 @@ async function boot() {
 }
 
 boot();
+
+/* =============================================================== toolbox */
+
+const MCP_JSON_TEMPLATE = JSON.stringify(
+  {
+    id: "demo",
+    name: "Demo MCP",
+    transport: "streamable_http",
+    endpoint: "http://127.0.0.1:8931/mcp",
+    // stdio 传输示例：
+    // transport: "stdio",
+    // endpoint: "python examples/mcp_demo_server.py",
+    description: "通过 JSON 粘贴注册的 MCP 服务器",
+  },
+  null,
+  2,
+);
+
+function switchView(view) {
+  document.querySelectorAll("#viewTabs .tab").forEach(t =>
+    t.classList.toggle("active", t.dataset.view === view),
+  );
+  document.getElementById("newtask").classList.toggle("hidden", view !== "runs");
+  document.getElementById("approvals").classList.toggle("hidden", view !== "runs");
+  document.getElementById("mainWrap").classList.toggle("hidden", view !== "runs");
+  document.getElementById("viewToolbox").classList.toggle("hidden", view !== "toolbox");
+  if (view === "toolbox") loadToolbox();
+}
+
+async function loadToolbox() {
+  await Promise.all([loadMcpServers(), loadSkills()]);
+}
+
+/* -------------------------------------------------------- MCP servers */
+
+async function loadMcpServers() {
+  const servers = await api("/v1/mcp/servers");
+  const tools = await api("/v1/tools");
+  const el = document.getElementById("mcpList");
+  el.innerHTML = "";
+  if (!servers.length) { el.innerHTML = '<span class="muted">（尚未注册任何 MCP 服务器）</span>'; return; }
+  for (const server of servers) {
+    const toolCount = tools.filter(t => t.metadata && t.metadata.mcp_server === server.id).length;
+    const card = document.createElement("div");
+    card.className = "servercard";
+    const status = server.status === "healthy"
+      ? '<span class="badge badge-ok">已连接</span>'
+      : '<span class="badge badge-idle">未连接</span>';
+    card.innerHTML = `<div class="top"><strong>${escapeHtml(server.name)}</strong> ${status}
+        <span class="muted" style="margin-left:auto">${escapeHtml(server.transport)}</span></div>
+      <div class="meta">${escapeHtml(server.endpoint)} · ${toolCount} 个工具 · id: ${escapeHtml(server.id)}</div>
+      <div class="actions">
+        ${server.status === "healthy"
+          ? `<button class="reject" onclick="mcpAction('${server.id}', 'disconnect')">断开</button>`
+          : `<button class="approve" onclick="mcpAction('${server.id}', 'connect')">连接</button>`}
+        <button class="reject" onclick="mcpRemove('${server.id}')">删除</button>
+      </div>`;
+    el.appendChild(card);
+  }
+}
+
+async function mcpAction(serverId, action) {
+  await api(`/v1/mcp/servers/${serverId}/${action}`, {method: "POST"});
+  loadMcpServers();
+}
+
+async function mcpRemove(serverId) {
+  if (!confirm(`删除 MCP 服务器 ${serverId}？`)) return;
+  try {
+    await api(`/v1/mcp/servers/${serverId}`, {method: "DELETE"});
+  } catch (e) {
+    const detail = await e.response?.json?.().catch?.(() => null);
+    alert(detail?.error?.message || "删除失败");
+  }
+  loadMcpServers();
+}
+
+async function addMcpServer() {
+  const errEl = document.getElementById("mcpError");
+  errEl.textContent = "";
+  let payload;
+  const jsonMode = document.querySelector(".subtab.active").dataset.mode === "json";
+  try {
+    if (jsonMode) {
+      payload = JSON.parse(document.getElementById("mcpJson").value);
+    } else {
+      payload = {
+        id: val("mcpF-id"), name: val("mcpF-name"),
+        transport: val("mcpF-transport"), endpoint: val("mcpF-endpoint"),
+        auth_ref: val("mcpF-auth") || null, description: val("mcpF-desc"),
+      };
+    }
+  } catch (e) {
+    errEl.textContent = "JSON 解析失败：" + e.message;
+    return;
+  }
+  if (!payload.id || !payload.name) { errEl.textContent = "id 和 name 必填"; return; }
+  if (!["streamable_http", "stdio"].includes(payload.transport)) {
+    errEl.textContent = "transport 必须是 streamable_http 或 stdio";
+    return;
+  }
+  if (!payload.endpoint) { errEl.textContent = "endpoint 必填"; return; }
+  try {
+    await api("/v1/mcp/servers", {method: "POST", body: JSON.stringify(payload)});
+  } catch (e) {
+    errEl.textContent = "注册失败：" + e.message;
+    return;
+  }
+  document.getElementById("mcpAdd").classList.add("hidden");
+  await Promise.all([loadMcpServers(), loadAgents()]);
+}
+
+/* ------------------------------------------------------------- skills */
+
+async function loadSkills() {
+  const skills = await api("/v1/skills");
+  const el = document.getElementById("skillList");
+  el.innerHTML = "";
+  if (!skills.length) { el.innerHTML = '<span class="muted">（尚未安装任何技能）</span>'; return; }
+  for (const skill of skills) {
+    const card = document.createElement("div");
+    card.className = "servercard";
+    card.innerHTML = `<div class="top"><strong>${escapeHtml(skill.name)}</strong>
+        <span class="badge badge-idle">v${escapeHtml(skill.version)}</span>
+        <button class="reject" style="margin-left:auto" onclick="removeSkill('${escapeHtml(skill.id)}')">删除</button></div>
+      <div class="meta">${escapeHtml(skill.description || "无描述")}</div>
+      <div class="meta">路径：${escapeHtml(String(skill.path || "—"))} · id: ${escapeHtml(skill.id)}</div>`;
+    el.appendChild(card);
+  }
+}
+
+async function installSkill() {
+  const errEl = document.getElementById("skillError");
+  errEl.textContent = "";
+  const payload = {
+    id: val("sk-id"), name: val("sk-name"),
+    version: val("sk-version") || "0.1.0",
+    description: val("sk-desc"), path: val("sk-path"),
+  };
+  if (!payload.id || !payload.name || !payload.path) {
+    errEl.textContent = "id、名称、目录路径必填";
+    return;
+  }
+  try {
+    await api("/v1/skills", {method: "POST", body: JSON.stringify(payload)});
+  } catch (e) {
+    const detail = await e.response?.json?.().catch?.(() => null);
+    errEl.textContent = detail?.error?.message || "安装失败";
+    return;
+  }
+  ["sk-id", "sk-name", "sk-desc", "sk-path"].forEach(id => setValue(id, ""));
+  document.getElementById("skillAdd").classList.add("hidden");
+  loadSkills();
+}
+
+async function removeSkill(skillId) {
+  if (!confirm(`删除技能 ${skillId}？`)) return;
+  await api(`/v1/skills/${skillId}`, {method: "DELETE"});
+  loadSkills();
+}
+
+/* -------------------------------------------------------------- wiring */
+
+function val(id) { return document.getElementById(id).value.trim(); }
+function setValue(id, value) { document.getElementById(id).value = value; }
+
+document.querySelectorAll("#viewTabs .tab").forEach(tab => {
+  tab.onclick = () => switchView(tab.dataset.view);
+});
+document.getElementById("mcpAddToggle").onclick = () => {
+  const add = document.getElementById("mcpAdd");
+  add.classList.toggle("hidden");
+  if (!add.classList.contains("hidden")) {
+    const box = document.getElementById("mcpJson");
+    if (!box.value) box.value = MCP_JSON_TEMPLATE;
+  }
+};
+document.getElementById("skillAddToggle").onclick = () => {
+  document.getElementById("skillAdd").classList.toggle("hidden");
+};
+document.querySelectorAll(".subtab").forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll(".subtab").forEach(t => t.classList.toggle("active", t === tab));
+    document.getElementById("mcpJsonMode").classList.toggle("hidden", tab.dataset.mode !== "json");
+    document.getElementById("mcpFormMode").classList.toggle("hidden", tab.dataset.mode !== "form");
+  };
+});

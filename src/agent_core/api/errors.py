@@ -22,6 +22,7 @@ from agent_core.errors.exceptions import (
     PermissionDeniedError,
     RegistryError,
     RunTimeoutError,
+    SkillError,
     StateError,
     ToolInvalidArgumentsError,
     ToolTimeoutError,
@@ -32,7 +33,7 @@ _NOT_FOUND = "not found"
 
 def status_for(exc: AgentError) -> int:
     """HTTP status that best matches the domain failure class."""
-    if isinstance(exc, ToolInvalidArgumentsError):
+    if isinstance(exc, (ToolInvalidArgumentsError, SkillError)):
         return 400
     if isinstance(exc, PermissionDeniedError):
         return 403

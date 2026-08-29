@@ -99,3 +99,37 @@ main { display: grid; grid-template-columns: 360px 1fr; gap: 0; min-height: 60vh
 .k-ok { color: var(--ok); } .k-run { color: var(--run); }
 
 footer { padding: 12px 18px; color: var(--muted); font-size: 12px; }
+
+/* ------------------------------------------------------- toolbox */
+#viewToolbox { padding: 14px 18px 40px; }
+.toolbox { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 1000px) { .toolbox { grid-template-columns: 1fr; } }
+.tb-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.tb-panel h2 { display: flex; align-items: center; gap: 10px; }
+#viewTabs { display: flex; gap: 4px; background: var(--panel2); border-radius: 8px; padding: 3px; }
+#viewTabs .tab { background: transparent; border: none; color: var(--muted); padding: 6px 16px;
+  border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; }
+#viewTabs .tab.active { background: var(--accent); color: #fff; }
+.mini-btn { background: var(--panel2); color: var(--accent); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+.mini-btn:hover { border-color: var(--accent); }
+.servercard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.servercard .top { display: flex; align-items: center; gap: 8px; }
+.servercard .meta { color: var(--muted); font-size: 12px; margin: 4px 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.servercard .actions { display: flex; gap: 8px; margin-top: 6px; }
+.addcard { border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 10px;
+  display: flex; flex-direction: column; gap: 8px; }
+.subtabs { display: flex; gap: 4px; }
+.subtab { background: var(--panel2); border: none; color: var(--muted); padding: 5px 14px;
+  border-radius: 6px; cursor: pointer; font-size: 12px; }
+.subtab.active { background: var(--accent); color: #fff; font-weight: 600; }
+#mcpJson { width: 100%; background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px; font-family: "JetBrains Mono", Consolas, monospace; font-size: 12px; }
+.addcard label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.addcard input, .addcard select { flex: 1; background: var(--panel2); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+.addcard .primary { background: var(--accent); color: #fff; border: none; border-radius: 6px;
+  padding: 8px 16px; cursor: pointer; font-weight: 600; align-self: flex-start; }
+.formerr { color: var(--err); font-size: 12px; min-height: 16px; white-space: pre-wrap; }
+.hint { color: var(--muted); font-size: 12px; }
