@@ -92,12 +92,14 @@ class BudgetMiddleware(AgentMiddleware):
         return {"jump_to": "end", "messages": [AIMessage(content=message)]}
 
     def wrap_model_call(self, request: Any, handler: Any) -> Any:
-        return self._wrap(request, handler)
+        return handler(self._with_reminder(request))
 
     async def awrap_model_call(self, request: Any, handler: Any) -> Any:
-        return self._wrap(request, handler)
+        # In the async chain handler(request) is a coroutine — it must be
+        # awaited, not returned (LangChain composes handlers per contract).
+        return await handler(self._with_reminder(request))
 
-    def _wrap(self, request: Any, handler: Any) -> Any:
+    def _with_reminder(self, request: Any) -> Any:
         usage = self._usage_getter()
         if budget_verdict(usage, self._budget) == "warn" and not self._warned:
             self._warned = True
@@ -105,4 +107,4 @@ class BudgetMiddleware(AgentMiddleware):
             request = request.override(
                 system_prompt=(request.system_prompt or "") + "\n\n" + reminder
             )
-        return handler(request)
+        return request
