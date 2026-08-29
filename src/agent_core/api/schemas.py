@@ -190,7 +190,12 @@ class SkillOut(BaseModel):
 
 
 class MCPServerCreateRequest(BaseModel):
-    """Registration payload; secrets are referenced, never sent."""
+    """Registration payload; secrets are referenced, never sent.
+
+    ``metadata`` carries per-server connection extras: ``headers`` for http
+    transports, ``env`` for stdio processes (imported from standard
+    mcpServers configs).
+    """
 
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -199,6 +204,7 @@ class MCPServerCreateRequest(BaseModel):
     transport: MCPTransport
     endpoint: str = ""
     auth_ref: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class MCPServerOut(BaseModel):

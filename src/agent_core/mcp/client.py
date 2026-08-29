@@ -62,9 +62,7 @@ async def open_sdk_session(
     """
     if definition.transport is MCPTransport.STDIO:
         command = shlex.split(definition.endpoint)
-        env = dict(os.environ)
-        if credential and definition.auth_ref:
-            env[definition.auth_ref] = credential
+        env = _stdio_env(definition, credential)
         async with stdio_client(
             StdioServerParameters(command=command[0], args=command[1:], env=env)
         ) as (read, write), ClientSession(read, write) as session:
@@ -73,7 +71,7 @@ async def open_sdk_session(
     else:
         # mcp 2.x takes a pre-configured http client for auth headers; we own
         # and close it, so it wraps outermost in the context stack.
-        http_client = create_mcp_http_client(headers=_bearer_headers(credential))
+        http_client = create_mcp_http_client(headers=_http_headers(definition, credential))
         async with http_client, streamable_http_client(
             definition.endpoint, http_client=http_client
         ) as (read, write), ClientSession(read, write) as session:
@@ -83,6 +81,23 @@ async def open_sdk_session(
 
 def _bearer_headers(credential: str | None) -> dict[str, str]:
     return {"Authorization": f"Bearer {credential}"} if credential else {}
+
+
+def _http_headers(definition: MCPServerDefinition, credential: str | None) -> dict[str, str]:
+    """Authorization for http transports: imported headers + optional credential."""
+    headers = dict(definition.metadata.get("headers") or {})
+    if credential and "Authorization" not in headers:
+        headers["Authorization"] = f"Bearer {credential}"
+    return headers
+
+
+def _stdio_env(definition: MCPServerDefinition, credential: str | None) -> dict[str, str]:
+    """Process environment for stdio servers: host env + auth_ref + imported env."""
+    env = dict(os.environ)
+    if credential and definition.auth_ref:
+        env[definition.auth_ref] = credential
+    env.update(definition.metadata.get("env") or {})
+    return env
 
 
 class _SdkSession:

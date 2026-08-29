@@ -379,36 +379,91 @@ async function mcpRemove(serverId) {
   loadMcpServers();
 }
 
+/* Normalize accepted MCP config shapes into our server definitions:
+   1. standard client config {mcpServers: {name: {command|url, args, env, headers, type}}}
+   2. array of our definitions
+   3. single our-definition object (id/name/transport/endpoint/...) */
+function normalizeMcpConfig(parsed) {
+  if (Array.isArray(parsed)) return {servers: parsed};
+  if (parsed && typeof parsed === "object" && parsed.mcpServers) {
+    const servers = [];
+    for (const [key, cfg] of Object.entries(parsed.mcpServers)) {
+      const converted = convertStdEntry(key, cfg);
+      if (converted.error) return converted;
+      servers.push(converted.server);
+    }
+    return {servers};
+  }
+  if (parsed && typeof parsed === "object" && (parsed.id || parsed.command || parsed.url)) {
+    const converted = convertStdEntry(parsed.id || parsed.name || "mcp-server", parsed);
+    return converted.error ? converted : {servers: [converted.server]};
+  }
+  return {error: "无法识别的格式：支持标准 {mcpServers:{…}} 配置，或包含 id/name/transport/endpoint 的定义"};
+}
+
+function convertStdEntry(key, cfg) {
+  if (!cfg || typeof cfg !== "object") {
+    return {error: `mcpServers.${key} 不是对象`};
+  }
+  const metadata = {};
+  if (cfg.env && typeof cfg.env === "object") metadata.env = cfg.env;
+  if (cfg.headers && typeof cfg.headers === "object") metadata.headers = cfg.headers;
+  if (cfg.command) {
+    return {server: {
+      id: cfg.id || key, name: cfg.name || key, transport: "stdio",
+      endpoint: [cfg.command, ...(cfg.args || [])].join(" "),
+      description: cfg.description || "", metadata,
+    }};
+  }
+  if (cfg.url) {
+    return {server: {
+      id: cfg.id || key, name: cfg.name || key, transport: "streamable_http",
+      endpoint: cfg.url, description: cfg.description || "", metadata,
+    }};
+  }
+  return {error: `mcpServers.${key}：需要 command（stdio）或 url（http/sse）字段`};
+}
+
 async function addMcpServer() {
   const errEl = document.getElementById("mcpError");
   errEl.textContent = "";
-  let payload;
-  const jsonMode = document.querySelector(".subtab.active").dataset.mode === "json";
+  let servers;
+  const jsonMode = document.getElementById("mcpJsonMode").classList.contains("hidden") === false;
   try {
     if (jsonMode) {
-      payload = JSON.parse(document.getElementById("mcpJson").value);
+      const parsed = JSON.parse(document.getElementById("mcpJson").value);
+      const normalized = normalizeMcpConfig(parsed);
+      if (normalized.error) { errEl.textContent = normalized.error; return; }
+      servers = normalized.servers;
     } else {
-      payload = {
+      servers = [{
         id: val("mcpF-id"), name: val("mcpF-name"),
         transport: val("mcpF-transport"), endpoint: val("mcpF-endpoint"),
         auth_ref: val("mcpF-auth") || null, description: val("mcpF-desc"),
-      };
+      }];
     }
   } catch (e) {
     errEl.textContent = "JSON 解析失败：" + e.message;
     return;
   }
-  if (!payload.id || !payload.name) { errEl.textContent = "id 和 name 必填"; return; }
-  if (!["streamable_http", "stdio"].includes(payload.transport)) {
-    errEl.textContent = "transport 必须是 streamable_http 或 stdio";
-    return;
+  for (const payload of servers) {
+    if (!payload.id || !payload.name) {
+      errEl.textContent = "缺少必填字段 id / name（收到字段：" + JSON.stringify(Object.keys(payload)) + "）";
+      return;
+    }
+    if (!["streamable_http", "stdio"].includes(payload.transport)) {
+      errEl.textContent = `${payload.id}: transport 必须是 streamable_http 或 stdio`;
+      return;
+    }
+    if (!payload.endpoint) { errEl.textContent = `${payload.id}: endpoint 必填`; return; }
   }
-  if (!payload.endpoint) { errEl.textContent = "endpoint 必填"; return; }
-  try {
-    await api("/v1/mcp/servers", {method: "POST", body: JSON.stringify(payload)});
-  } catch (e) {
-    errEl.textContent = "注册失败：" + e.message;
-    return;
+  for (const payload of servers) {
+    try {
+      await api("/v1/mcp/servers", {method: "POST", body: JSON.stringify(payload)});
+    } catch (e) {
+      errEl.textContent = `注册 ${payload.id} 失败：` + e.message;
+      return;
+    }
   }
   document.getElementById("mcpAdd").classList.add("hidden");
   await Promise.all([loadMcpServers(), loadAgents()]);

@@ -81,7 +81,7 @@
         </div>
         <div id="mcpJsonMode">
           <textarea id="mcpJson" rows="10" spellcheck="false"></textarea>
-          <div class="hint">粘贴完整定义；transport 只能是 streamable_http 或 stdio。凭据只填 auth_ref 引用名，密钥在服务器环境变量里。</div>
+          <div class="hint">支持两种格式：① 标准 mcpServers 配置（Claude Desktop / Cherry Studio 同款，type 可写 http/sse/stdio，支持 headers 与 env）；② 本系统定义 {id, name, transport, endpoint}。凭据可放 headers/env，或用 auth_ref 引用服务器环境变量。</div>
         </div>
         <div id="mcpFormMode" class="hidden">
           <label>id <input id="mcpF-id"></label>

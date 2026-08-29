@@ -317,3 +317,48 @@ class TestMcpRemoveApi:
         assert removed.status_code == 200
         assert (await client.get("/v1/mcp/servers/demo")).status_code == 404
         await client.aclose()
+
+
+class TestMcpMetadataAndStd:
+    async def test_create_with_metadata_persists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = toolbox_client(tmp_path, monkeypatch)
+        created = await client.post("/v1/mcp/servers", json={
+            "id": "mem0", "name": "mem0", "transport": "streamable_http",
+            "endpoint": "https://mcp.mem0.ai/mcp/",
+            "metadata": {"headers": {"Authorization": "Token abc"}},
+        })
+        assert created.status_code == 201
+        assert created.json()["metadata"]["headers"]["Authorization"] == "Token abc"
+        await client.aclose()
+
+    def test_http_headers_prefer_imported_and_fill_credential(self) -> None:
+        from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
+        from agent_core.mcp.client import _http_headers
+
+        definition = MCPServerDefinition(
+            id="mem0", name="mem0", transport=MCPTransport.STREAMABLE_HTTP,
+            endpoint="https://x/mcp/",
+            metadata={"headers": {"Authorization": "Token abc"}},
+        )
+        headers = _http_headers(definition, credential=None)
+        assert headers["Authorization"] == "Token abc"
+
+        # No imported header → the auth_ref credential fills in.
+        plain = MCPServerDefinition(
+            id="x", name="X", transport=MCPTransport.STREAMABLE_HTTP, endpoint="https://x"
+        )
+        assert _http_headers(plain, "sk-1")["Authorization"] == "Bearer sk-1"
+
+    def test_stdio_env_merges_host_auth_and_imported(self) -> None:
+        from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
+        from agent_core.mcp.client import _stdio_env
+
+        definition = MCPServerDefinition(
+            id="fs", name="FS", transport=MCPTransport.STDIO, endpoint="mcp-server fs",
+            metadata={"env": {"CUSTOM_VAR": "1"}},
+        )
+        env = _stdio_env(definition, credential=None)
+        assert env["CUSTOM_VAR"] == "1"
+        assert env["PATH"]  # host environment preserved
