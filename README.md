@@ -47,7 +47,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 21 | Podman Sandbox：run_code 容器内执行（仅挂载 workspace、资源上限、rootless），宿主机密钥不可达 | ✅ |
 | 22 | Agent Console：局域网 Web 控制台——Run 时间线（持久化历史+实时 SSE）、事件详情、产物预览/下载、审批面板、派任务 | ✅ |
 | 23 | 多轮对话：LangGraph checkpointer + thread_id，**任意 run 可续聊**（AsyncSqliteSaver 持久化，跨重启保留上下文） | ✅ |
-| 24 | Console 工具箱：Skills/MCP 安装与管理 UI（MCP 以 JSON 录入为主 + 表单备选），MCP 连接生命周期修复（owner-task） | ✅ |
+| 24 | Console 工具箱：Skills/MCP 安装与管理 UI（MCP 以 JSON 录入为主 + 表单备选，兼容标准 mcpServers 格式），MCP 连接生命周期修复（owner-task），Agent 工具/技能绑定（PUT /v1/agents/{id} + 工具箱面板） | ✅ |
 
 ## 快速开始
 
@@ -240,7 +240,7 @@ Console 顶部切换 **任务台 / 工具箱**。工具箱 = MCP 服务器面板
 
 两个底层修复：① MCP 连接改由**专属 owner task** 持有 SDK 会话——uvicorn 每个请求都是新任务，而 anyio 禁止跨任务退出 async 上下文，旧实现跨请求关闭会话必崩；② SqliteStore 开启跨线程访问 + 写锁（同步路由跑在线程池）。
 
-已知边界：工具箱负责注册与管理；把新装的 MCP 工具/技能**绑定到某个 agent**（改 AgentSpec）是下一步能力。
+**绑定到 Agent（工具箱闭环）**：工具箱 Agents 面板（或 `PUT /v1/agents/{id}`，传 `tools`/`skills`，省略字段保持不变）可随时把已连接 MCP 的工具与已安装技能挂到任意 agent，改动立即生效（下次 build 生效），并持久化（重启不丢）。绑定 skill 时 runtime 把技能目录**同步拷贝**到 `workspace/.skills/<agent_id>/`——DeepAgents 的技能与文件工具共用一个 backend，以 workspace 为根可同时保住文件工具的 workspace 语义、SKILL.md 的渐进披露可见性、以及技能脚本对 run_code 沙箱（workspace 挂载）的可见性。实机验证：avatar 绑定 mem0 两个工具 + demo 技能后，一轮任务内完成记忆写入（mem0_add_memory）与按 SKILL.md 格式的问候输出。
 
 ## 多轮对话（Phase 23）
 

@@ -332,7 +332,7 @@ function switchView(view) {
 }
 
 async function loadToolbox() {
-  await Promise.all([loadMcpServers(), loadSkills()]);
+  await Promise.all([loadMcpServers(), loadSkills(), loadAgentBindings()]);
 }
 
 /* -------------------------------------------------------- MCP servers */
@@ -544,3 +544,71 @@ document.querySelectorAll(".subtab").forEach(tab => {
     document.getElementById("mcpFormMode").classList.toggle("hidden", tab.dataset.mode !== "form");
   };
 });
+
+
+/* --------------------------------------------------- agent tool binding */
+
+function chip(text, onclickExpr) {
+  return `<span class="chip">${escapeHtml(text)}<a class="chipx" onclick="${onclickExpr}">×</a></span>`;
+}
+
+async function loadAgentBindings() {
+  const [agents, tools, skills] = await Promise.all([
+    api("/v1/agents"), api("/v1/tools"), api("/v1/skills"),
+  ]);
+  const el = document.getElementById("agentBindList");
+  el.innerHTML = "";
+  if (!agents.length) { el.innerHTML = '<span class="muted">（无 agent）</span>'; return; }
+  const toolOptions = tools.map(t =>
+    `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join("");
+  const skillOptions = skills.map(s =>
+    `<option value="${escapeHtml(s.id)}">${escapeHtml(s.id)} v${escapeHtml(s.version)}</option>`).join("");
+  for (const agent of agents) {
+    const card = document.createElement("div");
+    card.className = "servercard";
+    const toolChips = agent.tools.map(t =>
+      chip(t, `unbindBinding('${agent.id}', 'tools', '${escapeHtml(t)}')`)).join("")
+      || '<span class="muted">无</span>';
+    const skillChips = agent.skills.map(s =>
+      chip(s, `unbindBinding('${agent.id}', 'skills', '${escapeHtml(s)}')`)).join("")
+      || '<span class="muted">无</span>';
+    card.innerHTML = `
+      <div class="top"><strong>${escapeHtml(agent.id)}</strong>
+        <span class="muted">${escapeHtml(agent.name)}</span></div>
+      <div class="bindrow"><span class="muted">工具</span><div class="chips">${toolChips}</div></div>
+      <div class="bindrow"><span class="muted">添加</span>
+        <select id="bindtool-${escapeHtml(agent.id)}">${toolOptions}</select>
+        <button class="mini-btn" onclick="addBinding('${agent.id}', 'tools')">+</button></div>
+      <div class="bindrow"><span class="muted">技能</span><div class="chips">${skillChips}</div></div>
+      <div class="bindrow"><span class="muted">添加</span>
+        <select id="bindskill-${escapeHtml(agent.id)}">${skillOptions}</select>
+        <button class="mini-btn" onclick="addBinding('${agent.id}', 'skills')">+</button></div>
+      <div class="bindresult" id="binderr-${escapeHtml(agent.id)}"></div>`;
+    el.appendChild(card);
+  }
+}
+
+async function addBinding(agentId, kind) {
+  const errEl = document.getElementById(`binderr-${agentId}`);
+  errEl.textContent = "";
+  const select = document.getElementById(`bind${kind}-${agentId}`);
+  const value = select.value;
+  if (!value) return;
+  const agent = await api(`/v1/agents/${agentId}`);
+  const list = agent[kind];
+  const updated = list.includes(value) ? list : [...list, value];
+  if (updated.length === list.length) return;
+  await api(`/v1/agents/${agentId}`, {
+    method: "PUT", body: JSON.stringify({[kind]: updated}),
+  });
+  loadAgentBindings();
+}
+
+async function unbindBinding(agentId, kind, value) {
+  const agent = await api(`/v1/agents/${agentId}`);
+  await api(`/v1/agents/${agentId}`, {
+    method: "PUT",
+    body: JSON.stringify({[kind]: agent[kind].filter(v => v !== value)}),
+  });
+  loadAgentBindings();
+}

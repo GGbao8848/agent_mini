@@ -23,12 +23,19 @@ def make_builder(
     agents: AgentRegistry | None = None,
     tools: ToolRegistry | None = None,
     skills: SkillRegistry | None = None,
+    workspace: Path | None = None,
 ) -> AgentBuilder:
+    settings = None
+    if workspace is not None:
+        from agent_core.config.settings import Settings
+
+        settings = Settings(_env_file=None, workspace_dir=str(workspace))
     return AgentBuilder(
         agents or AgentRegistry(),
         tools or ToolRegistry(),
         skills or SkillRegistry(),
         model_factory=stub_model_factory,
+        settings=settings,
     )
 
 
@@ -102,30 +109,40 @@ class TestBuild:
 
         assert hasattr(graph, "ainvoke")
 
-    def test_skills_resolve_to_disk_backend(self, tmp_path: Path) -> None:
+    def test_skills_stage_into_workspace_backend(self, tmp_path: Path) -> None:
         skills_root = tmp_path / "skills"
         skill_dir = skills_root / "web-research"
         skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Web Research")
         skills = SkillRegistry()
         skills.register(SkillManifest(id="web-research", name="Web Research", path=skill_dir))
-        builder = make_builder(skills=skills)
+        workspace = tmp_path / "workspace"
+        builder = make_builder(skills=skills, workspace=workspace)
 
-        graph = builder.build(base_spec(skills=["web-research"]))
+        spec = base_spec(skills=["web-research"])
+        graph = builder.build(spec)
 
         assert hasattr(graph, "ainvoke")
+        # Staged under the workspace (not re-rooted there): file tools keep
+        # workspace-rooted behavior while skills stay backend-readable.
+        staged = workspace / ".skills" / "orchestrator" / "web-research" / "SKILL.md"
+        assert staged.is_file()
+        kwargs = builder._backend_kwargs(spec)
+        assert kwargs["backend"].cwd == workspace.resolve()
+        assert kwargs["skills"] == [".skills/orchestrator"]
 
-    def test_skill_without_path_raises(self) -> None:
+    def test_skill_without_path_raises(self, tmp_path: Path) -> None:
         skills = SkillRegistry()
         skills.register(SkillManifest(id="floating", name="Floating"))
-        builder = make_builder(skills=skills)
+        builder = make_builder(skills=skills, workspace=tmp_path / "workspace")
 
         with pytest.raises(SkillError):
             builder.build(base_spec(skills=["floating"]))
 
-    def test_skill_with_missing_directory_raises(self) -> None:
+    def test_skill_with_missing_directory_raises(self, tmp_path: Path) -> None:
         skills = SkillRegistry()
         skills.register(SkillManifest(id="gone", name="Gone", path=Path("/nonexistent/skill")))
-        builder = make_builder(skills=skills)
+        builder = make_builder(skills=skills, workspace=tmp_path / "workspace")
 
         with pytest.raises(SkillError):
             builder.build(base_spec(skills=["gone"]))

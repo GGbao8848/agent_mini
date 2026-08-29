@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent_core.domain.action import ApprovalRequest, ApprovalStatus
+from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition
 from agent_core.domain.task import Run
 from agent_core.domain.trace import EventType, TraceEvent
@@ -136,6 +137,27 @@ class AgentCoreService:
             edited_arguments=edited_arguments,
             note=note,
         )
+
+    def update_agent(
+        self, agent_id: str, *, tools: list[str] | None = None, skills: list[str] | None = None
+    ) -> AgentSpec:
+        """Update an agent's tool/skill binding; takes effect on the next run.
+
+        Skills are validated against the Skill Registry. Tools are not — MCP
+        tools exist only while their server is connected — but a run with an
+        unregistered tool fails fast with a clear error.
+        """
+        spec = self.runtime.agents.get(agent_id)
+        update: dict[str, Any] = {}
+        if tools is not None:
+            update["tools"] = tools
+        if skills is not None:
+            for skill_id in skills:
+                self.runtime.skills.get(skill_id)  # 404 on unknown skills
+            update["skills"] = skills
+        updated = spec.model_copy(update=update)
+        self.runtime.agents.replace(updated)
+        return updated
 
     # -------------------------------------------------------------------- mcp
 

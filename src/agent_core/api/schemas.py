@@ -113,6 +113,13 @@ class ApprovalOut(BaseModel):
         return cls.model_validate(request)
 
 
+class AgentUpdateRequest(BaseModel):
+    """Editable agent fields (tool/skill binding); omitted fields keep values."""
+
+    tools: list[str] | None = None
+    skills: list[str] | None = None
+
+
 class AgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

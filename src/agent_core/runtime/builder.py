@@ -7,7 +7,7 @@ DeepAgents keeps owning the delegation loop, skills and HITL machinery.
 
 from __future__ import annotations
 
-import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -90,18 +90,38 @@ class AgentBuilder:
         )
 
     def _backend_kwargs(self, spec: AgentSpec) -> dict[str, Any]:
-        """Root the harness file tools on the real workspace when configured.
+        """Root the harness file tools on the real workspace.
 
         With a workspace the agent's ``write_file``/``read_file``/... land on
         actual disk (contained by FilesystemBackend), which is what makes
-        ``run_code``-built artifacts (pptx, sites, images) possible. Skill
-        resolution keeps precedence: it computes its own backend root.
+        ``run_code``-built artifacts (pptx, sites, images) possible. DeepAgents
+        serves skills and file tools from ONE backend, so bound skills are
+        staged under ``.skills/<agent_id>/`` inside the workspace instead of
+        re-rooting the backend — file tools stay workspace-rooted and skill
+        scripts stay visible to the sandboxed ``run_code`` workspace mount.
         """
-        skill_kwargs = self._resolve_skills(spec.skills)
-        if skill_kwargs:
-            return skill_kwargs
         settings = self._settings or get_settings()
-        return {"backend": FilesystemBackend(root_dir=settings.workspace_dir)}
+        backend = FilesystemBackend(root_dir=settings.workspace_dir)
+        skill_source = self._stage_skills(spec, settings)
+        if skill_source is not None:
+            return {"skills": [skill_source], "backend": backend}
+        return {"backend": backend}
+
+    def _stage_skills(self, spec: AgentSpec, settings: Settings) -> str | None:
+        """Copy bound skills into the workspace; return their backend source."""
+        if not spec.skills:
+            return None
+        stage_root = Path(settings.workspace_dir) / ".skills" / spec.id
+        if stage_root.exists():
+            shutil.rmtree(stage_root)
+        for skill_id in spec.skills:
+            source = self._resolve_skill_path(skill_id)
+            shutil.copytree(
+                source,
+                stage_root / skill_id,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+        return f".skills/{spec.id}"
 
     def _resolve_tool(self, name: str) -> BaseTool:
         definition = self._tools.get(name)
@@ -138,16 +158,3 @@ class AgentBuilder:
                 details={"skill": skill_id},
             )
         return path
-
-    def _resolve_skills(self, skill_ids: list[str]) -> dict[str, Any]:
-        """Map skill ids to DeepAgents skill source dirs served by a disk backend."""
-        if not skill_ids:
-            return {}
-        parents = {self._resolve_skill_path(skill_id).parent for skill_id in skill_ids}
-        if len(parents) == 1:
-            parent = parents.pop()
-            root, sources = parent.parent, [parent.name]
-        else:
-            root = Path(os.path.commonpath([str(p) for p in parents]))
-            sources = sorted(p.relative_to(root).as_posix() for p in parents)
-        return {"skills": sources, "backend": FilesystemBackend(root_dir=str(root))}
