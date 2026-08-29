@@ -46,6 +46,7 @@ class AgentBuilder:
         settings: Settings | None = None,
         usage_provider: Callable[[], RunUsage | None] | None = None,
         help_tool: BaseTool | None = None,
+        checkpointer_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._agents = agents
         self._tools = tools
@@ -55,6 +56,7 @@ class AgentBuilder:
         self._tool_factory = tool_factory or make_direct_tool
         self._usage_provider = usage_provider
         self._help_tool = help_tool
+        self._checkpointer_provider = checkpointer_provider
 
     def _default_model_factory(self, model_spec: str | None) -> BaseChatModel:
         return build_model(model_spec, settings=self._settings or get_settings())
@@ -81,6 +83,8 @@ class AgentBuilder:
             subagents=[self._resolve_subagent(ref, parent_id=spec.id) for ref in spec.subagents]
             or None,
             middleware=build_middleware(spec, self._model_factory, self._usage_provider),
+            # Resolved lazily: build() runs inside a loop, construction may not.
+            checkpointer=self._checkpointer_provider() if self._checkpointer_provider else None,
             name=spec.name,
             **self._backend_kwargs(spec),
         )

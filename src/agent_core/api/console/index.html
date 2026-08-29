@@ -36,6 +36,12 @@
     <div id="detail"><span class="muted">← 从左侧选择一个 run</span></div>
     <div id="detailBody" class="hidden">
       <div id="detailHead"></div>
+      <h3>对话</h3>
+      <div id="thread"></div>
+      <div id="followup">
+        <input id="followupInput" placeholder="继续这条对话…（agent 带着全部上下文，如：把第 5 页改成……）">
+        <button onclick="sendFollowup()">发送</button>
+      </div>
       <h3>产物</h3>
       <div id="artifacts"><span class="muted">（无）</span></div>
       <h3>事件时间线</h3>

@@ -43,6 +43,10 @@ class RunUsageOut(BaseModel):
     duration_ms: float | None
 
 
+class RunMessageRequest(BaseModel):
+    input: str = Field(min_length=1)
+
+
 class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

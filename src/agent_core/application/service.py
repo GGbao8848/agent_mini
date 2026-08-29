@@ -80,6 +80,20 @@ class AgentCoreService:
     def cancel_run(self, run_id: str) -> Run:
         return self.runtime.cancel_run(run_id)
 
+    async def send_message(self, run_id: str, text: str, *, wait: bool = False) -> Run:
+        """Continue the conversation of ``run_id``'s thread with a new message.
+
+        The follow-up run replays the whole stored history, so the agent
+        continues where that run left off (change the deck, fix the file...).
+        """
+        original = self.get_run(run_id)
+        thread = original.thread_id or original.id
+        run = self.runtime.create_run(original.agent_id, text, thread_id=thread)
+        task = self.runtime.submit_run(run)
+        if wait:
+            await task
+        return run
+
     def task_input(self, run_id: str) -> str:
         run = self.get_run(run_id)
         return self.runtime.task_input(run)

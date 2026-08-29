@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 
 from agent_core.api.deps import ServiceDep
-from agent_core.api.schemas import RunCreateRequest, RunOut
+from agent_core.api.schemas import RunCreateRequest, RunMessageRequest, RunOut
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -25,6 +25,18 @@ async def create_run(
         parent_run_id=payload.parent_run_id,
         wait=wait,
     )
+    return RunOut.of(run, output=service.final_output(run.id), input=service.task_input(run.id))
+
+
+@router.post("/{run_id}/messages", response_model=RunOut, status_code=201)
+async def send_message(
+    run_id: str,
+    payload: RunMessageRequest,
+    service: ServiceDep,
+    wait: bool = Query(default=False),
+) -> RunOut:
+    """Continue a run's conversation; the agent sees the full prior history."""
+    run = await service.send_message(run_id, payload.input, wait=wait)
     return RunOut.of(run, output=service.final_output(run.id), input=service.task_input(run.id))
 
 

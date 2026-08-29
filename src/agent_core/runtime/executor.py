@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from langchain_core.messages import BaseMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from agent_core.domain.agent import AgentSpec
@@ -43,6 +44,7 @@ class AgentExecutor:
         task: Task,
         spec: AgentSpec,
         collector: UsageCollector | None = None,
+        thread_id: str | None = None,
     ) -> str:
         """Run the graph to completion and return the agent's final text.
 
@@ -63,10 +65,15 @@ class AgentExecutor:
                 )
             )
         try:
+            config: RunnableConfig = {"callbacks": callbacks}
+            if thread_id is not None:
+                # Same thread → LangGraph replays the stored conversation, so
+                # follow-up messages continue where the previous run stopped.
+                config["configurable"] = {"thread_id": thread_id}
             state = await asyncio.wait_for(
                 graph.ainvoke(
                     {"messages": [{"role": "user", "content": task.input}]},
-                    config={"callbacks": callbacks},
+                    config=config,
                 ),
                 timeout=spec.limits.timeout_seconds,
             )

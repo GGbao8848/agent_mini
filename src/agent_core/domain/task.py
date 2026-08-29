@@ -80,12 +80,18 @@ class Task(BaseModel):
 
 
 class Run(BaseModel):
-    """One execution of a task by an agent."""
+    """One execution of a task by an agent.
+
+    Root runs own a conversation ``thread_id`` (their own id by default);
+    follow-up messages reuse the thread so the agent sees the whole history.
+    Nested runs (sub-agents, verification) have no thread of their own.
+    """
 
     id: str = Field(default_factory=new_id)
     task_id: str
     agent_id: str
     parent_run_id: str | None = None
+    thread_id: str | None = None
     status: RunStatus = RunStatus.CREATED
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
