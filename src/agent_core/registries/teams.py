@@ -10,6 +10,7 @@ class TeamRegistry(BaseRegistry[TeamSpec]):
     """Teams keyed by :attr:`TeamSpec.id`."""
 
     kind = "team"
+    model_cls = TeamSpec
 
     def key_for(self, item: TeamSpec) -> str:
         return item.id

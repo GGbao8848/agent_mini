@@ -1,0 +1,189 @@
+"""SQLite persistence store: write-through mirror + startup restore.
+
+Every mutating component (registries, runtime, approval manager) keeps its
+in-memory dict as the read-side source of truth and additionally saves each
+change here, so reads stay dict-fast and never touch the database. On process
+start the facts are loaded back out of these tables: a restart then loses
+live executions (graph state and in-process wakeups cannot be serialized) but
+never the records themselves.
+
+All payloads are stored as JSON produced by pydantic ``model_dump_json`` —
+the same roundtrip convention as ``eval/baseline.py``.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+from agent_core.errors.exceptions import ConfigurationError
+
+_SQLITE_PREFIX = "sqlite:///"
+_SCHEMA_VERSION = 1
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS registry_items (
+    kind TEXT NOT NULL,
+    key TEXT NOT NULL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (kind, key)
+);
+CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS approvals (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS trace_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trace_events_run ON trace_events (run_id);
+"""
+
+
+def parse_sqlite_url(url: str) -> Path | str:
+    """Extract the database path from a ``sqlite:///`` URL.
+
+    ``sqlite:///relative.db`` → relative path, ``sqlite:////abs.db`` → absolute
+    path, ``sqlite:///:memory:`` → the literal ``:memory:``. Anything else is a
+    configuration error (Phase 16 ships SQLite only).
+    """
+    if not url.startswith(_SQLITE_PREFIX):
+        raise ConfigurationError(
+            f"Unsupported database_url '{url}': only 'sqlite:///' URLs are supported",
+            details={"database_url": url},
+        )
+    path = url[len(_SQLITE_PREFIX) :]
+    if not path:
+        raise ConfigurationError(
+            f"database_url '{url}' has no database path",
+            details={"database_url": url},
+        )
+    if path == ":memory:":
+        return path
+    return Path(path)
+
+
+def open_store(database_url: str | None) -> SqliteStore | None:
+    """Return a store for ``database_url``, or None when persistence is off."""
+    if database_url is None:
+        return None
+    return SqliteStore(database_url)
+
+
+class SqliteStore:
+    """The one place that knows the SQLite schema; callers only pass JSON."""
+
+    def __init__(self, database_url: str) -> None:
+        self._conn = sqlite3.connect(parse_sqlite_url(database_url))
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._migrate()
+
+    # ------------------------------------------------------------- lifecycle
+
+    def _migrate(self) -> None:
+        """Create the schema when missing; refuse newer databases."""
+        (version,) = self._conn.execute("PRAGMA user_version").fetchone()
+        if version > _SCHEMA_VERSION:
+            raise ConfigurationError(
+                f"Database schema v{version} is newer than this build (v{_SCHEMA_VERSION})",
+                details={"database_version": version, "code_version": _SCHEMA_VERSION},
+            )
+        if version == _SCHEMA_VERSION:
+            return
+        if version < 1:
+            self._conn.executescript(_SCHEMA)
+        self._conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    # ------------------------------------------------------------- registries
+
+    def save_item(self, kind: str, key: str, data: str) -> None:
+        self._conn.execute(
+            "INSERT INTO registry_items (kind, key, data) VALUES (?, ?, ?) "
+            "ON CONFLICT(kind, key) DO UPDATE SET data = excluded.data",
+            (kind, key, data),
+        )
+        self._conn.commit()
+
+    def delete_item(self, kind: str, key: str) -> None:
+        self._conn.execute(
+            "DELETE FROM registry_items WHERE kind = ? AND key = ?", (kind, key)
+        )
+        self._conn.commit()
+
+    def load_items(self, kind: str) -> list[tuple[str, str]]:
+        """(key, data) pairs in registration order."""
+        rows = self._conn.execute(
+            "SELECT key, data FROM registry_items WHERE kind = ? ORDER BY rowid", (kind,)
+        ).fetchall()
+        return [(key, data) for key, data in rows]
+
+    # ----------------------------------------------------------- runs / tasks
+
+    def save_task(self, task_id: str, data: str) -> None:
+        self._conn.execute(
+            "INSERT INTO tasks (id, data) VALUES (?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+            (task_id, data),
+        )
+        self._conn.commit()
+
+    def load_tasks(self) -> list[str]:
+        rows = self._conn.execute("SELECT data FROM tasks ORDER BY rowid").fetchall()
+        return [data for (data,) in rows]
+
+    def save_run(self, run_id: str, status: str, data: str) -> None:
+        self._conn.execute(
+            "INSERT INTO runs (id, status, data) VALUES (?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
+            (run_id, status, data),
+        )
+        self._conn.commit()
+
+    def load_runs(self) -> list[str]:
+        rows = self._conn.execute("SELECT data FROM runs ORDER BY rowid").fetchall()
+        return [data for (data,) in rows]
+
+    # -------------------------------------------------------------- approvals
+
+    def save_approval(self, approval_id: str, status: str, data: str) -> None:
+        self._conn.execute(
+            "INSERT INTO approvals (id, status, data) VALUES (?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
+            (approval_id, status, data),
+        )
+        self._conn.commit()
+
+    def load_approvals(self) -> list[str]:
+        rows = self._conn.execute("SELECT data FROM approvals ORDER BY rowid").fetchall()
+        return [data for (data,) in rows]
+
+    # ----------------------------------------------------------- trace events
+
+    def append_event(self, run_id: str, data: str) -> None:
+        self._conn.execute(
+            "INSERT INTO trace_events (run_id, data) VALUES (?, ?)", (run_id, data)
+        )
+        self._conn.commit()
+
+    def load_events(self) -> list[tuple[str, str]]:
+        """(run_id, data) pairs in emission order across all runs."""
+        rows = self._conn.execute(
+            "SELECT run_id, data FROM trace_events ORDER BY seq"
+        ).fetchall()
+        return [(run_id, data) for run_id, data in rows]

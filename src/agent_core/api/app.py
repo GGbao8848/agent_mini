@@ -31,6 +31,8 @@ def create_app(service: AgentCoreService | None = None) -> FastAPI:
             yield
         finally:
             await core.mcp.disconnect_all()
+            if core.store is not None:
+                core.store.close()
 
     app = FastAPI(
         title="Agent Core",

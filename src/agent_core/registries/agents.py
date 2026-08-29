@@ -10,6 +10,7 @@ class AgentRegistry(BaseRegistry[AgentSpec]):
     """Lookup table for agent definitions; the only way to obtain an AgentSpec."""
 
     kind = "agent"
+    model_cls = AgentSpec
 
     def key_for(self, item: AgentSpec) -> str:
         return item.id

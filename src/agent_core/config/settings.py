@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     model: str = "openai:gpt-4o-mini"
     model_provider: str = "openai"
 
-    # Reserved for Phase 6+ persistence; Agent Core never reads a DB directly.
+    # Optional persistence (Phase 16): set to "sqlite:///./agent_core.db" to
+    # mirror registries/runs/approvals/events into SQLite and restore on boot.
     database_url: str | None = None
 
     mcp_endpoint: str | None = None
