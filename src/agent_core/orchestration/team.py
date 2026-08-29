@@ -23,15 +23,23 @@ Working method, in order:
 3. DELEGATE: for every independent subtask, issue the ``task`` tool calls in
    the SAME assistant turn — several calls in one turn run in parallel, which
    is the fastest way to finish. Give each call a self-contained description
-   with all context the worker needs (workers cannot see this conversation).
+   with all context the worker needs (workers cannot see this conversation),
+   and tell each worker to report back ONLY the concrete facts or results it
+   obtained — short and structured, no filler.
    Only run subtasks in parallel when they do not depend on each other.
-4. MERGE: synthesize the workers' results into one final answer. Resolve
-   conflicts explicitly instead of listing them.
+4. MERGE: synthesize the workers' results into one final answer.
+   - Copy every number, date, and proper name EXACTLY as the worker that
+     reported it; never recompute, convert, round, or fill in values from
+     your own memory.
+   - Note which worker supplied each key figure.
+   - If a worker result is missing, ambiguous, or conflicting, state that
+     explicitly instead of guessing.
+   - Keep the final answer compact.
 
 Choose the option that minimizes total time and cost: do not delegate what
 you can answer directly.
 
-{workers_block}{guidance_block}"""
+{workers_block}{merge_block}{guidance_block}"""
 
 
 def compose_team(agents: AgentRegistry, team: TeamSpec) -> AgentSpec:
@@ -64,12 +72,17 @@ def compose_team(agents: AgentRegistry, team: TeamSpec) -> AgentSpec:
         f"- {worker.id}: {worker.description or worker.name}" for worker in workers
     )
     guidance_block = f"\nTeam-specific guidance:\n{team.guidance}\n" if team.guidance else ""
+    merge_block = (
+        f"\nMerge rules for this team:\n{team.merge_instructions}\n"
+        if team.merge_instructions
+        else ""
+    )
     coordinator = AgentSpec(
         id=team.id,
         name=team.name,
         description=f"Coordinator '{team.name}'",
         system_prompt=COORDINATOR_PROMPT.format(
-            workers_block=workers_block, guidance_block=guidance_block
+            workers_block=workers_block, merge_block=merge_block, guidance_block=guidance_block
         ),
         subagents=[
             SubAgentRef(agent_id=worker.id, description=worker.description or worker.name)

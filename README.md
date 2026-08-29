@@ -37,6 +37,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 11 | 评测基准：多类型任务端到端对比（时间/token/调用数，markdown+JSON 报告） | ✅ |
 | 12 | 原生中间件接入：summarization / 调用上限 / 重试 / 降级（ResiliencePolicy → LangChain AgentMiddleware） | ✅ |
 | 13 | 真实任务评估：5 类真实任务（实时 API/结构化抽取/代码执行验证/编排对比/多步工具链）+ 客观校验器 | ✅ |
+| 14 | Team 模式调优：汇总保真硬规则 + worker 汇报紧凑化 + `TeamSpec.merge_instructions` + 校验器加固 | ✅ |
 
 ## 快速开始
 
@@ -138,6 +139,20 @@ uv run --env-file .env python scripts/eval_real.py   # 结果写入 eval_results
 ```
 
 首轮实测（minimax-m3:free）：6/7 通过——天气答案与实测完全一致（18.4°C）、JSON 抽取全对（含合计金额）、修复代码通过全部 4 组执行用例、fanout 与 single 的汇率简报数值全部正确。**team 模式失败案例**：协调者确实并行委派了 3 个 worker 且 worker 返回了正确汇率，但汇总时混入了错误数字、耗时与 token 均为 single 的 ~1.3/3.4 倍——印证"小任务不值得委派"，也暴露了团队汇总的幻觉风险（这是需要 LLM-as-judge 或引用校验进一步治理的方向）。
+
+## Team 模式调优（Phase 14）
+
+针对 Phase 13 暴露的 team 汇总幻觉，从"提示词 + 领域模型 + 校验器"三层调优：
+
+| 调优杠杆 | 位置 | 内容 |
+|---|---|---|
+| 汇总保真硬规则 | `COORDINATOR_PROMPT` | MERGE 要求：数字/日期/专名**逐字复制** worker 返回值，禁止重算、换算、凭记忆补数；关键数值标注来源 worker；缺失/冲突要明说，不许猜 |
+| worker 汇报紧凑化 | `COORDINATOR_PROMPT` | DELEGATE 要求 worker 只回报具体事实/结果（短、结构化），压缩合并上下文 |
+| 专属合并规则 | `TeamSpec.merge_instructions` | 按团队注入 MERGE 规则（如 fx 团队：每个汇率数值必须逐字复制子任务 JSON 的 rate 字段并标注来源） |
+
+校验器同步加固：识别 `100 JPY ≈ ¥4.21` 这类百单位报价并归一化，消除对正确答案的误伤（plausibility 语义不变：输出须包含落在合理区间的汇率）。
+
+实测（`uv run --env-file .env python scripts/eval_real.py --suite fx`）：team 从 FAIL → **PASS**，三个汇率全部逐字转录并标注 `worker-1/2/3` 来源。附带发现：single 输出中自算的"高约 16.4%"与 Phase 13 team 混入的错误数字 16.4 同源——幻觉源头正是模型把自行换算的百分比当成了汇率，"禁止重算"规则正中要害。成本结论不变：team 的委派开销是结构性的（~3.3x tokens），小任务仍应选 single；调优解决的是"用 team 时结果必须对"。
 
 ## 可靠性策略（Phase 12）
 

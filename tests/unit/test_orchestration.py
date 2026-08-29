@@ -104,6 +104,33 @@ class TestComposeTeam:
         assert spec.system_prompt == "MY STYLE"
         assert [ref.agent_id for ref in spec.subagents] == ["w"]
 
+    def test_coordinator_prompt_demands_verbatim_merge(self) -> None:
+        agents = AgentRegistry()
+        agents.register(AgentSpec(id="w", name="W"))
+
+        spec = compose_team(agents, TeamSpec(id="team", name="T", worker_agent_ids=["w"]))
+
+        assert "EXACTLY as the worker that" in spec.system_prompt
+        assert "never recompute" in spec.system_prompt
+        assert "Merge rules for this team" not in spec.system_prompt
+
+    def test_merge_instructions_are_appended(self) -> None:
+        agents = AgentRegistry()
+        agents.register(AgentSpec(id="w", name="W"))
+
+        spec = compose_team(
+            agents,
+            TeamSpec(
+                id="team",
+                name="T",
+                worker_agent_ids=["w"],
+                merge_instructions="汇率数值必须逐字引用子任务结果",
+            ),
+        )
+
+        assert "Merge rules for this team:" in spec.system_prompt
+        assert "汇率数值必须逐字引用子任务结果" in spec.system_prompt
+
 
 class TestRunParallel:
     async def test_children_run_concurrently_with_parent_link(self) -> None:

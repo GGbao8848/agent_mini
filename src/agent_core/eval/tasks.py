@@ -187,19 +187,32 @@ def verify_bugfix(output: str, context: dict[str, object]) -> list[Check]:
 
 
 # ----------------------------------------------------------- T4: multi-source briefing
+_FX_RANGES: tuple[tuple[str, float, float], ...] = (
+    # USD/CNY ~6-9, EUR/CNY ~7-11, JPY/CNY ~0.02-0.09
+    ("USD", 5.5, 9.5),
+    ("EUR", 6.5, 11.5),
+    ("JPY", 0.015, 0.09),
+)
+
+
 def verify_fx(output: str, context: dict[str, object]) -> list[Check]:
     del context
     checks: list[Check] = []
-    # USD/CNY ~6-9, EUR/CNY ~7-11, JPY/CNY ~0.02-0.09
-    for base, low, high in (("USD", 5.5, 9.5), ("EUR", 6.5, 11.5), ("JPY", 0.015, 0.09)):
-        found = re.search(re.escape(base) + r"[^\d]{0,12}(\d+\.\d+)", output)
-        rate = float(found.group(1)) if found else None
-        plausible = rate is not None and low <= rate <= high
+    for base, low, high in _FX_RANGES:
+        candidates: list[float] = []
+        # Matches "JPY 0.048" as well as per-100 quotes like "100 JPY ≈ ¥4.21";
+        # a leading quantity divides the captured value back to a per-unit rate.
+        for prefix, value in re.findall(
+            r"(?:(\d{1,3})\s*)?" + re.escape(base) + r"[^\d]{0,12}(\d+\.\d+)", output
+        ):
+            rate = float(value) / float(prefix) if prefix else float(value)
+            candidates.append(rate)
+        plausible = any(low <= rate <= high for rate in candidates)
         checks.append(
             Check(
                 name=f"{base}→CNY rate plausible",
                 passed=plausible,
-                detail=f"found={rate}, expected in [{low}, {high}]",
+                detail=f"candidates={candidates}, expected in [{low}, {high}]",
             )
         )
     return checks

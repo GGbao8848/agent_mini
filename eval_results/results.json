@@ -1,125 +1,5 @@
 [
   {
-    "task_id": "live_weather",
-    "name": "Live weather QA (real HTTP tool)",
-    "aspects": [
-      "实时工具",
-      "单跳问答"
-    ],
-    "status": "completed",
-    "passed": true,
-    "wall_ms": 8492.917731986381,
-    "input_tokens": 6389,
-    "output_tokens": 39,
-    "total_tokens": 6428,
-    "model_calls": 2,
-    "tool_calls": 1,
-    "error": null,
-    "checks": [
-      {
-        "name": "real tool called",
-        "passed": true,
-        "detail": "1 live reading(s) captured"
-      },
-      {
-        "name": "reported temp matches live data (±3°C)",
-        "passed": true,
-        "detail": "answer=18.4°C, live=18.4°C"
-      }
-    ],
-    "output": "北京当前气温 18.4°C，天气为阴。"
-  },
-  {
-    "task_id": "orders_to_json",
-    "name": "Business text → strict JSON",
-    "aspects": [
-      "结构化抽取",
-      "指令遵循"
-    ],
-    "status": "completed",
-    "passed": true,
-    "wall_ms": 10707.258987007663,
-    "input_tokens": 3342,
-    "output_tokens": 178,
-    "total_tokens": 3520,
-    "model_calls": 1,
-    "tool_calls": 0,
-    "error": null,
-    "checks": [
-      {
-        "name": "output parses as JSON",
-        "passed": true,
-        "detail": "ok"
-      },
-      {
-        "name": "exactly 4 orders",
-        "passed": true,
-        "detail": "[{'id': 'A-1001', 'customer': '张伟', 'amount': 299, 'date': '2025-03-05', 'status': '已发货'}, {'id': 'A-1002', 'customer': "
-      },
-      {
-        "name": "all fields present",
-        "passed": true,
-        "detail": "id/customer/amount/date/status"
-      },
-      {
-        "name": "total_amount == 2236",
-        "passed": true,
-        "detail": "2236"
-      },
-      {
-        "name": "dates normalized to ISO",
-        "passed": true,
-        "detail": "YYYY-MM-DD"
-      }
-    ],
-    "output": "```json\n{\"orders\": [{\"id\": \"A-1001\", \"customer\": \"张伟\", \"amount\": 299, \"date\": \"2025-03-05\", \"status\": \"已发货\"}, {\"id\": \"A-1002\", \"customer\": \"李娜\", \"amount\": 1299, \"date\": \"2025-02-28\", \"status\": \"已取消\"}, {\"id\": \"A-1003\", \"customer\": \"王强\", \"amount\": 89, \"date\": \"2025-03-01\", \"status\": \"已签收\"}, {\"id\": \"A-1004\", \"customer\": \"赵敏\", \"amount\": 549, \"date\": \"2025-03-02\", \"status\": \"待修改\"}], \"total_amount\": 2236}\n```"
-  },
-  {
-    "task_id": "bugfix_code",
-    "name": "Fix an off-by-one bug (verified by execution)",
-    "aspects": [
-      "代码能力",
-      "客观验证"
-    ],
-    "status": "completed",
-    "passed": true,
-    "wall_ms": 1988.8240509899333,
-    "input_tokens": 3253,
-    "output_tokens": 104,
-    "total_tokens": 3357,
-    "model_calls": 1,
-    "tool_calls": 0,
-    "error": null,
-    "checks": [
-      {
-        "name": "fixed code executes",
-        "passed": true,
-        "detail": "ok"
-      },
-      {
-        "name": "chunk_list([1, 2, 3, 4, 5], 2)",
-        "passed": true,
-        "detail": "got=[[1, 2], [3, 4], [5]], want=[[1, 2], [3, 4], [5]]"
-      },
-      {
-        "name": "chunk_list([1, 2, 3, 4, 5, 6, 7], 3)",
-        "passed": true,
-        "detail": "got=[[1, 2, 3], [4, 5, 6], [7]], want=[[1, 2, 3], [4, 5, 6], [7]]"
-      },
-      {
-        "name": "chunk_list([], 3)",
-        "passed": true,
-        "detail": "got=[], want=[]"
-      },
-      {
-        "name": "chunk_list([1, 2], 5)",
-        "passed": true,
-        "detail": "got=[[1, 2]], want=[[1, 2]]"
-      }
-    ],
-    "output": "bug 原因：循环步长和切片末尾都多加了 1，导致每块比 `size` 多 1 个元素，最后一块会被截断。\n\n```python\ndef chunk_list(items, size):\n    \"\"\"把列表按 size 切块，例如 chunk_list([1,2,3,4,5], 2) -> [[1,2],[3,4],[5]]\"\"\"\n    return [items[i:i + size] for i in range(0, len(items), size)]\n```"
-  },
-  {
     "task_id": "fx_briefing",
     "name": "Multi-source FX briefing (orchestration comparison)",
     "aspects": [
@@ -130,10 +10,10 @@
     ],
     "status": "completed",
     "passed": true,
-    "wall_ms": 11450.518378987908,
-    "input_tokens": 6560,
-    "output_tokens": 222,
-    "total_tokens": 6782,
+    "wall_ms": 12472.621991008054,
+    "input_tokens": 6567,
+    "output_tokens": 240,
+    "total_tokens": 6807,
     "model_calls": 2,
     "tool_calls": 3,
     "error": null,
@@ -141,20 +21,20 @@
       {
         "name": "USD→CNY rate plausible",
         "passed": true,
-        "detail": "found=6.7209, expected in [5.5, 9.5]"
+        "detail": "candidates=[6.7209, 16.4], expected in [5.5, 9.5]"
       },
       {
         "name": "EUR→CNY rate plausible",
         "passed": true,
-        "detail": "found=7.8251, expected in [6.5, 11.5]"
+        "detail": "candidates=[7.8251], expected in [6.5, 11.5]"
       },
       {
         "name": "JPY→CNY rate plausible",
         "passed": true,
-        "detail": "found=0.04209, expected in [0.015, 0.09]"
+        "detail": "candidates=[0.04209], expected in [0.015, 0.09]"
       }
     ],
-    "output": "# 主要货币兑人民币汇率简报\n\n**数据日期：2026-08-28**\n\n| 货币 | 兑 CNY 汇率 |\n|------|------------|\n| 美元 USD | 6.7209 |\n| 欧元 EUR | 7.8251 |\n| 日元 JPY | 0.04209（100 日元 ≈ 4.21 元人民币） |\n\n**趋势提示：** 当前人民币对美元和日元相对走强（汇率数值低于欧元），欧元仍为三者中最贵；近期需关注美联储与欧央行政策动向对汇率的进一步影响。"
+    "output": "数据已获取（日期：2026-08-28），简报如下：\n\n## 主要货币兑人民币汇率简报\n\n| 货币 | 汇率（1 单位 = CNY） |\n|---|---|\n| **美元 USD** | 6.7209 |\n| **欧元 EUR** | 7.8251 |\n| **日元 JPY** | 0.04209 |\n\n**趋势提示：** 欧元兑人民币显著强于美元（EUR/CNY 比 USD/CNY 高约 16.4%），日元兑人民币仍处于低位区间；整体来看人民币对欧元相对偏弱、对日元相对偏强，对美元居中。"
   },
   {
     "task_id": "fx_briefing",
@@ -166,99 +46,31 @@
       "team"
     ],
     "status": "completed",
-    "passed": false,
-    "wall_ms": 14643.476745986845,
-    "input_tokens": 22200,
-    "output_tokens": 787,
-    "total_tokens": 22987,
+    "passed": true,
+    "wall_ms": 17565.45955396723,
+    "input_tokens": 22259,
+    "output_tokens": 488,
+    "total_tokens": 22747,
     "model_calls": 8,
     "tool_calls": 6,
     "error": null,
     "checks": [
       {
         "name": "USD→CNY rate plausible",
-        "passed": false,
-        "detail": "found=16.4, expected in [5.5, 9.5]"
-      },
-      {
-        "name": "EUR→CNY rate plausible",
-        "passed": false,
-        "detail": "found=16.4, expected in [6.5, 11.5]"
-      },
-      {
-        "name": "JPY→CNY rate plausible",
-        "passed": false,
-        "detail": "found=None, expected in [0.015, 0.09]"
-      }
-    ],
-    "output": "三个 worker 已并行返回结果，日期一致（2026-08-28），数据完整。下面汇总撰写简报：\n\n---\n\n# 主要货币兑人民币汇率简报\n\n**数据日期：2026-08-28**\n\n| 货币对 | 汇率（1 单位兑 CNY） |\n|---|---|\n| **USD / CNY** | 1 美元 = **6.7209** 元人民币 |\n| **EUR / CNY** | 1 欧元 = **7.8251** 元人民币 |\n| **JPY / CNY** | 1 日元 = **0.04209** 元人民币（约 100 日元 ≈ 4.21 元） |\n\n**趋势提示：** 欧元兑人民币仍强于美元（EUR 较 USD 溢价约 16.4%），日元因单位面值较小，数值上明显低于前两者；近期人民币对三大主流货币整体保持区间波动，结汇/购汇建议关注美联储议息与中日利差动向。"
-  },
-  {
-    "task_id": "fx_briefing",
-    "name": "Multi-source FX briefing (orchestration comparison)",
-    "aspects": [
-      "编排对比",
-      "实时数据",
-      "并行",
-      "fanout"
-    ],
-    "status": "completed",
-    "passed": true,
-    "wall_ms": 12657.962068973575,
-    "input_tokens": 21087,
-    "output_tokens": 376,
-    "total_tokens": 21463,
-    "model_calls": 7,
-    "tool_calls": 3,
-    "error": null,
-    "checks": [
-      {
-        "name": "USD→CNY rate plausible",
         "passed": true,
-        "detail": "found=6.7209, expected in [5.5, 9.5]"
+        "detail": "candidates=[6.7209], expected in [5.5, 9.5]"
       },
       {
         "name": "EUR→CNY rate plausible",
         "passed": true,
-        "detail": "found=7.8251, expected in [6.5, 11.5]"
+        "detail": "candidates=[7.8251], expected in [6.5, 11.5]"
       },
       {
         "name": "JPY→CNY rate plausible",
         "passed": true,
-        "detail": "found=0.04209, expected in [0.015, 0.09]"
+        "detail": "candidates=[0.04209], expected in [0.015, 0.09]"
       }
     ],
-    "output": "## 汇率简报（日期：2026-08-28）\n\n| 货币 | 兑 CNY 汇率 |\n|------|-------------|\n| **USD（美元）** | 1 USD = 6.7209 CNY |\n| **EUR（欧元）** | 1 EUR = 7.8251 CNY |\n| **JPY（日元）** | 1 JPY = 0.04209 CNY |\n\n**趋势提示**：当日欧元兑人民币（7.8251）> 美元兑人民币（6.7209）> 日元兑人民币（0.04209），美元保持主要储备货币地位，欧元小幅强于美元，日元受低利率政策影响持续走弱，人民币对三种货币整体呈现稳中偏强态势。"
-  },
-  {
-    "task_id": "holiday_planner",
-    "name": "Holiday planning with tool chain + calculator",
-    "aspects": [
-      "多步规划",
-      "工具链",
-      "计算"
-    ],
-    "status": "completed",
-    "passed": true,
-    "wall_ms": 8611.646380042657,
-    "input_tokens": 10020,
-    "output_tokens": 425,
-    "total_tokens": 10445,
-    "model_calls": 3,
-    "tool_calls": 2,
-    "error": null,
-    "checks": [
-      {
-        "name": "mentions a real 2026 holiday",
-        "passed": true,
-        "detail": "keyword search"
-      },
-      {
-        "name": "gives a concrete day count",
-        "passed": true,
-        "detail": "'N 天' pattern"
-      }
-    ],
-    "output": "## 2026年10月拼假方案\n\n**10月法定假日**：仅10月1日（国庆节）1天。\n\n**拼连休方案（用5天年假）**：\n\n10月1日是周四，最优方案是**向两端延伸**，形成长假：\n\n| 日期 | 星期 | 性质 |\n|------|------|------|\n| 9月30日 | 周三 | 年假 |\n| 10月1日 | 周四 | 国庆节 |\n| 10月2日 | 周五 | 年假 |\n| 10月3日 | 周六 | 周末 |\n| 10月4日 | 周日 | 周末 |\n| 10月5日 | 周一 | 年假 |\n| 10月6日 | 周二 | 年假 |\n| 10月7日 | 周三 | 年假 |\n| 10月8日 | 周四 | 年假 |\n| 10月9日 | 周五 | 正常上班 |\n\n**结果**：从 9月30日（周三）到 10月9日（周五），**连休 10 天**，仅消耗 5 天年假 + 1 天法定假日 + 4 天周末（3天调休的常规国庆3天假这里取理想情形）。\n\n> 注：实际连休长度取决于当年官方发布的国庆调休安排。若按基础\"1天法定假+前后2个周末\"算，国庆本身通常3天连休；拼5天年假最多可形成 **10天超级连休**。"
+    "output": "# USD / EUR / JPY 兑 CNY 汇率简报\n\n**最新汇率（基准货币 → CNY）：**\n\n| 货币对 | 汇率 | 来源 |\n|---|---|---|\n| USD → CNY | 6.7209 | worker-1 |\n| EUR → CNY | 7.8251 | worker-2 |\n| JPY → CNY | 0.04209 | worker-3 |\n\n**趋势提示：** 人民币对美元保持相对稳定，对日元仍处于强势区间（1 日元仅约 0.04 元），对欧元则小幅承压；建议持续关注美联储与日银政策动向对跨境结算的影响。"
   }
 ]
