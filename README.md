@@ -43,6 +43,8 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 17 | 自治与预算治理：RunBudget 硬上限、循环/无进展检测、NEEDS_INPUT 任务级求助、执行后自检自修回路 | ✅ |
 | 18 | 本地模型接入（`local:` provider，任意 OpenAI 兼容端点）+ 多模态内置工具（generate_image/view_image）+ 模型能力矩阵冒烟 | ✅ |
 | 19 | 代理（`AGENT_CORE_PROXY_URL` + NO_PROXY 豁免内网服务）+ Telegram 通知渠道（telegram_notify 工具 + chat_id 引导脚本） | ✅ |
+| 20 | run_code 内置工具 + workspace 真实文件 backend + 双长任务端到端自治验证（30 页 PPT / 网页画册） | ✅ |
+| 21 | Podman Sandbox：run_code 容器内执行（仅挂载 workspace、资源上限、rootless），宿主机密钥不可达 | ✅ |
 
 ## 快速开始
 
@@ -205,6 +207,25 @@ AGENT_CORE_NO_PROXY=10.10.10.146,10.10.10.169   # 内网服务（本地模型/�
 | 首次绑定 | `uv run --env-file .env python scripts/smoke_telegram.py`：getMe 验证 token → 轮询 getUpdates 发现你的 chat_id（自动写入 .env）→ 发送测试消息 |
 | Agent 工具 | 内置 `telegram_notify(message)`：配置齐全后自动注册，agent 在 `spec.tools` 里声明即可给主人发消息，照常走 Action Gate |
 | 实现 | `agent_core/notify/telegram.py`：httpx `trust_env` 自动走进程代理；网络错误为 retryable `ToolError` |
+
+## Podman Sandbox（Phase 21）
+
+"分身"技术栈的三层边界从此完整：
+
+```text
+Runtime（大脑：决策/治理/自检）  → 已成熟
+Workspace（工作台：文件视图）    → Phase 20，锁定在 workspace/
+Sandbox（执行隔离：代码跑在哪）  → Phase 21，rootless Podman 容器
+```
+
+```bash
+AGENT_CORE_SANDBOX=podman                       # 默认 none（宿主机直跑，向后兼容）
+AGENT_CORE_SANDBOX_IMAGE=localhost/agent-core-sandbox:latest
+AGENT_CORE_SANDBOX_MEMORY_MB=2048  AGENT_CORE_SANDBOX_CPUS=2.0  AGENT_CORE_SANDBOX_PIDS_LIMIT=256
+bash scripts/sandbox_build.sh                   # 构建镜像（python:3.13-slim + pptx/Pillow/pandas + CJK 字体）
+```
+
+启用后 `run_code` 的每条命令都在容器内执行：**只有 workspace 挂载进容器**（`/work`）——宿主机的 `.env` 密钥、SSH、git 历史全部不可达；路径穿越（`/work/../..`）只到容器自己的根；内存/CPU/进程数有硬上限；代理环境变量透传（pip 装包走代理）。workspace 成为 agent 与宿主机之间的唯一交换点。已实测验证：边界四项检查全过 + 沙箱模式下真实任务（mini pptx + Telegram 汇报）端到端完成。
 
 ## 本地模型与多模态工具（Phase 18）
 

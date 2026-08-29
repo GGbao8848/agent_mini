@@ -110,3 +110,4 @@ CREATED → PLANNING → RUNNING ⇄ WAITING_APPROVAL → COMPLETED
 - **第一版不引入**：Kafka / Redis / PostgreSQL / 向量库 / 微服务，单进程可运行。
 - **持久化（Phase 16）**：可选 SQLite（标准库 `sqlite3`，WAL）作为**写穿透镜像**——内存 dict 始终是读侧唯一来源，`AGENT_CORE_DATABASE_URL` 设置后注册中心/Run/审批/Trace 事件落库并在启动时恢复；跨重启的执行恢复（LangGraph checkpointer）仍属远期。
 - **自治层（Phase 17）**：预算/循环检测/求助/自检全部是声明式的 `AgentSpec.autonomy` 纯数据 + 运行时三个挂钩点——中间件（Budget，复用原生 `jump_to end` 收尾模式）、Action Gate（LoopGuard 与 `request_help`，gate 仍是工具执行的唯一通道）、Run 收尾回路（verification 嵌套 judge run）。治理动作优先"软反馈给模型"，只在确认无进展时升级人工（`NEEDS_INPUT`），审批答复经同一 ApprovalManager 通道回流。
+- **Sandbox（Phase 21）**：`run_code` 支持 podman 后端（`AGENT_CORE_SANDBOX=podman`）——rootless 容器仅挂载 workspace、资源受限、代理透传，宿主机密钥与文件系统不可达；workspace 是 agent 与宿主机的唯一交换点。自定义中间件必须同时实现 sync 与 async 钩子（运行时全 async，LangChain 无回退）。已知缺口：deepagents 文件工具（write_file 等）未纳入 Gate/事件系统，按路径约束在 workspace 内，远期收编到 SandboxBackendProtocol。
