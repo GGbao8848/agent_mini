@@ -123,7 +123,7 @@ def make_generate_image(settings: Settings) -> tuple[ToolDefinition, Any]:
             },
             "required": ["prompt"],
         },
-        metadata={"builtin": True, "endpoint": base_url},
+        metadata={"builtin": True, "endpoint": base_url, "timeout_seconds": 300},
     )
     return definition, generate_image
 

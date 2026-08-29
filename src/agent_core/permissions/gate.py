@@ -24,7 +24,7 @@ from agent_core.domain.action import Action, ActionStatus, ApprovalKind, Approva
 from agent_core.domain.autonomy import LoopGuardPolicy
 from agent_core.domain.permission import PermissionDecision
 from agent_core.domain.task import Run, RunStatus
-from agent_core.domain.tool import adapt_handler_arguments
+from agent_core.domain.tool import ToolDefinition, adapt_handler_arguments
 from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import (
     AgentError,
@@ -107,13 +107,13 @@ class ActionGate:
             arguments = await self._request_approval(run, action, arguments)
 
         if guard_policy is None or self._loop_guard is None:
-            return await self._execute(run, action, handler, arguments)
+            return await self._execute(run, action, definition, handler, arguments)
         # Soft-failure mode: tool errors become messages the model can react
         # to, with the failure streak nudging/escalating before it wastes more
         # calls. Without a loop guard the historical fail-closed applies.
         self._loop_guard.record_called(run.id, tool_name, arguments)
         try:
-            result = await self._execute(run, action, handler, arguments)
+            result = await self._execute(run, action, definition, handler, arguments)
         except AgentError as exc:
             failures = self._loop_guard.record_result(run.id, ok=False)
             if failures >= guard_policy.max_consecutive_failures:
@@ -253,7 +253,12 @@ class ActionGate:
         return arguments
 
     async def _execute(
-        self, run: Run, action: Action, handler: ToolHandler, arguments: dict[str, Any]
+        self,
+        run: Run,
+        action: Action,
+        definition: ToolDefinition,
+        handler: ToolHandler,
+        arguments: dict[str, Any],
     ) -> Any:
         action.status = ActionStatus.EXECUTING
         self._fanout.emit(
@@ -265,7 +270,13 @@ class ActionGate:
         )
         started = time.monotonic()
         try:
-            result = await self._executor.execute(action.tool_name, handler, arguments)
+            # A tool can declare its own execution budget via metadata
+            # ("timeout_seconds") — image generation and code runs legitimately
+            # exceed the executor's 60s default.
+            timeout = definition.metadata.get("timeout_seconds")
+            result = await self._executor.execute(
+                action.tool_name, handler, arguments, timeout_seconds=timeout
+            )
         except AgentError as exc:
             action.status = ActionStatus.FAILED
             action.error = exc.message

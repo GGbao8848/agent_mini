@@ -97,7 +97,12 @@ def make_run_code(settings: Settings) -> tuple[ToolDefinition, Any]:
             },
             "required": ["command"],
         },
-        metadata={"builtin": True, "workspace": str(workspace)},
+        metadata={
+            "builtin": True,
+            "workspace": str(workspace),
+            # Above the handler's own 900s cap so the handler's timeout wins.
+            "timeout_seconds": 920.0,
+        },
     )
     return definition, run_code
 
