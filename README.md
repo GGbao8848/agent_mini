@@ -47,6 +47,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 21 | Podman Sandbox：run_code 容器内执行（仅挂载 workspace、资源上限、rootless），宿主机密钥不可达 | ✅ |
 | 22 | Agent Console：局域网 Web 控制台——Run 时间线（持久化历史+实时 SSE）、事件详情、产物预览/下载、审批面板、派任务 | ✅ |
 | 23 | 多轮对话：LangGraph checkpointer + thread_id，**任意 run 可续聊**（AsyncSqliteSaver 持久化，跨重启保留上下文） | ✅ |
+| 24 | Console 工具箱：Skills/MCP 安装与管理 UI（MCP 以 JSON 录入为主 + 表单备选），MCP 连接生命周期修复（owner-task） | ✅ |
 
 ## 快速开始
 
@@ -228,6 +229,18 @@ bash scripts/sandbox_build.sh                   # 构建镜像（python:3.13-sli
 ```
 
 启用后 `run_code` 的每条命令都在容器内执行：**只有 workspace 挂载进容器**（`/work`）——宿主机的 `.env` 密钥、SSH、git 历史全部不可达；路径穿越（`/work/../..`）只到容器自己的根；内存/CPU/进程数有硬上限；代理环境变量透传（pip 装包走代理）。workspace 成为 agent 与宿主机之间的唯一交换点。已实测验证：边界四项检查全过 + 沙箱模式下真实任务（mini pptx + Telegram 汇报）端到端完成。
+
+## 工具箱：Skills / MCP 安装与管理（Phase 24）
+
+Console 顶部切换 **任务台 / 工具箱**。工具箱 = MCP 服务器面板 + Skills 面板，注册表已持久化（重启不丢）。
+
+**MCP（JSON 优先）**：添加服务器默认是 JSON 粘贴框（含模板与校验：transport 只允许 `streamable_http`/`stdio`），表单模式为备选。列表页有状态徽章、连接/断开/删除按钮、发现的工具计数。凭据只存 `auth_ref` 引用名，连接时从服务器环境变量解析，密钥不过前端。
+
+**Skills**：安装 = 把技能目录（内含 `SKILL.md`）放到服务器磁盘后，在表单里登记路径；列表可查看版本与路径、可删除。
+
+两个底层修复：① MCP 连接改由**专属 owner task** 持有 SDK 会话——uvicorn 每个请求都是新任务，而 anyio 禁止跨任务退出 async 上下文，旧实现跨请求关闭会话必崩；② SqliteStore 开启跨线程访问 + 写锁（同步路由跑在线程池）。
+
+已知边界：工具箱负责注册与管理；把新装的 MCP 工具/技能**绑定到某个 agent**（改 AgentSpec）是下一步能力。
 
 ## 多轮对话（Phase 23）
 
