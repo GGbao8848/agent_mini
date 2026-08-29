@@ -2,6 +2,7 @@
 
 import os
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,9 @@ class _StubBuilder:
         return self._Graph()
 
 
-def make_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AgentCoreService:
+def make_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mcp_opener: Any = None
+) -> AgentCoreService:
     """Real service with a stub graph; workspace rooted inside tmp_path."""
     monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()
@@ -44,9 +47,35 @@ def make_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AgentCoreSe
     runtime = AgentRuntime(agents, ToolRegistry(), SkillRegistry(), tracer=tracer,
                            builder=_StubBuilder())
     mcp_registry = MCPRegistry()
-    mcp = MCPManager(mcp_registry, ToolRegistry(), credentials=None)
+    mcp = MCPManager(mcp_registry, ToolRegistry(), credentials=None, opener=mcp_opener)
     broker = EventStreamBroker(runtime.bus)
     return AgentCoreService(runtime=runtime, mcp=mcp, mcp_registry=mcp_registry, broker=broker)
+
+
+def toolbox_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> httpx.AsyncClient:
+    """Console client whose MCP connects succeed against a fake session."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def opener(definition: Any, credential: str | None) -> AsyncIterator[Any]:
+        from agent_core.domain.tool import ToolDefinition
+
+        class FakeSession:
+            async def list_tools(self) -> list[ToolDefinition]:
+                return [
+                    ToolDefinition(
+                        name="demo_echo",
+                        description="Echo",
+                        input_schema={"type": "object"},
+                        source="mcp",
+                        metadata={"mcp_server": "demo", "mcp_tool": "echo"},
+                    )
+                ]
+
+        yield FakeSession()
+
+    service = make_service(tmp_path, monkeypatch, mcp_opener=opener)
+    return make_client(service)
 
 
 def make_client(service: AgentCoreService) -> httpx.AsyncClient:
@@ -195,4 +224,94 @@ class TestConsoleAuth:
         assert b"Agent Console" in console.content
 
         get_settings.cache_clear()
+        await client.aclose()
+
+
+class TestSkillInstallApi:
+    async def test_install_list_delete_skill(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        skill_dir = tmp_path / "skills" / "greet"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Greet")
+        client = toolbox_client(tmp_path, monkeypatch)
+
+        created = await client.post("/v1/skills", json={
+            "id": "greet", "name": "Greet", "description": "say hi",
+            "path": str(skill_dir),
+        })
+        assert created.status_code == 201
+        assert created.json()["path"].endswith("greet")
+
+        listed = await client.get("/v1/skills")
+        assert [s["id"] for s in listed.json()] == ["greet"]
+
+        removed = await client.delete("/v1/skills/greet")
+        assert removed.status_code == 200
+        assert [s["id"] for s in (await client.get("/v1/skills")).json()] == []
+        await client.aclose()
+
+    async def test_duplicate_skill_maps_to_409(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        skill_dir = tmp_path / "skills" / "greet"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Greet")
+        client = toolbox_client(tmp_path, monkeypatch)
+        payload = {"id": "greet", "name": "Greet", "path": str(skill_dir)}
+
+        assert (await client.post("/v1/skills", json=payload)).status_code == 201
+        assert (await client.post("/v1/skills", json=payload)).status_code == 409
+        await client.aclose()
+
+    async def test_missing_directory_or_skillmd_maps_to_400(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = toolbox_client(tmp_path, monkeypatch)
+
+        missing = await client.post("/v1/skills", json={
+            "id": "x", "name": "X", "path": str(tmp_path / "nope"),
+        })
+        assert missing.status_code == 400
+        assert "does not exist" in missing.json()["error"]["message"]
+
+        empty = tmp_path / "skills" / "empty"
+        empty.mkdir(parents=True)
+        no_manifest = await client.post("/v1/skills", json={
+            "id": "x", "name": "X", "path": str(empty),
+        })
+        assert no_manifest.status_code == 400
+        assert "SKILL.md" in no_manifest.json()["error"]["message"]
+        await client.aclose()
+
+
+class TestMcpRemoveApi:
+    async def test_remove_disconnected_server(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = toolbox_client(tmp_path, monkeypatch)
+        created = await client.post("/v1/mcp/servers", json={
+            "id": "demo", "name": "Demo", "transport": "streamable_http",
+            "endpoint": "http://127.0.0.1:8931/mcp",
+        })
+        assert created.status_code == 201
+
+        removed = await client.delete("/v1/mcp/servers/demo")
+        assert removed.status_code == 200
+        assert (await client.get("/v1/mcp/servers/demo")).status_code == 404
+        await client.aclose()
+
+    async def test_remove_connected_server_maps_to_409(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = toolbox_client(tmp_path, monkeypatch)
+        await client.post("/v1/mcp/servers", json={
+            "id": "demo", "name": "Demo", "transport": "streamable_http",
+            "endpoint": "http://127.0.0.1:8931/mcp",
+        })
+        await client.post("/v1/mcp/servers/demo/connect")
+
+        conflict = await client.delete("/v1/mcp/servers/demo")
+        assert conflict.status_code == 409
+        assert "disconnect" in conflict.json()["error"]["message"]
         await client.aclose()

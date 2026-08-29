@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from agent_core.api.deps import ServiceDep
 from agent_core.api.schemas import MCPServerCreateRequest, MCPServerOut
 from agent_core.domain.mcp import MCPServerDefinition
+from agent_core.errors.exceptions import StateError
 
 router = APIRouter(prefix="/mcp/servers", tags=["mcp"])
 
@@ -25,6 +26,18 @@ def list_servers(service: ServiceDep) -> list[MCPServerOut]:
 async def register_server(payload: MCPServerCreateRequest, service: ServiceDep) -> MCPServerOut:
     definition = MCPServerDefinition(**payload.model_dump())
     return MCPServerOut.of(service.register_server(definition))
+
+
+@router.delete("/{server_id}", response_model=MCPServerOut)
+def remove_server(server_id: str, service: ServiceDep) -> MCPServerOut:
+    """Remove a server definition; disconnect it first when still connected."""
+    definition = service.mcp_registry.get(server_id)
+    if definition.status.value == "healthy":
+        raise StateError(
+            f"MCP server '{server_id}' is still connected — disconnect it first",
+            details={"server_id": server_id},
+        )
+    return MCPServerOut.of(service.mcp_registry.remove(server_id))
 
 
 @router.get("/{server_id}", response_model=MCPServerOut)

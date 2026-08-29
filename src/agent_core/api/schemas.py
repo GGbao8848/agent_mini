@@ -21,6 +21,7 @@ from agent_core.domain.skill import SkillManifest
 from agent_core.domain.task import Run
 from agent_core.domain.tool import ToolDefinition
 from agent_core.domain.trace import TraceEvent
+from agent_core.errors.exceptions import SkillError
 
 # Human decisions accepted by POST /approvals/{id}/resolve.
 ApprovalDecision = Literal["approved", "rejected", "edited", "cancelled"]
@@ -145,6 +146,30 @@ class ToolOut(BaseModel):
     @classmethod
     def of(cls, definition: ToolDefinition) -> ToolOut:
         return cls.model_validate(definition)
+
+
+class SkillCreateRequest(BaseModel):
+    """Install a skill from a server-side directory containing SKILL.md."""
+
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    version: str = "0.1.0"
+    description: str = ""
+    path: str = Field(min_length=1, description="Server-side skill directory")
+
+    def validate_directory(self) -> Path:
+        directory = Path(self.path).expanduser().resolve()
+        if not directory.is_dir():
+            raise SkillError(
+                f"Skill directory does not exist: {directory}",
+                details={"skill": self.id, "path": str(directory)},
+            )
+        if not (directory / "SKILL.md").is_file():
+            raise SkillError(
+                f"'{directory}' is not a skill directory (missing SKILL.md)",
+                details={"skill": self.id, "path": str(directory)},
+            )
+        return directory
 
 
 class SkillOut(BaseModel):

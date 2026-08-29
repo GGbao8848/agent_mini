@@ -9,12 +9,18 @@ never the records themselves.
 
 All payloads are stored as JSON produced by pydantic ``model_dump_json`` —
 the same roundtrip convention as ``eval/baseline.py``.
+
+Threading: FastAPI runs sync route handlers in a worker threadpool while the
+connection is created on the main thread, so the connection opts into
+cross-thread use and a lock serializes writes (WAL keeps readers free).
 """
 
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
+from typing import Any
 
 from agent_core.errors.exceptions import ConfigurationError
 
@@ -74,7 +80,7 @@ def parse_sqlite_url(url: str) -> Path | str:
     return Path(path)
 
 
-def open_store(database_url: str | None) -> SqliteStore | None:
+def open_store(database_url: str | None) -> "SqliteStore | None":
     """Return a store for ``database_url``, or None when persistence is off."""
     if database_url is None:
         return None
@@ -85,7 +91,13 @@ class SqliteStore:
     """The one place that knows the SQLite schema; callers only pass JSON."""
 
     def __init__(self, database_url: str) -> None:
-        self._conn = sqlite3.connect(parse_sqlite_url(database_url))
+        # FastAPI runs sync route handlers in a worker threadpool while the
+        # connection is created on the main thread — cross-thread use must be
+        # opted into, and a lock serializes writes across those threads.
+        self._conn = sqlite3.connect(
+            parse_sqlite_url(database_url), check_same_thread=False
+        )
+        self._lock = threading.Lock()
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._migrate()
@@ -113,18 +125,20 @@ class SqliteStore:
     # ------------------------------------------------------------- registries
 
     def save_item(self, kind: str, key: str, data: str) -> None:
-        self._conn.execute(
-            "INSERT INTO registry_items (kind, key, data) VALUES (?, ?, ?) "
-            "ON CONFLICT(kind, key) DO UPDATE SET data = excluded.data",
-            (kind, key, data),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO registry_items (kind, key, data) VALUES (?, ?, ?) "
+                "ON CONFLICT(kind, key) DO UPDATE SET data = excluded.data",
+                (kind, key, data),
+            )
+            self._conn.commit()
 
     def delete_item(self, kind: str, key: str) -> None:
-        self._conn.execute(
-            "DELETE FROM registry_items WHERE kind = ? AND key = ?", (kind, key)
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM registry_items WHERE kind = ? AND key = ?", (kind, key)
+            )
+            self._conn.commit()
 
     def load_items(self, kind: str) -> list[tuple[str, str]]:
         """(key, data) pairs in registration order."""
@@ -136,24 +150,26 @@ class SqliteStore:
     # ----------------------------------------------------------- runs / tasks
 
     def save_task(self, task_id: str, data: str) -> None:
-        self._conn.execute(
-            "INSERT INTO tasks (id, data) VALUES (?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
-            (task_id, data),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO tasks (id, data) VALUES (?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+                (task_id, data),
+            )
+            self._conn.commit()
 
     def load_tasks(self) -> list[str]:
         rows = self._conn.execute("SELECT data FROM tasks ORDER BY rowid").fetchall()
         return [data for (data,) in rows]
 
     def save_run(self, run_id: str, status: str, data: str) -> None:
-        self._conn.execute(
-            "INSERT INTO runs (id, status, data) VALUES (?, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
-            (run_id, status, data),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO runs (id, status, data) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
+                (run_id, status, data),
+            )
+            self._conn.commit()
 
     def load_runs(self) -> list[str]:
         rows = self._conn.execute("SELECT data FROM runs ORDER BY rowid").fetchall()
@@ -162,12 +178,13 @@ class SqliteStore:
     # -------------------------------------------------------------- approvals
 
     def save_approval(self, approval_id: str, status: str, data: str) -> None:
-        self._conn.execute(
-            "INSERT INTO approvals (id, status, data) VALUES (?, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
-            (approval_id, status, data),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO approvals (id, status, data) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
+                (approval_id, status, data),
+            )
+            self._conn.commit()
 
     def load_approvals(self) -> list[str]:
         rows = self._conn.execute("SELECT data FROM approvals ORDER BY rowid").fetchall()
@@ -176,10 +193,11 @@ class SqliteStore:
     # ----------------------------------------------------------- trace events
 
     def append_event(self, run_id: str, data: str) -> None:
-        self._conn.execute(
-            "INSERT INTO trace_events (run_id, data) VALUES (?, ?)", (run_id, data)
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO trace_events (run_id, data) VALUES (?, ?)", (run_id, data)
+            )
+            self._conn.commit()
 
     def load_events(self) -> list[tuple[str, str]]:
         """(run_id, data) pairs in emission order across all runs."""

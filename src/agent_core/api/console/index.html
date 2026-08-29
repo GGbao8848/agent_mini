@@ -9,6 +9,10 @@
 <body>
 <header>
   <h1>🤖 Agent Console</h1>
+  <nav id="viewTabs">
+    <button class="tab active" data-view="runs">任务台</button>
+    <button class="tab" data-view="toolbox">工具箱</button>
+  </nav>
   <span id="conn" class="badge badge-off">connecting…</span>
   <span class="spacer"></span>
   <span id="pendingBadge" class="badge badge-warn hidden" title="待处理审批"></span>
@@ -25,6 +29,7 @@
   <div id="approvalList"><span class="muted">（空）</span></div>
 </section>
 
+<div id="mainWrap">
 <main>
   <aside id="runsPane">
     <h2>Runs 时间线</h2>
@@ -53,6 +58,54 @@
 <footer>
   <span id="footnote">workspace 是分身的持久工作区 · 产物图片可预览、其余点击下载</span>
 </footer>
+</div>
+
+<section id="viewToolbox" class="hidden">
+  <div class="toolbox">
+    <div class="tb-panel">
+      <h2>MCP 服务器 <button class="mini-btn" id="mcpAddToggle">+ 添加服务器</button></h2>
+      <div id="mcpList"><span class="muted">加载中…</span></div>
+
+      <div id="mcpAdd" class="hidden addcard">
+        <div class="subtabs">
+          <button class="subtab active" data-mode="json">JSON（推荐）</button>
+          <button class="subtab" data-mode="form">表单</button>
+        </div>
+        <div id="mcpJsonMode">
+          <textarea id="mcpJson" rows="10" spellcheck="false"></textarea>
+          <div class="hint">粘贴完整定义；transport 只能是 streamable_http 或 stdio。凭据只填 auth_ref 引用名，密钥在服务器环境变量里。</div>
+        </div>
+        <div id="mcpFormMode" class="hidden">
+          <label>id <input id="mcpF-id"></label>
+          <label>名称 <input id="mcpF-name"></label>
+          <label>transport <select id="mcpF-transport"><option value="streamable_http">streamable_http</option><option value="stdio">stdio</option></select></label>
+          <label>endpoint <input id="mcpF-endpoint" placeholder="http://host:port/mcp 或启动命令"></label>
+          <label>auth_ref <input id="mcpF-auth" placeholder="可空：服务器环境变量里的凭据引用名"></label>
+          <label>描述 <input id="mcpF-desc"></label>
+        </div>
+        <div id="mcpError" class="formerr"></div>
+        <button class="primary" onclick="addMcpServer()">导入 / 注册</button>
+      </div>
+    </div>
+
+    <div class="tb-panel">
+      <h2>Skills 技能 <button class="mini-btn" id="skillAddToggle">+ 安装技能</button></h2>
+      <div id="skillList"><span class="muted">加载中…</span></div>
+
+      <div id="skillAdd" class="hidden addcard">
+        <label>id <input id="sk-id" placeholder="my-skill"></label>
+        <label>名称 <input id="sk-name"></label>
+        <label>版本 <input id="sk-version" value="0.1.0"></label>
+        <label>描述 <input id="sk-desc"></label>
+        <label>服务器上的目录路径 <input id="sk-path" placeholder="/home/user/skills/my-skill（目录内需有 SKILL.md）"></label>
+        <div class="hint">技能目录约定：目录内放 SKILL.md（+ references/ scripts/）。文件先放到服务器磁盘，再在这里登记。绑定到 agent 属于下一步能力。</div>
+        <div id="skillError" class="formerr"></div>
+        <button class="primary" onclick="installSkill()">安装</button>
+      </div>
+    </div>
+  </div>
+</section>
+
 <script src="app.js"></script>
 </body>
 </html>
