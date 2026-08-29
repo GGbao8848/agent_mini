@@ -29,6 +29,10 @@ class UsageCollector(BaseCallbackHandler):
         """Snapshot of everything collected so far."""
         return self._usage.model_copy()
 
+    def merge(self, extra: RunUsage) -> None:
+        """Charge externally produced usage (e.g. a verification sub-run)."""
+        self._usage.add(extra)
+
     def on_chat_model_start(self, *args: Any, **kwargs: Any) -> None:
         self._usage.model_calls += 1
 

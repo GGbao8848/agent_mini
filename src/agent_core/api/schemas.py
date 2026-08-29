@@ -70,6 +70,8 @@ class ApprovalResolveRequest(BaseModel):
     decision: ApprovalDecision
     resolved_by: str = Field(default="user", min_length=1)
     edited_arguments: dict[str, Any] | None = None
+    # Human's answer for task-help requests; fed back to the agent as guidance.
+    note: str | None = None
 
     @model_validator(mode="after")
     def _edited_requires_arguments(self) -> ApprovalResolveRequest:
@@ -84,16 +86,19 @@ class ApprovalOut(BaseModel):
     id: str
     run_id: str
     agent_id: str
-    action_id: str
-    tool_name: str
+    kind: str
+    action_id: str | None
+    tool_name: str | None
     arguments: dict[str, Any]
     risk_level: str
+    question: str
     reason: str
     status: str
     created_at: Any
     resolved_at: Any
     resolved_by: str | None
     edited_arguments: dict[str, Any] | None
+    resolved_note: str | None
 
     @classmethod
     def of(cls, request: ApprovalRequest) -> ApprovalOut:

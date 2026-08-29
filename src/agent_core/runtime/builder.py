@@ -8,6 +8,7 @@ DeepAgents keeps owning the delegation loop, skills and HITL machinery.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -19,8 +20,10 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agent_core.config.settings import Settings, get_settings
 from agent_core.domain.agent import AgentSpec, SubAgentRef
+from agent_core.domain.metrics import RunUsage
 from agent_core.errors.exceptions import ConfigurationError, SkillError
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
+from agent_core.runtime.help_tool import autonomy_prompt_addendum
 from agent_core.runtime.middleware import build_middleware
 from agent_core.runtime.model import ModelFactory, build_model
 from agent_core.runtime.tooling import ToolFactory, make_direct_tool
@@ -41,6 +44,8 @@ class AgentBuilder:
         model_factory: ModelFactory | None = None,
         tool_factory: ToolFactory | None = None,
         settings: Settings | None = None,
+        usage_provider: Callable[[], RunUsage | None] | None = None,
+        help_tool: BaseTool | None = None,
     ) -> None:
         self._agents = agents
         self._tools = tools
@@ -48,6 +53,8 @@ class AgentBuilder:
         self._settings = settings
         self._model_factory: ModelFactory = model_factory or self._default_model_factory
         self._tool_factory = tool_factory or make_direct_tool
+        self._usage_provider = usage_provider
+        self._help_tool = help_tool
 
     def _default_model_factory(self, model_spec: str | None) -> BaseChatModel:
         return build_model(model_spec, settings=self._settings or get_settings())
@@ -60,13 +67,20 @@ class AgentBuilder:
                 f"above its limit of {spec.limits.max_subagents}",
                 details={"agent_id": spec.id},
             )
+        tools = [self._resolve_tool(name) for name in spec.tools]
+        system_prompt = spec.system_prompt or None
+        if spec.autonomy is not None:
+            # Autonomy adds the escape hatch (request_help) and the rules that
+            # keep the agent from spinning or guessing instead of asking.
+            tools = tools + ([self._help_tool] if self._help_tool is not None else [])
+            system_prompt = (system_prompt or "") + autonomy_prompt_addendum()
         return create_deep_agent(
             model=self._model_factory(spec.model),
-            tools=[self._resolve_tool(name) for name in spec.tools],
-            system_prompt=spec.system_prompt or None,
+            tools=tools,
+            system_prompt=system_prompt,
             subagents=[self._resolve_subagent(ref, parent_id=spec.id) for ref in spec.subagents]
             or None,
-            middleware=build_middleware(spec, self._model_factory),
+            middleware=build_middleware(spec, self._model_factory, self._usage_provider),
             name=spec.name,
             **self._resolve_skills(spec.skills),
         )
@@ -82,11 +96,14 @@ class AgentBuilder:
                 f"Agent '{parent_id}' cannot delegate to itself",
                 details={"agent_id": parent_id},
             )
+        sub_tools = [self._resolve_tool(name) for name in sub_spec.tools]
+        if sub_spec.autonomy is not None and self._help_tool is not None:
+            sub_tools.append(self._help_tool)
         return SubAgent(
             name=sub_spec.id,
             description=ref.description or sub_spec.description or sub_spec.name,
             system_prompt=sub_spec.system_prompt,
-            tools=[self._resolve_tool(name) for name in sub_spec.tools],
+            tools=sub_tools,
             model=self._model_factory(sub_spec.model),
         )
 

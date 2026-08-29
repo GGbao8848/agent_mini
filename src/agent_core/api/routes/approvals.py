@@ -35,5 +35,6 @@ def resolve_approval(
         ApprovalStatus(payload.decision),
         resolved_by=payload.resolved_by,
         edited_arguments=payload.edited_arguments,
+        note=payload.note,
     )
     return ApprovalOut.of(request)

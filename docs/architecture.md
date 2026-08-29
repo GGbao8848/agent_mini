@@ -109,3 +109,4 @@ CREATED → PLANNING → RUNNING ⇄ WAITING_APPROVAL → COMPLETED
 - **传输层极薄**：`AgentCoreService` 是 API/CLI 共用的唯一用例入口；`create_app` 支持注入自定义 service，路由无状态。
 - **第一版不引入**：Kafka / Redis / PostgreSQL / 向量库 / 微服务，单进程可运行。
 - **持久化（Phase 16）**：可选 SQLite（标准库 `sqlite3`，WAL）作为**写穿透镜像**——内存 dict 始终是读侧唯一来源，`AGENT_CORE_DATABASE_URL` 设置后注册中心/Run/审批/Trace 事件落库并在启动时恢复；跨重启的执行恢复（LangGraph checkpointer）仍属远期。
+- **自治层（Phase 17）**：预算/循环检测/求助/自检全部是声明式的 `AgentSpec.autonomy` 纯数据 + 运行时三个挂钩点——中间件（Budget，复用原生 `jump_to end` 收尾模式）、Action Gate（LoopGuard 与 `request_help`，gate 仍是工具执行的唯一通道）、Run 收尾回路（verification 嵌套 judge run）。治理动作优先"软反馈给模型"，只在确认无进展时升级人工（`NEEDS_INPUT`），审批答复经同一 ApprovalManager 通道回流。

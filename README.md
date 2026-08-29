@@ -40,6 +40,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 14 | Team 模式调优：汇总保真硬规则 + worker 汇报紧凑化 + `TeamSpec.merge_instructions` + 校验器加固 | ✅ |
 | 15 | 评估进阶：LLM-as-judge 四维质量评分 + 基线快照与回归对比（时间/token/质量漂移可见化） | ✅ |
 | 16 | 持久化：SQLite 写穿透（注册中心/Run/审批/事件）+ 重启恢复，`AGENT_CORE_DATABASE_URL` 可选启用 | ✅ |
+| 17 | 自治与预算治理：RunBudget 硬上限、循环/无进展检测、NEEDS_INPUT 任务级求助、执行后自检自修回路 | ✅ |
 
 ## 快速开始
 
@@ -182,6 +183,28 @@ uv run --env-file .env python scripts/eval_real.py --suite fx --judge --compare 
 | 审批请求 | `ApprovalManager` 写穿透 | 已决审批原样保留；遗留 pending 自动置 `REJECTED`（resolved_by=restart，其 run 已无法恢复） |
 
 设计要点：内存 dict 始终是读侧唯一来源（读性能不变、契约不变），库只是镜像；不设置该变量时行为与纯内存 v1 完全一致。**不解决执行恢复**——WAITING_APPROVAL 的 run 其图状态与进程内唤醒句柄不可序列化，跨重启恢复执行需接入 LangGraph checkpointer（远期）。
+
+## 自治与预算治理（Phase 17）
+
+面向"AI 分身"定位：长任务不失控、不空转、该问人就问人。全部能力由 `AgentSpec.autonomy`（`AutonomyPolicy`）声明，默认 None = 行为与之前完全一致：
+
+| 能力 | 声明 | 行为 |
+|---|---|---|
+| 预算硬上限 | `autonomy.budget`（max_total_tokens / max_model_calls / max_tool_calls / warn_fraction） | 自定义 `BudgetMiddleware` 在每次模型调用前检查实时用量（run 级 `UsageCollector` 注册表）：到 warn 阈值向 system prompt 注入"尽快收尾"；到硬上限按原生 `jump_to end` 模式**优雅收尾**（run 正常完成并附说明），绝不报错死。`AgentLimits.token_budget` 旧占位字段同时接通为兜底 |
+| 循环/无进展检测 | `autonomy.loop_guard`（max_identical_calls=3 / max_consecutive_failures=3） | Action Gate 在执行前按 run 记账工具调用指纹：第 N 次同参数调用被**软拒绝**（"你在空转，换方法"作为工具结果返回给模型），第 N+1 次升级人工；配置 loop_guard 后工具失败也从"杀 run"变为软消息（先自愈再升级） |
+| 任务级求助 | 内置 `request_help(question)` 工具（配置任意 autonomy 自动注入，含 subagent） | 新增非终端状态 `NEEDS_INPUT`：agent 主动停下等人工，人工答复（审批的 `note`）作为工具结果回流继续执行；循环升级、自检失败升级共用此通道。重启后遗留 NEEDS_INPUT/WAITING_APPROVAL 仍按 Phase 16 语义标 FAILED（执行恢复属 Phase 18 checkpointer） |
+| 执行后自检 | `autonomy.verification`（min_overall=7.0 / max_rounds=1 / on_fail="escalate"\|"accept"） | 输出完成后由 judge agent（内置 `verifier`，惰性注册）以嵌套 Run 打分（用量聚合回父 run）；不合格先自修最多 N 轮（把评审反馈拼进任务重跑同一 graph），仍不合格升级人工（人工答复引导最后一轮）或标记未验证完成。结果写入 `run.metadata["verification"]` |
+
+```python
+AgentSpec(
+    id="avatar", name="Avatar",
+    autonomy=AutonomyPolicy(
+        budget=RunBudget(max_total_tokens=200_000),
+        loop_guard=LoopGuardPolicy(),
+        verification=VerificationPolicy(enabled=True),
+    ),
+)
+```
 
 ## 可靠性策略（Phase 12）
 
