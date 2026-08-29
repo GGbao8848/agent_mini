@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 from agent_core.domain.metrics import RunUsage
 from agent_core.domain.task import Run
+from agent_core.eval.judge import JudgeResult, build_judge_input, parse_judge_output
 from agent_core.eval.model import Check, EvalResult
 from agent_core.eval.tasks import RealTask
 from agent_core.orchestration import Job, run_parallel
@@ -122,6 +123,25 @@ class EvalRunner:
             if event.event_type.value == "run_finished" and event.output is not None:
                 return str(event.output)
         return ""
+
+    async def run_judge(
+        self, judge_agent_id: str, task: RealTask, result: EvalResult
+    ) -> JudgeResult:
+        """Grade a completed result's output with an LLM judge agent."""
+        verdict = await self._judge_once(judge_agent_id, task, result)
+        if verdict.parsed:
+            return verdict
+        # Small/free models occasionally return an empty message; one retry is cheap.
+        return await self._judge_once(judge_agent_id, task, result)
+
+    async def _judge_once(
+        self, judge_agent_id: str, task: RealTask, result: EvalResult
+    ) -> JudgeResult:
+        run = self._runtime.create_run(
+            judge_agent_id, build_judge_input(task.name, task.prompt, result.output)
+        )
+        await self._runtime.execute_run(run)
+        return parse_judge_output(self._finished_output(run.id))
 
 
 def collect_usage(runs: list[Run]) -> RunUsage:

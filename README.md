@@ -38,6 +38,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 12 | 原生中间件接入：summarization / 调用上限 / 重试 / 降级（ResiliencePolicy → LangChain AgentMiddleware） | ✅ |
 | 13 | 真实任务评估：5 类真实任务（实时 API/结构化抽取/代码执行验证/编排对比/多步工具链）+ 客观校验器 | ✅ |
 | 14 | Team 模式调优：汇总保真硬规则 + worker 汇报紧凑化 + `TeamSpec.merge_instructions` + 校验器加固 | ✅ |
+| 15 | 评估进阶：LLM-as-judge 四维质量评分 + 基线快照与回归对比（时间/token/质量漂移可见化） | ✅ |
 
 ## 快速开始
 
@@ -153,6 +154,20 @@ uv run --env-file .env python scripts/eval_real.py   # 结果写入 eval_results
 校验器同步加固：识别 `100 JPY ≈ ¥4.21` 这类百单位报价并归一化，消除对正确答案的误伤（plausibility 语义不变：输出须包含落在合理区间的汇率）。
 
 实测（`uv run --env-file .env python scripts/eval_real.py --suite fx`）：team 从 FAIL → **PASS**，三个汇率全部逐字转录并标注 `worker-1/2/3` 来源。附带发现：single 输出中自算的"高约 16.4%"与 Phase 13 team 混入的错误数字 16.4 同源——幻觉源头正是模型把自行换算的百分比当成了汇率，"禁止重算"规则正中要害。成本结论不变：team 的委派开销是结构性的（~3.3x tokens），小任务仍应选 single；调优解决的是"用 team 时结果必须对"。
+
+## 评估进阶：LLM-as-judge + 基线回归（Phase 15）
+
+在确定性校验器之上补齐两个持续治理工具：
+
+- **LLM-as-judge**（`eval/judge.py`）：评审员本身就是一个注册 Agent（rubric 放在 system prompt，执行复用正常 Run 机制，不新增执行路径），按 accuracy / completeness / conciseness / instruction_following 四维打 0-10 分。确定性校验器证明硬事实，judge 补软质量信号。`EvalRunner.run_judge()` 挂到 `EvalResult.judge`。校准要点（首跑教训）：数据真伪归确定性校验器管，judge 不因"看不到工具调用记录"扣分；输入注入评审日期避免"未来日期"误判；解析器对内嵌引号的破损 JSON 有正则回退。
+- **基线回归**（`eval/baseline.py`）：一次运行的指标（通过率/耗时/token/checks）存为纯数据 JSON，后续运行逐任务对比：质量回退/提升、耗时或 token 超出 ±25% 容差判 regressed；渲染对比表，任何 regressed 令脚本非零退出（可直接接 CI）。
+
+```bash
+uv run --env-file .env python scripts/eval_real.py --suite fx --judge --save-baseline eval_results/baseline.json
+uv run --env-file .env python scripts/eval_real.py --suite fx --judge --compare eval_results/baseline.json
+```
+
+实测（minimax-m3:free）：judge 稳定输出 6.5–7.6/10 的合理评分与中肯点评；基线对比把运行间漂移显式化——同一 fx 任务相邻两次运行即得到 `single 📈 improved (wall -55%, tokens -70%)` 与 `team 📉 regressed (wall +90%)` 的结论（team 质量未退、checks 3/3，速度波动被准确捕获）。附带的 team 调优延续：COORDINATOR_PROMPT 的 DELEGATE 步骤新增"实时数据必须来自 worker 自己的工具调用，不得凭记忆回答"，堵住 worker 跳过工具直接编数的路径。
 
 ## 可靠性策略（Phase 12）
 
