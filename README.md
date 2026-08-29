@@ -42,6 +42,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 16 | 持久化：SQLite 写穿透（注册中心/Run/审批/事件）+ 重启恢复，`AGENT_CORE_DATABASE_URL` 可选启用 | ✅ |
 | 17 | 自治与预算治理：RunBudget 硬上限、循环/无进展检测、NEEDS_INPUT 任务级求助、执行后自检自修回路 | ✅ |
 | 18 | 本地模型接入（`local:` provider，任意 OpenAI 兼容端点）+ 多模态内置工具（generate_image/view_image）+ 模型能力矩阵冒烟 | ✅ |
+| 19 | 代理（`AGENT_CORE_PROXY_URL` + NO_PROXY 豁免内网服务）+ Telegram 通知渠道（telegram_notify 工具 + chat_id 引导脚本） | ✅ |
 
 ## 快速开始
 
@@ -184,6 +185,26 @@ uv run --env-file .env python scripts/eval_real.py --suite fx --judge --compare 
 | 审批请求 | `ApprovalManager` 写穿透 | 已决审批原样保留；遗留 pending 自动置 `REJECTED`（resolved_by=restart，其 run 已无法恢复） |
 
 设计要点：内存 dict 始终是读侧唯一来源（读性能不变、契约不变），库只是镜像；不设置该变量时行为与纯内存 v1 完全一致。**不解决执行恢复**——WAITING_APPROVAL 的 run 其图状态与进程内唤醒句柄不可序列化，跨重启恢复执行需接入 LangGraph checkpointer（远期）。
+
+## 代理与 Telegram 通知（Phase 19）
+
+### 进程级代理
+
+```bash
+AGENT_CORE_PROXY_URL=http://10.10.10.214:7890   # → HTTP_PROXY / HTTPS_PROXY
+AGENT_CORE_NO_PROXY=10.10.10.146,10.10.10.169   # 内网服务（本地模型/文生图）直连豁免
+```
+
+`apply_proxy` 在设置代理时总是把 `localhost,127.0.0.1,::1` 加入 `NO_PROXY`，并追加 `AGENT_CORE_NO_PROXY` 主机——代理只覆盖 Telegram 等外网流量，本地方向不受影响。
+
+### Telegram 出站渠道
+
+| 项 | 说明 |
+|---|---|
+| 配置 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`（标准环境变量，凭据不入库） |
+| 首次绑定 | `uv run --env-file .env python scripts/smoke_telegram.py`：getMe 验证 token → 轮询 getUpdates 发现你的 chat_id（自动写入 .env）→ 发送测试消息 |
+| Agent 工具 | 内置 `telegram_notify(message)`：配置齐全后自动注册，agent 在 `spec.tools` 里声明即可给主人发消息，照常走 Action Gate |
+| 实现 | `agent_core/notify/telegram.py`：httpx `trust_env` 自动走进程代理；网络错误为 retryable `ToolError` |
 
 ## 本地模型与多模态工具（Phase 18）
 
