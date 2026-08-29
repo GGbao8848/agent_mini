@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     environment: Environment = Environment.DEVELOPMENT
     log_level: str = "INFO"
 
+    # Built-in multimodal tools (Phase 18). ``image_api_base_url`` points at an
+    # A1111/Forge-compatible txt2img endpoint (e.g. http://host:18542); when set
+    # the ``generate_image`` tool is registered. Generated/read files live under
+    # ``workspace_dir``.
+    image_api_base_url: str | None = None
+    workspace_dir: str = "./workspace"
+
     # Outbound HTTP proxy for model providers / MCP (e.g. http://127.0.0.1:7890).
     # Applied to the standard HTTP_PROXY / HTTPS_PROXY env vars so every HTTP
     # client in the process (OpenAI SDK, langchain, MCP) picks it up.

@@ -13,6 +13,7 @@ are restored before the service is returned.
 from __future__ import annotations
 
 from agent_core.application.service import AgentCoreService
+from agent_core.builtins import register_builtin_tools
 from agent_core.config.settings import Settings, apply_proxy, get_settings
 from agent_core.domain.mcp import MCPServerStatus
 from agent_core.mcp.credentials import EnvCredentialResolver
@@ -38,6 +39,7 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     agents = AgentRegistry(store)
     tools = ToolRegistry(store)
     skills = SkillRegistry(store)
+    register_builtin_tools(tools, resolved)
 
     approvals = ApprovalManager(store)
     memory_tracer = InMemoryTracer()

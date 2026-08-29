@@ -8,6 +8,7 @@ agent's request; they pass through Permission and the Action Gate first.
 
 from __future__ import annotations
 
+import asyncio
 from enum import StrEnum
 from typing import Any
 
@@ -31,3 +32,38 @@ class ToolDefinition(BaseModel):
     risk_level: RiskLevel = RiskLevel.LOW
     source: ToolSource = ToolSource.PYTHON
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def adapt_handler_arguments(definition: ToolDefinition, handler: Any) -> Any:
+    """Optional args the model omitted keep the handler's own Python defaults.
+
+    The generated args schema gives optional fields an explicit ``None``
+    default, so a plain-Python handler would otherwise see ``days=None``
+    instead of its own ``days=1`` default. Explicit schema defaults are passed
+    through unchanged. This is a domain rule about the schema contract, applied
+    at the execution chokepoint for BOTH tool factories (direct and gated).
+    """
+    schema = definition.input_schema
+    required = set(schema.get("required") or [])
+    droppable = {
+        name
+        for name, prop in (schema.get("properties") or {}).items()
+        if isinstance(prop, dict) and name not in required and "default" not in prop
+    }
+    if not droppable:
+        return handler
+
+    def drop(kwargs: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in kwargs.items() if not (k in droppable and v is None)}
+
+    if asyncio.iscoroutinefunction(handler):
+
+        async def async_wrapper(**kwargs: Any) -> Any:
+            return await handler(**drop(kwargs))
+
+        return async_wrapper
+
+    def sync_wrapper(**kwargs: Any) -> Any:
+        return handler(**drop(kwargs))
+
+    return sync_wrapper

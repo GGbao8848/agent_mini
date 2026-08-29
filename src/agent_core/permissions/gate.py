@@ -24,6 +24,7 @@ from agent_core.domain.action import Action, ActionStatus, ApprovalKind, Approva
 from agent_core.domain.autonomy import LoopGuardPolicy
 from agent_core.domain.permission import PermissionDecision
 from agent_core.domain.task import Run, RunStatus
+from agent_core.domain.tool import adapt_handler_arguments
 from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import (
     AgentError,
@@ -37,6 +38,8 @@ from agent_core.permissions.policy import ActionPolicy
 from agent_core.registries import AgentRegistry, ToolHandler, ToolRegistry
 
 if TYPE_CHECKING:
+    # Runtime import would be circular (runtime/__init__ pulls the builder,
+    # which pulls this module via help_tool); the executor is injected.
     from agent_core.runtime.tool_executor import ToolExecutor
 
 
@@ -71,7 +74,7 @@ class ActionGate:
             input=arguments,
         )
         definition = self._tools.get(tool_name)
-        handler = self._tools.handler_for(tool_name)
+        handler = adapt_handler_arguments(definition, self._tools.handler_for(tool_name))
         action = Action(
             run_id=run.id,
             agent_id=run.agent_id,
