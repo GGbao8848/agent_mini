@@ -20,7 +20,6 @@ from __future__ import annotations
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Any
 
 from agent_core.errors.exceptions import ConfigurationError
 
@@ -80,7 +79,7 @@ def parse_sqlite_url(url: str) -> Path | str:
     return Path(path)
 
 
-def open_store(database_url: str | None) -> "SqliteStore | None":
+def open_store(database_url: str | None) -> SqliteStore | None:
     """Return a store for ``database_url``, or None when persistence is off."""
     if database_url is None:
         return None
