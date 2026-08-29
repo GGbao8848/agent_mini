@@ -16,10 +16,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))  # reuse the e2e avatar spec
 
 import uvicorn
-
-from agent_core.application.bootstrap import default_service
-from agent_core.api.app import create_app
 from e2e_autonomy import avatar_spec
+
+from agent_core.api.app import create_app
+from agent_core.application.bootstrap import default_service
 
 
 def main() -> None:
