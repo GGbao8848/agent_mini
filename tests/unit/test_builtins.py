@@ -207,5 +207,8 @@ class TestRunCode:
         failed = await handler(command="exit 3")
         assert "exit_code=3" in failed and "command failed" in failed
 
-        venv_python = await handler(command="python -c 'import pptx; print(\"pptx-ok\")'")
-        assert "exit_code=0" in venv_python and "pptx-ok" in venv_python
+        # The venv python (not the system one) is what resolves first on PATH.
+        venv_python = await handler(
+            command="python -c 'import sys; print(sys.prefix != sys.base_prefix)'"
+        )
+        assert "exit_code=0" in venv_python and "True" in venv_python

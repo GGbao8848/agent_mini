@@ -54,6 +54,7 @@ class RunOut(BaseModel):
     task_id: str
     agent_id: str
     parent_run_id: str | None
+    thread_id: str | None = None
     status: str
     created_at: Any
     finished_at: Any
