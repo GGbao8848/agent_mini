@@ -53,8 +53,9 @@ def create_app(service: AgentCoreService | None = None) -> FastAPI:
 
         @app.middleware("http")
         async def console_token_guard(request: Any, call_next: Any) -> Any:
-            path = request.url.path
-            if path.startswith("/v1") or path.startswith("/console"):
+            # Only the API is gated: the console page itself carries no
+            # secrets, and it must load so the browser can collect the token.
+            if request.url.path.startswith("/v1"):
                 provided = request.headers.get("X-Console-Token") or request.query_params.get(
                     "token"
                 )
