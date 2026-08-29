@@ -74,13 +74,30 @@ class BudgetMiddleware(AgentMiddleware):
     def before_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         usage = self._usage_getter()
         if budget_verdict(usage, self._budget) == "stop":
-            message = (
-                budget_stop_message(usage, self._budget) if usage else "[budget] exhausted"
-            )
-            return {"jump_to": "end", "messages": [AIMessage(content=message)]}
+            return self._stop_command()
         return None
 
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        # The runtime is async end-to-end; without this hook LangChain refuses
+        # to use the middleware at all (no automatic sync->async fallback).
+        usage = self._usage_getter()
+        if budget_verdict(usage, self._budget) == "stop":
+            return self._stop_command()
+        return None
+
+    def _stop_command(self) -> dict[str, Any]:
+        usage = self._usage_getter()
+        message = budget_stop_message(usage, self._budget) if usage else "[budget] exhausted"
+        return {"jump_to": "end", "messages": [AIMessage(content=message)]}
+
     def wrap_model_call(self, request: Any, handler: Any) -> Any:
+        return self._wrap(request, handler)
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        return self._wrap(request, handler)
+
+    def _wrap(self, request: Any, handler: Any) -> Any:
         usage = self._usage_getter()
         if budget_verdict(usage, self._budget) == "warn" and not self._warned:
             self._warned = True
