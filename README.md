@@ -45,6 +45,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 19 | 代理（`AGENT_CORE_PROXY_URL` + NO_PROXY 豁免内网服务）+ Telegram 通知渠道（telegram_notify 工具 + chat_id 引导脚本） | ✅ |
 | 20 | run_code 内置工具 + workspace 真实文件 backend + 双长任务端到端自治验证（30 页 PPT / 网页画册） | ✅ |
 | 21 | Podman Sandbox：run_code 容器内执行（仅挂载 workspace、资源上限、rootless），宿主机密钥不可达 | ✅ |
+| 22 | Agent Console：局域网 Web 控制台——Run 时间线（持久化历史+实时 SSE）、事件详情、产物预览/下载、审批面板、派任务 | ✅ |
 
 ## 快速开始
 
@@ -226,6 +227,24 @@ bash scripts/sandbox_build.sh                   # 构建镜像（python:3.13-sli
 ```
 
 启用后 `run_code` 的每条命令都在容器内执行：**只有 workspace 挂载进容器**（`/work`）——宿主机的 `.env` 密钥、SSH、git 历史全部不可达；路径穿越（`/work/../..`）只到容器自己的根；内存/CPU/进程数有硬上限；代理环境变量透传（pip 装包走代理）。workspace 成为 agent 与宿主机之间的唯一交换点。已实测验证：边界四项检查全过 + 沙箱模式下真实任务（mini pptx + Telegram 汇报）端到端完成。
+
+## Agent Console（Phase 22）
+
+```bash
+uv run --env-file .env python scripts/serve_console.py   # 默认 0.0.0.0:8000
+# 然后在局域网任意机器的浏览器打开：
+#   http://<服务器IP>:8000/console/
+```
+
+一次解决"agent 在服务器上，人在别的机器"的三个痛点：
+
+| 痛点 | Console 能力 |
+|---|---|
+| 交付物要 ssh 上去找路径拷贝 | **产物窗口**：run 收尾自动登记 workspace 新增文件（manifest 写入 run 元数据并持久化），图片缩略图直接预览、其余一键下载（路径严格限制在 workspace 内，穿越/隐藏文件拒绝） |
+| 不知道它之前/现在在干嘛 | **时间线**：历史 run 来自 SQLite（重启不丢），进行中的 run 通过全局 SSE 实时刷新状态徽章；详情页有逐条事件时间线、token 用量、自检结果、最终输出 |
+| 危险操作/求助需要人工 | **审批面板**：工具审批与任务级求助（NEEDS_INPUT）在页面上批准/驳回/填写给分身的答复 |
+
+派任务也在页面顶部完成（选 agent → 写任务 → 提交，立即出现在时间线上）。安全：设置 `AGENT_CORE_CONSOLE_TOKEN` 后所有 `/v1` 与 `/console` 请求需携带 token（页面首次提示输入，存 localStorage）；不设置则局域网内开放。
 
 ## 本地模型与多模态工具（Phase 18）
 
