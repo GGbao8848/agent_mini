@@ -82,8 +82,22 @@ class AgentBuilder:
             or None,
             middleware=build_middleware(spec, self._model_factory, self._usage_provider),
             name=spec.name,
-            **self._resolve_skills(spec.skills),
+            **self._backend_kwargs(spec),
         )
+
+    def _backend_kwargs(self, spec: AgentSpec) -> dict[str, Any]:
+        """Root the harness file tools on the real workspace when configured.
+
+        With a workspace the agent's ``write_file``/``read_file``/... land on
+        actual disk (contained by FilesystemBackend), which is what makes
+        ``run_code``-built artifacts (pptx, sites, images) possible. Skill
+        resolution keeps precedence: it computes its own backend root.
+        """
+        skill_kwargs = self._resolve_skills(spec.skills)
+        if skill_kwargs:
+            return skill_kwargs
+        settings = self._settings or get_settings()
+        return {"backend": FilesystemBackend(root_dir=settings.workspace_dir)}
 
     def _resolve_tool(self, name: str) -> BaseTool:
         definition = self._tools.get(name)
