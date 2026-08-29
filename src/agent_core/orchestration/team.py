@@ -25,7 +25,8 @@ Working method, in order:
    is the fastest way to finish. Give each call a self-contained description
    with all context the worker needs (workers cannot see this conversation),
    and tell each worker to report back ONLY the concrete facts or results it
-   obtained — short and structured, no filler.
+   obtained — short and structured, no filler. Facts about live or changing
+   data must come from the worker's own tools, never from memory.
    Only run subtasks in parallel when they do not depend on each other.
 4. MERGE: synthesize the workers' results into one final answer.
    - Copy every number, date, and proper name EXACTLY as the worker that

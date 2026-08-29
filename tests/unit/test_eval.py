@@ -1,13 +1,26 @@
 """Eval tests: verifier logic and runner wiring (no network)."""
 
 import json
+import pathlib
 from typing import Any
 
 from langchain_core.messages import AIMessage
 
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.resilience import ResiliencePolicy
-from agent_core.eval import ALL_TASKS, EvalRunner, RealTask
+from agent_core.eval import (
+    ALL_TASKS,
+    Check,
+    EvalResult,
+    EvalRunner,
+    RealTask,
+    compare,
+    load_baseline,
+    parse_judge_output,
+    render_comparison,
+    save_baseline,
+    snapshot,
+)
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.middleware import build_middleware
 from agent_core.runtime.runtime import AgentRuntime
@@ -244,3 +257,168 @@ class TestRunner:
 def test_resilience_policy_still_wires_middleware() -> None:
     spec = AgentSpec(id="a", name="A", resilience=ResiliencePolicy(model_call_limit=2))
     assert len(build_middleware(spec, lambda m: None)) == 1
+
+
+JUDGE_JSON = json.dumps(
+    {
+        "dimensions": {
+            "accuracy": 9,
+            "completeness": 8,
+            "conciseness": 7,
+            "instruction_following": 9,
+        },
+        "overall": 8.3,
+        "comment": "内容准确，稍显冗长",
+    },
+    ensure_ascii=False,
+)
+
+
+class TestJudgeParsing:
+    def test_parses_plain_and_fenced_json(self) -> None:
+        verdict = parse_judge_output(JUDGE_JSON)
+
+        assert verdict.parsed
+        assert verdict.overall == 8.3
+        assert verdict.dimensions["accuracy"] == 9
+        assert parse_judge_output(f"评审结果：\n```json\n{JUDGE_JSON}\n```").parsed
+
+    def test_garbage_is_unparsable(self) -> None:
+        verdict = parse_judge_output("这个输出写得很好。")
+
+        assert not verdict.parsed
+        assert verdict.overall == 0.0
+
+    def test_scores_clamped_and_overall_inferred(self) -> None:
+        verdict = parse_judge_output('{"dimensions": {"accuracy": 15, "conciseness": 4}}')
+
+        assert verdict.parsed
+        assert verdict.dimensions["accuracy"] == 10.0
+        assert verdict.overall == 7.0  # mean of the given dimensions
+
+    def test_fallback_parses_broken_json_with_inner_quotes(self) -> None:
+        broken = '{"dimensions": {"accuracy": 8}, "overall": 8, "comment": "仅用"偏弱"过于笼统"}'
+
+        verdict = parse_judge_output(broken)
+
+        assert verdict.parsed
+        assert verdict.overall == 8.0
+        assert verdict.dimensions["accuracy"] == 8.0
+        assert "偏弱" in verdict.comment
+
+
+class TestJudgeRunner:
+    async def test_run_judge_returns_parsed_verdict(self) -> None:
+        runner = EvalRunner(runtime_with_reply(JUDGE_JSON))
+        task = next(t for t in ALL_TASKS if t.id == "orders_to_json")
+
+        result = await runner.run_task(task, "solo", {})
+        verdict = await runner.run_judge("solo", task, result)
+
+        assert verdict.parsed
+        assert verdict.overall == 8.3
+        assert "冗长" in verdict.comment
+
+    async def test_run_judge_retries_after_empty_reply(self) -> None:
+        class FlakyJudgeGraph(ScriptedGraph):
+            def __init__(self) -> None:
+                super().__init__(reply=JUDGE_JSON)
+                self.calls = 0
+
+            async def ainvoke(self, state: Any, config: Any = None) -> dict[str, Any]:
+                self.calls += 1
+                if self.calls == 1:
+                    return {"messages": [AIMessage(content="")]}
+                return await super().ainvoke(state, config)
+
+        graph = FlakyJudgeGraph()
+        agents = AgentRegistry()
+        agents.register(AgentSpec(id="judge", name="Judge"))
+        runtime = AgentRuntime(agents, ToolRegistry(), SkillRegistry(), builder=StubBuilder(graph))
+        runner = EvalRunner(runtime)
+        task = next(t for t in ALL_TASKS if t.id == "orders_to_json")
+
+        verdict = await runner.run_judge("judge", task, _result())
+
+        assert verdict.parsed and verdict.overall == 8.3
+        assert graph.calls == 2
+
+
+def _result(
+    task_id: str = "t1",
+    *,
+    passed: bool = True,
+    wall_ms: float = 100.0,
+    total_tokens: int = 1000,
+) -> EvalResult:
+    return EvalResult(
+        task_id=task_id,
+        name=task_id,
+        aspects=[],
+        status="completed" if passed else "failed",
+        passed=passed,
+        wall_ms=wall_ms,
+        total_tokens=total_tokens,
+        checks=[Check(name="c", passed=passed)],
+    )
+
+
+class TestBaseline:
+    def test_save_and_load_round_trip(self, tmp_path: pathlib.Path) -> None:
+        results = [_result("t1"), _result("t2", passed=False, wall_ms=50.0, total_tokens=500)]
+        path = tmp_path / "baseline.json"
+
+        save_baseline(path, results)
+        loaded = load_baseline(path)
+
+        assert loaded.created_at
+        assert [(e.task_id, e.passed) for e in loaded.entries] == [
+            ("t1", True),
+            ("t2", False),
+        ]
+
+    def test_quality_regressions_and_improvements(self) -> None:
+        baseline = snapshot([_result("good"), _result("bad", passed=False)])
+        current = [_result("good", passed=False), _result("bad")]
+
+        verdicts = {c.task_id: c.verdict for c in compare(current, baseline)}
+
+        assert verdicts["good"] == "regressed"
+        assert verdicts["bad"] == "improved"
+
+    def test_cost_regression_beyond_tolerance(self) -> None:
+        baseline = snapshot([_result("t1")])
+        current = [_result("t1", wall_ms=200.0, total_tokens=1500)]  # +100% / +50%
+
+        assert compare(current, baseline)[0].verdict == "regressed"
+
+    def test_within_tolerance_unchanged(self) -> None:
+        baseline = snapshot([_result("t1")])
+        current = [_result("t1", wall_ms=110.0, total_tokens=1100)]  # +10%
+
+        assert compare(current, baseline)[0].verdict == "unchanged"
+
+    def test_new_and_missing_tasks(self) -> None:
+        baseline = snapshot([_result("old")])
+        current = [_result("fresh")]
+
+        verdicts = {c.task_id: c.verdict for c in compare(current, baseline)}
+
+        assert verdicts == {"fresh": "new", "old": "missing"}
+
+    def test_comparison_label_includes_aspects(self) -> None:
+        baseline = snapshot([_result("fx")])
+        current = [_result("fx", wall_ms=300.0)]
+        current[0].aspects = ["编排", "single"]
+
+        comparisons = compare(current, baseline)
+
+        assert "single" in comparisons[0].label
+
+    def test_render_lists_every_comparison(self) -> None:
+        baseline = snapshot([_result("t1")])
+
+        text = render_comparison(compare([_result("t1", wall_ms=300.0)], baseline))
+
+        assert "t1" in text
+        assert "regressed" in text

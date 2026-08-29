@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from agent_core.eval.judge import JudgeResult
+
 
 class Check(BaseModel):
     """One objective assertion about a task's answer."""
@@ -30,6 +32,7 @@ class EvalResult(BaseModel):
     error: str | None = None
     checks: list[Check] = Field(default_factory=list)
     output: str = ""
+    judge: JudgeResult | None = None
 
     @property
     def failed_checks(self) -> list[Check]:

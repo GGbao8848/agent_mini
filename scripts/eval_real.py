@@ -6,7 +6,8 @@ the model's code, an FX briefing run under three orchestration modes
 (single / team / fan-out) against a live rates API, and a multi-step holiday
 planner chaining an HTTP tool with a calculator.
 
-Usage: uv run --env-file .env python scripts/eval_real.py
+Usage: uv run --env-file .env python scripts/eval_real.py [--suite full|fx]
+         [--judge] [--save-baseline PATH] [--compare PATH]
 """
 
 from __future__ import annotations
@@ -25,7 +26,18 @@ from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.team import TeamSpec
 from agent_core.domain.tool import ToolDefinition
-from agent_core.eval import ALL_TASKS, EvalResult, EvalRunner
+from agent_core.eval import (
+    ALL_TASKS,
+    JUDGE_SYSTEM_PROMPT,
+    EvalResult,
+    EvalRunner,
+    compare,
+    load_baseline,
+    render_comparison,
+)
+from agent_core.eval import (
+    save_baseline as write_baseline,
+)
 from agent_core.orchestration import compose_team
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime import AgentRuntime
@@ -247,6 +259,13 @@ def build_runtime() -> tuple[AgentRuntime, AgentRegistry]:
             )
         )
     compose_team(agents, _team_spec("fx-team", "FX Team"))
+    agents.register(
+        AgentSpec(
+            id="judge",
+            name="Judge",
+            system_prompt=JUDGE_SYSTEM_PROMPT,
+        )
+    )
     return AgentRuntime(agents, tools, SkillRegistry()), agents
 
 
@@ -277,6 +296,13 @@ def render_report(results: list[EvalResult]) -> str:
         for check in result.checks:
             mark = "PASS" if check.passed else "FAIL"
             lines.append(f"  - [{mark}] {check.name} — {check.detail}")
+        if result.judge is not None:
+            if result.judge.parsed:
+                dims = ", ".join(f"{k} {v:g}" for k, v in result.judge.dimensions.items())
+                summary = f"overall {result.judge.overall:g}/10 ({dims})"
+                lines.append(f"  - judge: {summary} — {result.judge.comment}")
+            else:
+                lines.append(f"  - judge: unparsable — {result.judge.raw[:80]}")
         preview = result.output.replace("\n", " ")[:220]
         lines.append(f"- output: {preview}…")
         lines.append("")
@@ -317,6 +343,8 @@ def main() -> int:
         return results
 
     results = asyncio.run(run_all())
+    if args.judge:
+        results = asyncio.run(_apply_judge(runner, results))
     report = render_report(results)
     print(report)
 
@@ -330,7 +358,19 @@ def main() -> int:
         encoding="utf-8",
     )
     print(f"reports written to {RESULTS_DIR}/")
-    return 0 if passed == len(results) else 1
+
+    exit_code = 0 if passed == len(results) else 1
+    if args.save_baseline:
+        write_baseline(args.save_baseline, results)
+        print(f"baseline written to {args.save_baseline}")
+    if args.compare:
+        comparisons = compare(results, load_baseline(args.compare))
+        comparison_md = render_comparison(comparisons)
+        print(comparison_md)
+        (RESULTS_DIR / "comparison.md").write_text(comparison_md, encoding="utf-8")
+        if any(c.verdict == "regressed" for c in comparisons):
+            exit_code = 1
+    return exit_code
 
 
 def _parse_args() -> argparse.Namespace:
@@ -341,7 +381,24 @@ def _parse_args() -> argparse.Namespace:
         default="full",
         help="fx runs only fx_briefing single+team (fast team-tuning loop)",
     )
+    parser.add_argument(
+        "--judge", action="store_true", help="grade completed outputs with an LLM judge agent"
+    )
+    parser.add_argument(
+        "--save-baseline", metavar="PATH", help="save this run's metrics as a baseline JSON"
+    )
+    parser.add_argument(
+        "--compare", metavar="PATH", help="compare this run against a baseline JSON"
+    )
     return parser.parse_args()
+
+
+async def _apply_judge(runner: EvalRunner, results: list[EvalResult]) -> list[EvalResult]:
+    for result in results:
+        if result.status != "completed":
+            continue
+        result.judge = await runner.run_judge("judge", _TASK_BY_ID[result.task_id], result)
+    return results
 
 
 if __name__ == "__main__":
