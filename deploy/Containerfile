@@ -1,0 +1,22 @@
+# Sandbox image for the agent-core run_code tool (Phase 21).
+# Build: scripts/sandbox_build.sh
+# The agent workspace is mounted at /work at runtime; the image only carries
+# the toolchain so scripts the agent writes can run immediately.
+
+FROM docker.io/library/python:3.13-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash coreutils findutils grep git curl jq ca-certificates fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    "python-pptx>=1.0" \
+    "Pillow>=11.0" \
+    "openpyxl>=3.1" \
+    "pandas>=2.2" \
+    "httpx>=0.28"
+
+# Non-root is implicit under rootless podman (host user mapping).
+ENV PYTHONUNBUFFERED=1
+WORKDIR /work

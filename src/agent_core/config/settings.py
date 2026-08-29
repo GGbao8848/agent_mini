@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from enum import StrEnum
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -46,6 +47,16 @@ class Settings(BaseSettings):
     # ``workspace_dir``.
     image_api_base_url: str | None = None
     workspace_dir: str = "./workspace"
+
+    # Code-execution sandbox (Phase 21). "none" runs run_code directly on the
+    # host (legacy behaviour); "podman" runs every command inside a rootless
+    # container with only the workspace mounted — the host's secrets and the
+    # rest of the filesystem stay out of reach.
+    sandbox: Literal["none", "podman"] = "none"
+    sandbox_image: str = "localhost/agent-core-sandbox:latest"
+    sandbox_memory_mb: int = 2048
+    sandbox_cpus: float = 2.0
+    sandbox_pids_limit: int = 256
 
     # Outbound HTTP proxy for model providers / MCP (e.g. http://127.0.0.1:7890).
     # Applied to the standard HTTP_PROXY / HTTPS_PROXY env vars so every HTTP
