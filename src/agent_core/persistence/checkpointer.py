@@ -35,8 +35,10 @@ def build_checkpointer(database_url: str | None) -> BaseCheckpointSaver[Any]:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     raw = database_url.removeprefix("sqlite:///")
+    # timeout → sqlite busy timeout: the store holds a second connection to
+    # this file, so overlapping writes wait instead of failing.
     if raw == ":memory:":
-        return AsyncSqliteSaver(aiosqlite.connect(":memory:"))
+        return AsyncSqliteSaver(aiosqlite.connect(":memory:", timeout=15))
     path = Path(raw)
     path.parent.mkdir(parents=True, exist_ok=True)
-    return AsyncSqliteSaver(aiosqlite.connect(str(path)))
+    return AsyncSqliteSaver(aiosqlite.connect(str(path), timeout=15))

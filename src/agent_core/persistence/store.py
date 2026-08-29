@@ -12,19 +12,24 @@ the same roundtrip convention as ``eval/baseline.py``.
 
 Threading: FastAPI runs sync route handlers in a worker threadpool while the
 connection is created on the main thread, so the connection opts into
-cross-thread use and a lock serializes writes (WAL keeps readers free).
+cross-thread use and a lock serializes writes (WAL keeps readers free). The
+LangGraph checkpointer holds a second connection to this file; a generous
+busy timeout plus write retries absorb the overlap.
 """
 
 from __future__ import annotations
 
 import sqlite3
 import threading
+import time
 from pathlib import Path
+from typing import Any
 
 from agent_core.errors.exceptions import ConfigurationError
 
 _SQLITE_PREFIX = "sqlite:///"
 _SCHEMA_VERSION = 1
+_BUSY_TIMEOUT_MS = 15000
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS registry_items (
@@ -99,6 +104,7 @@ class SqliteStore:
         self._lock = threading.Lock()
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
         self._migrate()
 
     # ------------------------------------------------------------- lifecycle
@@ -121,23 +127,36 @@ class SqliteStore:
     def close(self) -> None:
         self._conn.close()
 
+    # ---------------------------------------------------------------- writes
+
+    def _write(self, sql: str, params: tuple[Any, ...]) -> None:
+        """Serialized write; transient lock contention is retried, not fatal."""
+        for attempt in range(4):
+            try:
+                with self._lock:
+                    self._conn.execute(sql, params)
+                    self._conn.commit()
+                return
+            except sqlite3.OperationalError as exc:
+                message = str(exc)
+                if "locked" not in message and "busy" not in message:
+                    raise
+                time.sleep(0.25 * (attempt + 1))
+        raise sqlite3.OperationalError(
+            f"database is locked (retries exhausted): {sql[:80]}"
+        )
+
     # ------------------------------------------------------------- registries
 
     def save_item(self, kind: str, key: str, data: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO registry_items (kind, key, data) VALUES (?, ?, ?) "
-                "ON CONFLICT(kind, key) DO UPDATE SET data = excluded.data",
-                (kind, key, data),
-            )
-            self._conn.commit()
+        self._write(
+            "INSERT INTO registry_items (kind, key, data) VALUES (?, ?, ?) "
+            "ON CONFLICT(kind, key) DO UPDATE SET data = excluded.data",
+            (kind, key, data),
+        )
 
     def delete_item(self, kind: str, key: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "DELETE FROM registry_items WHERE kind = ? AND key = ?", (kind, key)
-            )
-            self._conn.commit()
+        self._write("DELETE FROM registry_items WHERE kind = ? AND key = ?", (kind, key))
 
     def load_items(self, kind: str) -> list[tuple[str, str]]:
         """(key, data) pairs in registration order."""
@@ -149,26 +168,22 @@ class SqliteStore:
     # ----------------------------------------------------------- runs / tasks
 
     def save_task(self, task_id: str, data: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO tasks (id, data) VALUES (?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
-                (task_id, data),
-            )
-            self._conn.commit()
+        self._write(
+            "INSERT INTO tasks (id, data) VALUES (?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+            (task_id, data),
+        )
 
     def load_tasks(self) -> list[str]:
         rows = self._conn.execute("SELECT data FROM tasks ORDER BY rowid").fetchall()
         return [data for (data,) in rows]
 
     def save_run(self, run_id: str, status: str, data: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO runs (id, status, data) VALUES (?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
-                (run_id, status, data),
-            )
-            self._conn.commit()
+        self._write(
+            "INSERT INTO runs (id, status, data) VALUES (?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
+            (run_id, status, data),
+        )
 
     def load_runs(self) -> list[str]:
         rows = self._conn.execute("SELECT data FROM runs ORDER BY rowid").fetchall()
@@ -177,13 +192,11 @@ class SqliteStore:
     # -------------------------------------------------------------- approvals
 
     def save_approval(self, approval_id: str, status: str, data: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO approvals (id, status, data) VALUES (?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
-                (approval_id, status, data),
-            )
-            self._conn.commit()
+        self._write(
+            "INSERT INTO approvals (id, status, data) VALUES (?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
+            (approval_id, status, data),
+        )
 
     def load_approvals(self) -> list[str]:
         rows = self._conn.execute("SELECT data FROM approvals ORDER BY rowid").fetchall()
@@ -192,11 +205,9 @@ class SqliteStore:
     # ----------------------------------------------------------- trace events
 
     def append_event(self, run_id: str, data: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO trace_events (run_id, data) VALUES (?, ?)", (run_id, data)
-            )
-            self._conn.commit()
+        self._write(
+            "INSERT INTO trace_events (run_id, data) VALUES (?, ?)", (run_id, data)
+        )
 
     def load_events(self) -> list[tuple[str, str]]:
         """(run_id, data) pairs in emission order across all runs."""
