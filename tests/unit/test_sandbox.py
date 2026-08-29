@@ -49,8 +49,9 @@ class TestSandboxArgv:
 
         assert argv[:2] == ["podman", "run"]
         assert "--rm" in argv
-        vol = argv[argv.index("--volume") + 1]
-        assert vol == f"{workspace}:/work"
+        volumes = [argv[i + 1] for i, item in enumerate(argv) if item == "--volume"]
+        assert f"{workspace}:/work" in volumes
+        assert "agent-core-pip-cache:/root/.cache/pip" in volumes
         assert argv[argv.index("--workdir") + 1] == "/work"
         assert argv[argv.index("--memory") + 1] == "2048m"
         assert argv[argv.index("--cpus") + 1] == "2.0"

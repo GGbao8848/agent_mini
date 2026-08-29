@@ -1,22 +1,35 @@
 # Sandbox image for the agent-core run_code tool (Phase 21).
 # Build: scripts/sandbox_build.sh
-# The agent workspace is mounted at /work at runtime; the image only carries
-# the toolchain so scripts the agent writes can run immediately.
+# The agent workspace is mounted at /work at runtime; the image carries a
+# curated toolbox so the vast majority of agent tasks need zero installs.
+# Anything missing can be pip-installed on the fly (cached in a named volume).
 
 FROM docker.io/library/python:3.13-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        bash coreutils findutils grep git curl jq ca-certificates fonts-noto-cjk \
+        bash coreutils findutils grep git curl jq ca-certificates \
+        fonts-noto-cjk fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
+# Curated toolbox, grouped by the tasks a personal avatar actually does:
+#   data/science  — numpy pandas scipy matplotlib seaborn plotly
+#   documents     — python-pptx python-docx openpyxl xlsxwriter reportlab
+#                   markdown jinja2 pypdf pdfplumber
+#   imaging       — Pillow imageio opencv-python-headless
+#   web/http      — requests httpx beautifulsoup4 lxml pyyaml toml
+#   text/cjk      — jieba pypinyin
+#   cli/utils     — rich tqdm click pydantic tabulate python-dateutil uv
 RUN pip install --no-cache-dir \
-    "python-pptx>=1.0" \
-    "Pillow>=11.0" \
-    "openpyxl>=3.1" \
-    "pandas>=2.2" \
-    "httpx>=0.28"
+    numpy pandas scipy matplotlib seaborn plotly \
+    python-pptx python-docx openpyxl xlsxwriter reportlab markdown jinja2 pypdf pdfplumber \
+    Pillow imageio opencv-python-headless \
+    requests httpx beautifulsoup4 lxml pyyaml toml \
+    jieba pypinyin \
+    rich tqdm click pydantic tabulate python-dateutil uv
 
-# Non-root is implicit under rootless podman (host user mapping).
+# The run_code tool mounts a persistent named pip-cache volume here, so
+# ad-hoc installs of packages outside this list are fast on repeat calls.
+ENV PIP_CACHE_DIR=/root/.cache/pip
 ENV PYTHONUNBUFFERED=1
 WORKDIR /work

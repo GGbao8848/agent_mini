@@ -53,6 +53,9 @@ def build_sandbox_command(
     argv = [
         "podman", "run", "--rm",
         "--volume", f"{workspace}:/work",
+        # Persistent pip cache across the ephemeral containers: ad-hoc installs
+        # of packages outside the prebuilt toolbox are fast on repeat calls.
+        "--volume", "agent-core-pip-cache:/root/.cache/pip",
         "--workdir", "/work",
         "--memory", f"{settings.sandbox_memory_mb}m",
         "--cpus", str(settings.sandbox_cpus),
