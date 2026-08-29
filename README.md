@@ -48,6 +48,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 22 | Agent Console：局域网 Web 控制台——Run 时间线（持久化历史+实时 SSE）、事件详情、产物预览/下载、审批面板、派任务 | ✅ |
 | 23 | 多轮对话：LangGraph checkpointer + thread_id，**任意 run 可续聊**（AsyncSqliteSaver 持久化，跨重启保留上下文） | ✅ |
 | 24 | Console 工具箱：Skills/MCP 安装与管理 UI（MCP 以 JSON 录入为主 + 表单备选，兼容标准 mcpServers 格式），MCP 连接生命周期修复（owner-task），Agent 工具/技能绑定（PUT /v1/agents/{id} + 工具箱面板） | ✅ |
+| 25 | Console 前端重构：React 19 + shadcn/ui 官方组件（Base UI 内核）+ Tailwind v4 + Vite，任务台改对话式布局（Runs 进侧边栏、聊天输入框沉底、线程气泡流、审批内联、运行详情弹窗），构建产物直出挂载目录，后端零改动 | ✅ |
 
 ## 快速开始
 
@@ -242,6 +243,28 @@ Console 顶部切换 **任务台 / 工具箱**。工具箱 = MCP 服务器面板
 
 **绑定到 Agent（工具箱闭环）**：工具箱 Agents 面板（或 `PUT /v1/agents/{id}`，传 `tools`/`skills`，省略字段保持不变）可随时把已连接 MCP 的工具与已安装技能挂到任意 agent，改动立即生效（下次 build 生效），并持久化（重启不丢）。绑定 skill 时 runtime 把技能目录**同步拷贝**到 `workspace/.skills/<agent_id>/`——DeepAgents 的技能与文件工具共用一个 backend，以 workspace 为根可同时保住文件工具的 workspace 语义、SKILL.md 的渐进披露可见性、以及技能脚本对 run_code 沙箱（workspace 挂载）的可见性。实机验证：avatar 绑定 mem0 两个工具 + demo 技能后，一轮任务内完成记忆写入（mem0_add_memory）与按 SKILL.md 格式的问候输出。
 
+## Console 前端重构：React + shadcn/ui（Phase 25）
+
+原生三件套（app.js/index.html/style.css）整体退役，换成 React 19 + shadcn/ui 官方组件（CLI 生成的 v4 组件原样使用，Base UI 内核）+ Tailwind v4 + Vite + TanStack Query v5。任务台重构为**对话式布局**：
+
+- **Runs 时间线内嵌左侧边栏**：状态圆点 + 任务摘要 + 时间，点击即打开该线程对话
+- **主区 = 聊天气泡流**：同一线程的全部 run 按序渲染（你 → 分身），SSE 实时更新状态与输出
+- **派任务/续聊共用底部输入框**：Enter 发送、Shift+Enter 换行；未选中任务 = 派新任务（可选 agent），选中任务 = 续聊该线程（agent 带全部上下文）
+- **审批内联**：当前线程的待审批卡片直接出现在输入框上方，批准/驳回/答复一步完成
+- **运行详情弹窗**：事件时间线 + 产物预览/下载收进弹窗，聊天主区保持干净
+
+开发与构建（前端源码在 `frontend/`）：
+
+```bash
+cd frontend
+pnpm dev      # 开发服务器，/v1 与 /healthz 代理到 localhost:8000
+pnpm build    # 产物直出 src/agent_core/api/console/（base:'./'，FastAPI 挂载点不变）
+```
+
+- **后端零改动**：`app.py` 的静态挂载与全部 console 测试原样通过（页面标题仍为 Agent Console）
+- 401 自动弹出令牌输入框；SSE 实时刷新 + 轮询兜底（runs 15s / approvals 8s / 活动 run 详情 10s）
+- 顺带修复：线程气泡倒序显示的旧 bug（flex-col-reverse 下的 DOM 顺序）
+
 ## 多轮对话（Phase 23）
 
 **每个 run 天生自带对话线程**（`thread_id` = 自己的 id，对话状态经 LangGraph checkpointer 持久化到 `agent_core.db`）。在 Console 的任意 run 详情页输入框直接续聊——"把第 5 页改成……"、"刚才那个文件再补充一点"——agent 带着该 thread 的全部历史继续干活，产物实时进产物窗口。跨重启后依然记得全部上下文（AsyncSqliteSaver）。
@@ -273,7 +296,7 @@ uv run --env-file .env python scripts/serve_console.py   # 默认 0.0.0.0:8000
 | 不知道它之前/现在在干嘛 | **时间线**：历史 run 来自 SQLite（重启不丢），进行中的 run 通过全局 SSE 实时刷新状态徽章；详情页有逐条事件时间线、token 用量、自检结果、最终输出 |
 | 危险操作/求助需要人工 | **审批面板**：工具审批与任务级求助（NEEDS_INPUT）在页面上批准/驳回/填写给分身的答复 |
 
-派任务也在页面顶部完成（选 agent → 写任务 → 提交，立即出现在时间线上）。安全：设置 `AGENT_CORE_CONSOLE_TOKEN` 后所有 `/v1` 与 `/console` 请求需携带 token（页面首次提示输入，存 localStorage）；不设置则局域网内开放。
+派任务/续聊在页面底部聊天输入框完成（Runs 列表在左侧边栏，点击即续聊该线程）。安全：设置 `AGENT_CORE_CONSOLE_TOKEN` 后所有 `/v1` 与 `/console` 请求需携带 token（页面首次提示输入，存 localStorage）；不设置则局域网内开放。前端技术栈见 Phase 25。
 
 ## 本地模型与多模态工具（Phase 18）
 
