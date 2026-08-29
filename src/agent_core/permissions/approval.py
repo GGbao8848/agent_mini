@@ -14,7 +14,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
-from agent_core.domain.action import Action, ApprovalRequest, ApprovalStatus
+from agent_core.domain.action import Action, ApprovalKind, ApprovalRequest, ApprovalStatus
 from agent_core.errors.exceptions import ApprovalError, RegistryError
 from agent_core.persistence.store import SqliteStore
 
@@ -38,6 +38,22 @@ class ApprovalManager:
             arguments=dict(action.arguments),
             risk_level=action.risk_level,
             reason=reason or action.reason,
+        )
+        self._pending[request.id] = request
+        self._wakeups[request.id] = asyncio.Event()
+        self._save(request)
+        return request
+
+    def create_help(
+        self, *, run_id: str, agent_id: str, question: str, reason: str = ""
+    ) -> ApprovalRequest:
+        """Create a task-level help request (autonomy layer, no tool execution)."""
+        request = ApprovalRequest(
+            run_id=run_id,
+            agent_id=agent_id,
+            kind=ApprovalKind.TASK_HELP,
+            question=question,
+            reason=reason,
         )
         self._pending[request.id] = request
         self._wakeups[request.id] = asyncio.Event()
@@ -90,8 +106,13 @@ class ApprovalManager:
         *,
         resolved_by: str = "user",
         edited_arguments: dict[str, Any] | None = None,
+        note: str | None = None,
     ) -> ApprovalRequest:
-        """Resolve a pending request and wake the waiting gate."""
+        """Resolve a pending request and wake the waiting gate.
+
+        ``note`` carries the human's answer for task-help requests; the gate
+        feeds it back to the agent as guidance.
+        """
         request = self._pending.pop(approval_id, None)
         if request is None:
             if approval_id in self._resolved:
@@ -110,6 +131,8 @@ class ApprovalManager:
         request.resolved_at = datetime.now(UTC)
         if edited_arguments is not None:
             request.edited_arguments = dict(edited_arguments)
+        if note is not None:
+            request.resolved_note = note
         self._resolved[approval_id] = request
         self._wakeups[approval_id].set()
         self._save(request)

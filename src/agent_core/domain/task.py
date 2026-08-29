@@ -28,6 +28,7 @@ class RunStatus(StrEnum):
     PLANNING = "planning"
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"
+    NEEDS_INPUT = "needs_input"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -48,6 +49,7 @@ _ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.RUNNING: frozenset(
         {
             RunStatus.WAITING_APPROVAL,
+            RunStatus.NEEDS_INPUT,
             RunStatus.COMPLETED,
             RunStatus.FAILED,
             RunStatus.CANCELLED,
@@ -55,6 +57,11 @@ _ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
         }
     ),
     RunStatus.WAITING_APPROVAL: frozenset(
+        {RunStatus.RUNNING, RunStatus.CANCELLED, RunStatus.TIMEOUT}
+    ),
+    # Task-level human help (request_help / loop guard / verification escalation);
+    # the human's answer is fed back to the agent, so it resumes like a pause.
+    RunStatus.NEEDS_INPUT: frozenset(
         {RunStatus.RUNNING, RunStatus.CANCELLED, RunStatus.TIMEOUT}
     ),
     RunStatus.COMPLETED: frozenset(),

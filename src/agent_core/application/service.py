@@ -99,8 +99,13 @@ class AgentCoreService:
         *,
         resolved_by: str = "user",
         edited_arguments: dict[str, Any] | None = None,
+        note: str | None = None,
     ) -> ApprovalRequest:
-        """Resolve a pending approval and wake the run waiting on it."""
+        """Resolve a pending approval and wake the run waiting on it.
+
+        ``note`` is the human's answer for task-help requests; it is fed back
+        to the agent as guidance.
+        """
         if decision not in _RESOLVABLE_DECISIONS:
             raise ApprovalError(
                 f"'{decision.value}' is not a valid approval decision",
@@ -111,6 +116,7 @@ class AgentCoreService:
             decision,
             resolved_by=resolved_by,
             edited_arguments=edited_arguments,
+            note=note,
         )
 
     # -------------------------------------------------------------------- mcp

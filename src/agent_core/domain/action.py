@@ -63,19 +63,36 @@ class ApprovalStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class ApprovalKind(StrEnum):
+    """What kind of human decision a request represents.
+
+    ``tool_action`` is the classic Action Gate approval for a risky tool call;
+    ``task_help`` is a task-level question raised by the autonomy layer (the
+    agent's own ``request_help`` tool, the loop guard, or verification
+    escalation) — the human's ``resolved_note`` is fed back to the agent as
+    guidance rather than gating a specific execution.
+    """
+
+    TOOL_ACTION = "tool_action"
+    TASK_HELP = "task_help"
+
+
 class ApprovalRequest(BaseModel):
-    """A human decision request created by the Action Gate."""
+    """A human decision request created by the Action Gate or autonomy layer."""
 
     id: str = Field(default_factory=new_id)
     run_id: str
     agent_id: str
-    action_id: str
-    tool_name: str
+    kind: ApprovalKind = ApprovalKind.TOOL_ACTION
+    action_id: str | None = None
+    tool_name: str | None = None
     arguments: dict[str, Any] = Field(default_factory=dict)
-    risk_level: RiskLevel
+    risk_level: RiskLevel = RiskLevel.LOW
+    question: str = ""
     reason: str = ""
     status: ApprovalStatus = ApprovalStatus.PENDING
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     resolved_at: datetime | None = None
     resolved_by: str | None = None
     edited_arguments: dict[str, Any] | None = None
+    resolved_note: str | None = None

@@ -36,15 +36,26 @@ class AgentExecutor:
         self._fanout = fanout or EventFanout()
 
     async def execute(
-        self, graph: CompiledGraph, *, run: Run, task: Task, spec: AgentSpec
+        self,
+        graph: CompiledGraph,
+        *,
+        run: Run,
+        task: Task,
+        spec: AgentSpec,
+        collector: UsageCollector | None = None,
     ) -> str:
-        """Run the graph to completion and return the agent's final text."""
+        """Run the graph to completion and return the agent's final text.
+
+        ``collector`` lets the caller own the usage accounting (the runtime
+        registers a run-scoped collector so budget middleware can read live
+        usage mid-run); without one a local collector is used.
+        """
+        usage_collector = collector or UsageCollector()
         self._fanout.emit(
             EventType.AGENT_STARTED, run=run, agent_id=run.agent_id, input=task.input
         )
         started = time.monotonic()
-        collector = UsageCollector()
-        callbacks: list[Any] = [collector]
+        callbacks: list[Any] = [usage_collector]
         if spec.subagents:
             callbacks.append(
                 SubagentTraceHandler(
@@ -71,7 +82,7 @@ class AgentExecutor:
             ) from exc
         finally:
             # Partial usage survives failures; consumers still see the cost.
-            run.usage = collector.usage
+            run.usage = usage_collector.usage
 
         output = self._final_output(state, run_id=run.id)
         run.usage.duration_ms = (time.monotonic() - started) * 1000
