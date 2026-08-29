@@ -68,6 +68,17 @@ class BaseRegistry(Generic[V]):
             self._store.delete_item(self.kind, key)
         return item
 
+    def replace(self, item: V) -> None:
+        """Insert or update ``item`` (upsert) with write-through persistence.
+
+        Unlike :meth:`register` this tolerates an existing key — the editing
+        surface (Console agent binding) updates specs in place.
+        """
+        key = self.key_for(item)
+        self._items[key] = item
+        if self._store is not None:
+            self._store.save_item(self.kind, key, self.serialize(item))
+
     def hydrate(self) -> None:
         """Load items persisted by a previous process (no-op without a store)."""
         if self._store is None:

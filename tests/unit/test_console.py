@@ -362,3 +362,61 @@ class TestMcpMetadataAndStd:
         env = _stdio_env(definition, credential=None)
         assert env["CUSTOM_VAR"] == "1"
         assert env["PATH"]  # host environment preserved
+
+
+class TestAgentBinding:
+    async def test_update_tools_and_skills(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        skill_dir = tmp_path / "skills" / "greet"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Greet")
+        client = toolbox_client(tmp_path, monkeypatch)
+
+        installed = await client.post("/v1/skills", json={
+            "id": "greet", "name": "Greet", "path": str(skill_dir),
+        })
+        assert installed.status_code == 201, installed.text
+
+        updated = await client.put("/v1/agents/helper", json={
+            "tools": ["demo_echo", "run_code"], "skills": ["greet"],
+        })
+        assert updated.status_code == 200, updated.text
+        body = updated.json()
+        assert body["tools"] == ["demo_echo", "run_code"]
+        assert body["skills"] == ["greet"]
+
+        # Omitted fields keep their values.
+        tools_only = await client.put("/v1/agents/helper", json={"tools": ["run_code"]})
+        assert tools_only.json()["tools"] == ["run_code"]
+        assert tools_only.json()["skills"] == ["greet"]
+        await client.aclose()
+
+    async def test_unknown_skill_maps_to_404(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = toolbox_client(tmp_path, monkeypatch)
+        missing = await client.put("/v1/agents/helper", json={"skills": ["nope"]})
+        assert missing.status_code == 404
+        await client.aclose()
+
+    async def test_binding_survives_restart(self, tmp_path: Path) -> None:
+        from agent_core.application.bootstrap import default_service
+        from agent_core.config.settings import Settings
+
+        settings = Settings(
+            _env_file=None,
+            workspace_dir=str(tmp_path / "workspace"),
+            database_url=f"sqlite:///{tmp_path}/agent.db",
+        )
+        service = default_service(settings)
+        if "helper" not in service.runtime.agents:
+            service.runtime.agents.register(AgentSpec(id="helper", name="Helper"))
+        service.update_agent("helper", tools=["demo_echo"])
+
+        # New process, same database.
+        service2 = default_service(settings)
+        agent = service2.runtime.agents.get("helper")
+        assert agent.tools == ["demo_echo"]
+        service2.store.close()
+        service.store.close()
