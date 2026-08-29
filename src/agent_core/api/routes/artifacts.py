@@ -51,10 +51,12 @@ def download_artifact(
     if target is None:
         raise RegistryError(kind="artifact", key=path, detail="not found in workspace")
     media_type = guess_media_type(target)
-    disposition = "inline" if inline_preview(media_type) else "attachment"
+    # Starlette emits an RFC 5987 filename* for non-ASCII names (Chinese
+    # filenames are the norm here) — never build the header by hand, an
+    # encoded latin-1 header raises UnicodeEncodeError and 500s the download.
     return FileResponse(
         target,
         media_type=media_type,
-        filename=target.name if disposition == "attachment" else None,
-        headers={"Content-Disposition": f'{disposition}; filename="{target.name}"'},
+        filename=target.name,
+        content_disposition_type="inline" if inline_preview(media_type) else "attachment",
     )

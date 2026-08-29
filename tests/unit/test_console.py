@@ -136,6 +136,31 @@ class TestArtifactApi:
         assert escape.status_code == 404
         await client.aclose()
 
+    async def test_unicode_filename_downloads(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Chinese artifact names must not break the response headers (regression:
+        a hand-built Content-Disposition raised UnicodeEncodeError → 500)."""
+        service = make_service(tmp_path, monkeypatch)
+        client = make_client(service)
+        workspace = tmp_path / "workspace"
+        (workspace / "ppt").mkdir(parents=True)
+        (workspace / "ppt" / "智能体科普扫盲.pptx").write_bytes(b"PK\x03\x04fake")
+        run = service.runtime.create_run("helper", "make a deck")
+
+        response = await client.get(
+            f"/v1/artifacts/{run.id}/download", params={"path": "ppt/智能体科普扫盲.pptx"}
+        )
+
+        assert response.status_code == 200
+        assert response.content.startswith(b"PK")
+        disposition = response.headers["content-disposition"]
+        assert "filename*=utf-8''" in disposition  # RFC 5987 encoded
+        assert response.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument"
+        )
+        await client.aclose()
+
 
 class TestConsoleAuth:
     async def test_token_required_when_configured(

@@ -26,6 +26,7 @@ LOG_DIR = Path("logs/e2e")
 
 AVATAR_SYSTEM_PROMPT = """你是用户的个人 AI 分身，独立完成长任务。工作约定：
 - 工作目录：所有文件都写在 workspace 下（文件工具的根目录就是它）；
+  文件工具一律用相对路径（如 ppt/build.py），不要用绝对路径；
   run_code 在同一目录执行 bash。
 - 生成图片：调用 generate_image 后会返回图片的绝对路径；
   重要的图用 view_image 亲自查看确认。
