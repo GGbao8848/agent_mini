@@ -11,8 +11,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agent_core.artifacts import scan_workspace_artifacts
+from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
 from agent_core.domain.metrics import RunUsage
@@ -133,6 +136,11 @@ class AgentRuntime:
         """Snapshot of all runs, in creation order."""
         return list(self._runs.values())
 
+    def task_input(self, run: Run) -> str:
+        """The task text a run was created for (empty for restored strangers)."""
+        task = self._tasks.get(run.task_id)
+        return task.input if task else ""
+
     # ---------------------------------------------------------------- restore
 
     def hydrate(self) -> None:
@@ -209,6 +217,7 @@ class AgentRuntime:
         except AgentError as exc:
             self._finish_with_error(run, exc, RunStatus.FAILED)
         finally:
+            self._collect_artifacts(run)
             self._collectors.pop(run.id, None)
             self.loop_guard.forget_run(run.id)
             current_run.reset(run_token)
@@ -241,6 +250,22 @@ class AgentRuntime:
         return run
 
     # --------------------------------------------------------------- internal
+
+    def _collect_artifacts(self, run: Run) -> None:
+        """Record the workspace files this run created (the console's 产物窗口).
+
+        Only top-level runs collect: nested runs (verifier) share the workspace
+        and would double-claim the same files. A small clock-skew allowance
+        keeps files written microseconds after run creation from being missed.
+        """
+        if run.parent_run_id is not None:
+            return
+        workspace = Path(get_settings().workspace_dir)
+        since = run.created_at.timestamp() - 2.0
+        files = scan_workspace_artifacts(workspace, since_ts=since)
+        if files:
+            run.metadata["artifacts"] = files
+            self._save_run(run)
 
     async def _self_verify(
         self,

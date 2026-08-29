@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Console</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>🤖 Agent Console</h1>
+  <span id="conn" class="badge badge-off">connecting…</span>
+  <span class="spacer"></span>
+  <span id="pendingBadge" class="badge badge-warn hidden" title="待处理审批"></span>
+</header>
+
+<section id="newtask">
+  <select id="agentSel"></select>
+  <textarea id="taskInput" rows="2" placeholder="给分身派个任务，例如：把画册的冬天板块加两张图…"></textarea>
+  <button id="runBtn" onclick="submitTask()">▶ 派任务</button>
+</section>
+
+<section id="approvals">
+  <h2>待你处理 <span id="approvalCount" class="muted"></span></h2>
+  <div id="approvalList"><span class="muted">（空）</span></div>
+</section>
+
+<main>
+  <aside id="runsPane">
+    <h2>Runs 时间线</h2>
+    <div id="runList"></div>
+  </aside>
+
+  <section id="detailPane">
+    <h2>Run 详情</h2>
+    <div id="detail"><span class="muted">← 从左侧选择一个 run</span></div>
+    <div id="detailBody" class="hidden">
+      <div id="detailHead"></div>
+      <h3>产物</h3>
+      <div id="artifacts"><span class="muted">（无）</span></div>
+      <h3>事件时间线</h3>
+      <div id="events"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span id="footnote">workspace 是分身的持久工作区 · 产物图片可预览、其余点击下载</span>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

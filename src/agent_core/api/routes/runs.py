@@ -25,13 +25,13 @@ async def create_run(
         parent_run_id=payload.parent_run_id,
         wait=wait,
     )
-    return RunOut.of(run, output=service.final_output(run.id))
+    return RunOut.of(run, output=service.final_output(run.id), input=service.task_input(run.id))
 
 
 @router.get("", response_model=list[RunOut])
 def list_runs(service: ServiceDep, agent_id: str | None = Query(default=None)) -> list[RunOut]:
     return [
-        RunOut.of(run, output=service.final_output(run.id))
+        RunOut.of(run, output=service.final_output(run.id), input=service.task_input(run.id))
         for run in service.list_runs(agent_id)
     ]
 
@@ -39,10 +39,10 @@ def list_runs(service: ServiceDep, agent_id: str | None = Query(default=None)) -
 @router.get("/{run_id}", response_model=RunOut)
 def get_run(run_id: str, service: ServiceDep) -> RunOut:
     run = service.get_run(run_id)
-    return RunOut.of(run, output=service.final_output(run.id))
+    return RunOut.of(run, output=service.final_output(run.id), input=service.task_input(run.id))
 
 
 @router.post("/{run_id}/cancel", response_model=RunOut)
 def cancel_run(run_id: str, service: ServiceDep) -> RunOut:
     run = service.cancel_run(run_id)
-    return RunOut.of(run, output=service.final_output(run.id))
+    return RunOut.of(run, output=service.final_output(run.id), input=service.task_input(run.id))

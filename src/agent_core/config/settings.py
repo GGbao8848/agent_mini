@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     sandbox_cpus: float = 2.0
     sandbox_pids_limit: int = 256
 
+    # Console (Phase 22): when set, every /v1 and /console request must carry
+    # this shared token (X-Console-Token header or ?token=) — a minimal guard
+    # for a console exposed on the LAN. Unset means open access.
+    console_token: str | None = None
+
     # Outbound HTTP proxy for model providers / MCP (e.g. http://127.0.0.1:7890).
     # Applied to the standard HTTP_PROXY / HTTPS_PROXY env vars so every HTTP
     # client in the process (OpenAI SDK, langchain, MCP) picks it up.

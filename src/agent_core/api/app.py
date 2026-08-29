@@ -12,13 +12,20 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from agent_core.api import errors
 from agent_core.api.routes import api_router
 from agent_core.application.bootstrap import default_service
 from agent_core.application.service import AgentCoreService
+from agent_core.config.settings import get_settings
+
+_CONSOLE_DIR = Path(__file__).parent / "console"
 
 
 def create_app(service: AgentCoreService | None = None) -> FastAPI:
@@ -40,6 +47,31 @@ def create_app(service: AgentCoreService | None = None) -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    token = get_settings().console_token
+    if token:
+
+        @app.middleware("http")
+        async def console_token_guard(request: Any, call_next: Any) -> Any:
+            path = request.url.path
+            if path.startswith("/v1") or path.startswith("/console"):
+                provided = request.headers.get("X-Console-Token") or request.query_params.get(
+                    "token"
+                )
+                if provided != token:
+                    return JSONResponse(
+                        status_code=401,
+                        content={
+                            "error": {
+                                "code": "unauthorized",
+                                "message": "missing or invalid console token",
+                                "retryable": False,
+                            }
+                        },
+                    )
+            return await call_next(request)
+
+    app.mount("/console", StaticFiles(directory=_CONSOLE_DIR, html=True), name="console")
     app.state.service = core
     errors.register_error_handlers(app)
     app.include_router(api_router, prefix="/v1")
