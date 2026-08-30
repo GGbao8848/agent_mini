@@ -86,7 +86,7 @@ class TestTelegramBuiltinTool:
         assert seen["url"].endswith("/botTESTTOKEN/sendMessage")
         assert "run finished" in seen["body"]
 
-    def test_registration_requires_token_and_chat(
+    def test_registration_always_registers_but_flags_availability(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from agent_core.builtins.notify import register_builtin_tools
@@ -94,13 +94,17 @@ class TestTelegramBuiltinTool:
         registry = ToolRegistry()
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
         monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-        assert register_builtin_tools(registry) == []
+        # Registered (so the console can show it) but marked unavailable.
+        assert register_builtin_tools(registry) == [TELEGRAM_NOTIFY_TOOL]
+        assert registry.get(TELEGRAM_NOTIFY_TOOL).metadata["available"] is False
 
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T")
-        assert register_builtin_tools(registry) == []  # token alone is not enough
+        assert register_builtin_tools(registry) == [TELEGRAM_NOTIFY_TOOL]
+        assert registry.get(TELEGRAM_NOTIFY_TOOL).metadata["available"] is False  # still no chat
 
         monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
         assert register_builtin_tools(registry) == [TELEGRAM_NOTIFY_TOOL]
+        assert registry.get(TELEGRAM_NOTIFY_TOOL).metadata["available"] is True
         registry.handler_for(TELEGRAM_NOTIFY_TOOL)  # executable is attached
 
 

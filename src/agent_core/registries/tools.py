@@ -50,6 +50,19 @@ class ToolRegistry(BaseRegistry[ToolDefinition]):
         self.get(tool_name)
         self._handlers[tool_name] = handler
 
+    def replace_with_handler(
+        self, item: ToolDefinition, handler: ToolHandler | None = None
+    ) -> None:
+        """Upsert a definition and attach (or keep) its executable.
+
+        Used by registration that must refresh a tool's metadata — built-ins
+        re-register on every boot/reload so availability flags track the
+        current configuration.
+        """
+        self.replace(item)
+        if handler is not None:
+            self._handlers[item.name] = handler
+
     def handler_for(self, tool_name: str) -> ToolHandler:
         """Return the executable for ``tool_name``."""
         self.get(tool_name)

@@ -1,18 +1,21 @@
 """AgentRuntime: owns the run lifecycle from creation to a terminal state.
 
-This is the entry point business code talks to: create a run for an agent,
-execute it (directly or as a background task), cancel it, inspect it. All
-state transitions go through the domain state machine; every observable step
-is emitted as a trace event.
+This is the entry point business code talks to: create a conversation for an
+agent, execute it (directly or as a background task), cancel it, inspect it.
+All state transitions go through the domain state machine; every observable
+step is emitted as a trace event.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from pydantic import ValidationError
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
@@ -21,7 +24,7 @@ from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
 from agent_core.domain.metrics import RunUsage
-from agent_core.domain.task import Run, RunStatus, Task, new_id
+from agent_core.domain.task import Run, RunStatus, Task, make_title, new_id
 from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import (
     AgentError,
@@ -147,12 +150,39 @@ class AgentRuntime:
         except KeyError:
             raise RegistryError(kind="run", key=run_id, detail="not found") from None
 
+    def get_task(self, task_id: str) -> Task:
+        """Return the conversation with ``task_id``."""
+        try:
+            return self._tasks[task_id]
+        except KeyError:
+            raise RegistryError(kind="task", key=task_id, detail="not found") from None
+
+    def list_tasks(self) -> list[Task]:
+        """Snapshot of all conversations, in creation order."""
+        return list(self._tasks.values())
+
     def list_runs(self) -> list[Run]:
         """Snapshot of all runs, in creation order."""
         return list(self._runs.values())
 
+    def task_root_runs(self, task_id: str) -> list[Run]:
+        """Root runs of a conversation, in creation order (each is one turn)."""
+        return [
+            run
+            for run in self._runs.values()
+            if run.task_id == task_id and run.parent_run_id is None
+        ]
+
+    def task_active_run(self, task_id: str) -> Run | None:
+        """The conversation's most recently created root run, if any."""
+        runs = self.task_root_runs(task_id)
+        return runs[-1] if runs else None
+
     def task_input(self, run: Run) -> str:
         """The task text a run was created for (empty for restored strangers)."""
+        stored = run.metadata.get("input")
+        if stored:
+            return str(stored)
         task = self._tasks.get(run.task_id)
         return task.input if task else ""
 
@@ -169,7 +199,20 @@ class AgentRuntime:
         if self._store is None:
             return
         for data in self._store.load_tasks():
-            task = Task.model_validate_json(data)
+            try:
+                task = Task.model_validate_json(data)
+            except ValidationError:
+                # Pre-conversation rows carried only input; keep them as
+                # one-shot conversations so their runs still resolve.
+                raw = json.loads(data)
+                task = Task(
+                    id=raw.get("id") or new_id(),
+                    agent_id="unknown",
+                    title=make_title(raw.get("input", "")),
+                    input=raw.get("input", ""),
+                    metadata=raw.get("metadata") or {},
+                )
+                self._save_task(task)
             self._tasks[task.id] = task
         for data in self._store.load_runs():
             run = Run.model_validate_json(data)
@@ -182,6 +225,13 @@ class AgentRuntime:
 
     # -------------------------------------------------------------- lifecycle
 
+    def create_conversation(self, agent_id: str, text: str) -> Task:
+        """Start a new conversation: create its Task and the first root run."""
+        spec = self.agents.get(agent_id)  # fail fast on unknown agents
+        task = self._new_task(spec.id, text)
+        self.create_run(spec.id, text, task=task)
+        return task
+
     def create_run(
         self,
         agent_id: str,
@@ -189,26 +239,60 @@ class AgentRuntime:
         *,
         parent_run_id: str | None = None,
         thread_id: str | None = None,
+        task: Task | None = None,
     ) -> Run:
         """Create (but do not start) a run of ``agent_id`` for ``task_input``.
 
-        Root runs own a conversation thread (their own id) unless the caller
-        continues an existing one; nested runs never carry a thread.
+        - ``task`` attaches a root run to an existing conversation (follow-up);
+          it reuses the conversation's thread so the agent sees the whole
+          history.
+        - ``parent_run_id`` makes a nested run (sub-agent, verifier): it
+          inherits the parent's conversation and carries no thread of its own.
+        - Neither: a one-shot conversation is created for this run.
         """
         spec = self.agents.get(agent_id)  # fail fast on unknown agents
-        task = Task(input=task_input)
+        if parent_run_id is not None:
+            parent = self._runs.get(parent_run_id)
+            if parent is not None:
+                conversation = task or self._tasks[parent.task_id]
+            else:
+                conversation = task or self._new_task(spec.id, task_input)
+            thread = None
+        elif task is not None:
+            conversation = task
+            thread = thread_id or conversation.thread_id
+        else:
+            conversation = self._new_task(spec.id, task_input)
+            thread = thread_id or conversation.thread_id
         run = Run(
-            task_id=task.id,
+            task_id=conversation.id,
             agent_id=spec.id,
             parent_run_id=parent_run_id,
-            thread_id=thread_id or (new_id() if parent_run_id is None else None),
+            thread_id=thread,
+        )
+        run.metadata["input"] = task_input
+        self._runs[run.id] = run
+        if run.parent_run_id is None:
+            conversation.add_user_turn(task_input, run_id=run.id)
+            self._save_task(conversation)
+        self._save_run(run)
+        return run
+
+    def _new_task(self, agent_id: str, text: str) -> Task:
+        """Create and register a fresh conversation owned by ``agent_id``."""
+        task = Task(
+            agent_id=agent_id,
+            title=make_title(text),
+            input=text,
+            thread_id=new_id(),
         )
         self._tasks[task.id] = task
-        self._runs[run.id] = run
+        self._save_task(task)
+        return task
+
+    def _save_task(self, task: Task) -> None:
         if self._store is not None:
             self._store.save_task(task.id, task.model_dump_json())
-            self._save_run(run)
-        return run
 
     async def execute_run(self, run: Run) -> Run:
         """Drive ``run`` to a terminal state and return it."""
@@ -232,7 +316,7 @@ class AgentRuntime:
             output = await self.executor.execute(
                 graph,
                 run=run,
-                task=task,
+                input_text=run.metadata.get("input") or task.input,
                 spec=spec,
                 collector=collector,
                 thread_id=run.thread_id if run.parent_run_id is None else None,
@@ -242,6 +326,8 @@ class AgentRuntime:
             self.fanout.emit(
                 EventType.RUN_FINISHED, run=run, agent_id=run.agent_id, output=output
             )
+            if run.parent_run_id is None:
+                self._record_assistant_turn(run, output)
         except asyncio.CancelledError:
             # Deliberate cancellation is a normal outcome, not an error.
             self._transition(run, RunStatus.CANCELLED)
@@ -425,10 +511,17 @@ class AgentRuntime:
         self, run: Run, spec: AgentSpec, graph: Any, task_input: str, collector: UsageCollector
     ) -> str:
         """One more execution of the same graph for a fix round."""
-        fix_task = Task(input=task_input)
         return await self.executor.execute(
-            graph, run=run, task=fix_task, spec=spec, collector=collector
+            graph, run=run, input_text=task_input, spec=spec, collector=collector
         )
+
+    def _record_assistant_turn(self, run: Run, output: str) -> None:
+        """Append the agent's answer to the conversation (root runs only)."""
+        conversation = self._tasks.get(run.task_id)
+        if conversation is None:
+            return
+        conversation.add_assistant_turn(output)
+        self._save_task(conversation)
 
     def _transition(self, run: Run, status: RunStatus) -> None:
         previous = run.status

@@ -109,6 +109,41 @@ class TestBuild:
 
         assert hasattr(graph, "ainvoke")
 
+    def test_empty_tools_expands_to_all_available(self) -> None:
+        tools = ToolRegistry()
+        tools.register(ToolDefinition(name="a", description="A"), lambda: "ok")
+        tools.register(ToolDefinition(name="b", description="B"), lambda: "ok")
+        tools.register(
+            ToolDefinition(
+                name="c", description="C", metadata={"available": False}
+            ),
+            lambda: "nope",
+        )
+        builder = make_builder(tools=tools)
+        spec = base_spec(tools=[])  # empty = everything available
+
+        names = builder._agent_tool_names(spec)
+
+        assert names == ["a", "b"]  # unavailable tool excluded
+
+    def test_explicit_tools_stay_a_whitelist(self) -> None:
+        tools = ToolRegistry()
+        tools.register(ToolDefinition(name="a", description="A"), lambda: "ok")
+        tools.register(
+            ToolDefinition(name="b", description="B", metadata={"available": False}),
+            lambda: "ok",
+        )
+        builder = make_builder(tools=tools)
+
+        # Explicitly binding an unavailable tool still resolves (the call-time
+        # handler raises a precise error); explicit list is not filtered.
+        assert builder._agent_tool_names(base_spec(tools=["b"])) == ["b"]
+
+    def test_empty_tools_with_no_registry_is_empty(self) -> None:
+        builder = make_builder()  # empty ToolRegistry
+
+        assert builder._agent_tool_names(base_spec()) == []
+
     def test_skills_stage_into_workspace_backend(self, tmp_path: Path) -> None:
         skills_root = tmp_path / "skills"
         skill_dir = skills_root / "web-research"

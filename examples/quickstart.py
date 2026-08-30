@@ -48,7 +48,11 @@ async def main() -> int:
     )
 
     # 4. Run it; every lifecycle step also landed on the tracer as events.
-    run = await service.submit_run("assistant", "What time is it right now?", wait=True)
+    conversation = await service.submit_run(
+        "assistant", "What time is it right now?", wait=True
+    )
+    run = service.runtime.task_active_run(conversation.id)
+    assert run is not None
     print(f"run {run.id}: {run.status.value}")
     print(f"output: {service.final_output(run.id)}")
     if run.usage:

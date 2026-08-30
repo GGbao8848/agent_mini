@@ -2,6 +2,10 @@
 
 The stub here is a *real* LangGraph graph compiled with the runtime's
 checkpointer — that is the mechanism under test (thread_id → state replay).
+
+A conversation (Task) owns one thread; every turn executes as a root run on
+that thread, so the sidebar shows one entry per conversation no matter how
+many turns it has.
 """
 
 from pathlib import Path
@@ -78,10 +82,14 @@ class TestThreadContinuation:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         runtime = make_runtime(tmp_path, monkeypatch)
-        first = await runtime.execute_run(runtime.create_run("helper", "hello"))
+        conversation = runtime.create_conversation("helper", "hello")
+        first = runtime.task_active_run(conversation.id)
+        assert first is not None
+        await runtime.execute_run(first)
         assert first.status.value == "completed"
 
-        followup = runtime.create_run("helper", "and now?", thread_id=first.thread_id)
+        followup = runtime.create_run("helper", "and now?", task=conversation)
+        assert followup.thread_id == first.thread_id  # same conversation thread
         await runtime.execute_run(followup)
 
         # The node sees the state BEFORE its own output: run 1 sees [user];
@@ -90,13 +98,30 @@ class TestThreadContinuation:
         assert service_output(runtime, first) == "saw-1"
         assert service_output(runtime, followup) == "saw-3"
 
-    async def test_separate_threads_do_not_mix(
+        # The conversation records every turn; the sidebar has one entry.
+        assert [turn.role for turn in conversation.turns] == [
+            "user", "assistant", "user", "assistant",
+        ]
+        assert len(runtime.list_tasks()) == 1
+        assert len(runtime.task_root_runs(conversation.id)) == 2
+
+    async def test_separate_conversations_do_not_mix(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         runtime = make_runtime(tmp_path, monkeypatch)
-        await runtime.execute_run(runtime.create_run("helper", "a"))
-        run_b = await runtime.execute_run(runtime.create_run("helper", "b"))
-        assert service_output(runtime, run_b) == "saw-1"  # fresh thread
+        conversation_a = runtime.create_conversation("helper", "a")
+        run_a = runtime.task_active_run(conversation_a.id)
+        assert run_a is not None
+        await runtime.execute_run(run_a)
+
+        conversation_b = runtime.create_conversation("helper", "b")
+        run_b = runtime.task_active_run(conversation_b.id)
+        assert run_b is not None
+        await runtime.execute_run(run_b)
+
+        assert service_output(runtime, run_a) == "saw-1"  # fresh threads
+        assert service_output(runtime, run_b) == "saw-1"
+        assert run_a.thread_id != run_b.thread_id
 
     async def test_nested_runs_have_no_thread(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -106,6 +131,9 @@ class TestThreadContinuation:
         nested = runtime.create_run("helper", "nested", parent_run_id=root.id)
         assert nested.thread_id is None
         assert root.thread_id is not None
+        # Nested runs share the parent's conversation and record no turns.
+        assert nested.task_id == root.task_id
+        assert len(runtime.get_task(root.task_id).turns) == 1  # user turn only
 
 
 class TestCheckpointerPersistence:
@@ -114,10 +142,14 @@ class TestCheckpointerPersistence:
     ) -> None:
         monkeypatch.setenv("AGENT_CORE_DATABASE_URL", f"sqlite:///{tmp_path}/agent.db")
         runtime1 = make_runtime(tmp_path, monkeypatch)
-        first = await runtime1.execute_run(runtime1.create_run("helper", "hello"))
+        conversation = runtime1.create_conversation("helper", "hello")
+        first = runtime1.task_active_run(conversation.id)
+        assert first is not None
+        await runtime1.execute_run(first)
         assert service_output(runtime1, first) == "saw-1"
 
-        # "Second process": a brand-new runtime over the same database.
+        # "Second process": a brand-new runtime over the same database; the
+        # thread state (what the follow-up needs) survives in the checkpointer.
         runtime2 = make_runtime(tmp_path, monkeypatch)
         followup = runtime2.create_run("helper", "and now?", thread_id=first.thread_id)
         await runtime2.execute_run(followup)
@@ -125,15 +157,39 @@ class TestCheckpointerPersistence:
         assert service_output(runtime2, followup) == "saw-3"
 
 
-class TestSendMessageApi:
-    async def test_send_message_creates_linked_run(
+class TestConversationApi:
+    async def test_send_message_continues_same_conversation(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         service = make_service(tmp_path, monkeypatch)
-        original = await service.submit_run("helper", "hello", wait=True)
+        conversation = await service.submit_run("helper", "hello", wait=True)
+        assert conversation.turns[0].role == "user"
+        assert conversation.turns[-1].role == "assistant"
+        first = service.runtime.task_active_run(conversation.id)
+        assert first is not None
+        assert first.status.value == "completed"
 
-        followup = await service.send_message(original.id, "and now?", wait=True)
+        followup = await service.send_message(conversation.id, "and now?", wait=True)
 
-        assert followup.thread_id == original.thread_id
-        assert followup.id != original.id
-        assert followup.status.value == "completed"
+        # Same conversation object, one more turn; still a single sidebar entry.
+        assert followup.id == conversation.id
+        assert [turn.role for turn in followup.turns] == [
+            "user", "assistant", "user", "assistant",
+        ]
+        runs = service.runtime.task_root_runs(conversation.id)
+        assert len(runs) == 2
+        assert runs[0].thread_id == runs[1].thread_id  # same conversation thread
+        assert runs[1].status.value == "completed"
+        assert len(service.list_tasks()) == 1
+        assert len(service.list_runs()) == 2
+
+    async def test_cancel_task_cancels_active_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = make_service(tmp_path, monkeypatch)
+        # Created but not yet executed — cancellation is deterministic.
+        conversation = service.runtime.create_conversation("helper", "hello")
+        cancelled = service.cancel_task(conversation.id)
+        run = service.runtime.task_active_run(conversation.id)
+        assert run is not None and run.status.value == "cancelled"
+        assert cancelled.id == conversation.id

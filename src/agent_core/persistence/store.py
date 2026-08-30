@@ -28,7 +28,7 @@ from typing import Any
 from agent_core.errors.exceptions import ConfigurationError
 
 _SQLITE_PREFIX = "sqlite:///"
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _BUSY_TIMEOUT_MS = 15000
 
 _SCHEMA = """
@@ -59,6 +59,16 @@ CREATE TABLE IF NOT EXISTS trace_events (
 );
 CREATE INDEX IF NOT EXISTS idx_trace_events_run ON trace_events (run_id);
 """
+
+# Incremental migrations run in order for databases below _SCHEMA_VERSION.
+_MIGRATIONS: dict[int, str] = {
+    2: """
+CREATE TABLE IF NOT EXISTS schedules (
+    id TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+);
+""",
+}
 
 
 def parse_sqlite_url(url: str) -> Path | str:
@@ -110,19 +120,22 @@ class SqliteStore:
     # ------------------------------------------------------------- lifecycle
 
     def _migrate(self) -> None:
-        """Create the schema when missing; refuse newer databases."""
+        """Create the schema when missing; apply incremental migrations in order."""
         (version,) = self._conn.execute("PRAGMA user_version").fetchone()
         if version > _SCHEMA_VERSION:
             raise ConfigurationError(
                 f"Database schema v{version} is newer than this build (v{_SCHEMA_VERSION})",
                 details={"database_version": version, "code_version": _SCHEMA_VERSION},
             )
-        if version == _SCHEMA_VERSION:
-            return
         if version < 1:
             self._conn.executescript(_SCHEMA)
-        self._conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-        self._conn.commit()
+        for target in range(version + 1, _SCHEMA_VERSION + 1):
+            script = _MIGRATIONS.get(target)
+            if script:
+                self._conn.executescript(script)
+        if version < _SCHEMA_VERSION:
+            self._conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -201,6 +214,22 @@ class SqliteStore:
     def load_approvals(self) -> list[str]:
         rows = self._conn.execute("SELECT data FROM approvals ORDER BY rowid").fetchall()
         return [data for (data,) in rows]
+
+    # -------------------------------------------------------------- schedules
+
+    def save_schedule(self, schedule_id: str, data: str) -> None:
+        self._write(
+            "INSERT INTO schedules (id, data) VALUES (?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+            (schedule_id, data),
+        )
+
+    def load_schedules(self) -> list[str]:
+        rows = self._conn.execute("SELECT data FROM schedules ORDER BY rowid").fetchall()
+        return [data for (data,) in rows]
+
+    def delete_schedule(self, schedule_id: str) -> None:
+        self._write("DELETE FROM schedules WHERE id = ?", (schedule_id,))
 
     # ----------------------------------------------------------- trace events
 

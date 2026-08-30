@@ -16,7 +16,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from agent_core.domain.agent import AgentSpec
-from agent_core.domain.task import Run, Task
+from agent_core.domain.task import Run
 from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import AgentError, AgentExecutionError, RunTimeoutError
 from agent_core.observability.emitter import EventFanout
@@ -41,7 +41,7 @@ class AgentExecutor:
         graph: CompiledGraph,
         *,
         run: Run,
-        task: Task,
+        input_text: str,
         spec: AgentSpec,
         collector: UsageCollector | None = None,
         thread_id: str | None = None,
@@ -54,7 +54,7 @@ class AgentExecutor:
         """
         usage_collector = collector or UsageCollector()
         self._fanout.emit(
-            EventType.AGENT_STARTED, run=run, agent_id=run.agent_id, input=task.input
+            EventType.AGENT_STARTED, run=run, agent_id=run.agent_id, input=input_text
         )
         started = time.monotonic()
         callbacks: list[Any] = [usage_collector]
@@ -72,7 +72,7 @@ class AgentExecutor:
                 config["configurable"] = {"thread_id": thread_id}
             state = await asyncio.wait_for(
                 graph.ainvoke(
-                    {"messages": [{"role": "user", "content": task.input}]},
+                    {"messages": [{"role": "user", "content": input_text}]},
                     config=config,
                 ),
                 timeout=spec.limits.timeout_seconds,

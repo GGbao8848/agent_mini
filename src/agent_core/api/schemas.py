@@ -9,6 +9,7 @@ application layer.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -17,8 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent_core.domain.action import ApprovalRequest
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
+from agent_core.domain.schedule import Schedule, ScheduleType
 from agent_core.domain.skill import SkillManifest
-from agent_core.domain.task import Run
+from agent_core.domain.task import Run, Task, Turn
 from agent_core.domain.tool import ToolDefinition
 from agent_core.domain.trace import TraceEvent
 from agent_core.errors.exceptions import SkillError
@@ -46,6 +48,121 @@ class RunUsageOut(BaseModel):
 
 class RunMessageRequest(BaseModel):
     input: str = Field(min_length=1)
+
+
+class TaskCreateRequest(BaseModel):
+    agent_id: str = Field(min_length=1)
+    input: str = Field(min_length=1, description="Task input, e.g. the user's question")
+
+
+class TaskMessageRequest(BaseModel):
+    input: str = Field(min_length=1)
+
+
+class TurnOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    role: str
+    content: str
+    created_at: Any
+    metadata: dict[str, Any]
+
+    @classmethod
+    def of(cls, turn: Turn) -> TurnOut:
+        return cls.model_validate(turn)
+
+
+class TaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    agent_id: str
+    title: str
+    thread_id: str | None
+    turns: list[TurnOut]
+    status: str
+    active_run_id: str | None
+    created_at: Any
+    metadata: dict[str, Any]
+
+    @classmethod
+    def of(cls, task: Task, *, status: str, active_run_id: str | None) -> TaskOut:
+        return cls(
+            id=task.id,
+            agent_id=task.agent_id,
+            title=task.title,
+            thread_id=task.thread_id,
+            turns=[TurnOut.of(turn) for turn in task.turns],
+            status=status,
+            active_run_id=active_run_id,
+            created_at=task.created_at,
+            metadata=task.metadata,
+        )
+
+
+class ScheduleBase(BaseModel):
+    name: str = Field(min_length=1)
+    agent_id: str = Field(min_length=1)
+    task_input: str = Field(min_length=1)
+    schedule_type: ScheduleType
+    run_at: datetime | None = None
+    cron_expr: str | None = None
+    interval_minutes: int | None = Field(default=None, ge=1)
+    enabled: bool = True
+
+
+class ScheduleCreateRequest(ScheduleBase):
+    pass
+
+
+class ScheduleUpdateRequest(ScheduleBase):
+    pass
+
+
+class ScheduleOut(BaseModel):
+    id: str
+    name: str
+    agent_id: str
+    task_input: str
+    schedule_type: str
+    run_at: Any | None = None
+    cron_expr: str | None = None
+    interval_minutes: int | None = None
+    enabled: bool
+    created_at: Any
+    last_run_at: Any | None = None
+    next_run_at: Any | None = None
+    last_task_id: str | None = None
+    run_count: int
+    trigger_text: str
+    metadata: dict[str, Any]
+
+    @classmethod
+    def of(cls, schedule: Schedule) -> ScheduleOut:
+        return cls(
+            id=schedule.id,
+            name=schedule.name,
+            agent_id=schedule.agent_id,
+            task_input=schedule.task_input,
+            schedule_type=schedule.schedule_type,
+            run_at=schedule.run_at,
+            cron_expr=schedule.cron_expr,
+            interval_minutes=schedule.interval_minutes,
+            enabled=schedule.enabled,
+            created_at=schedule.created_at,
+            last_run_at=schedule.last_run_at,
+            next_run_at=schedule.next_run_at,
+            last_task_id=schedule.last_task_id,
+            run_count=schedule.run_count,
+            trigger_text=schedule.describe_trigger(),
+            metadata=schedule.metadata,
+        )
+
+
+class ScheduleRunOut(BaseModel):
+    schedule_id: str
+    task_id: str
 
 
 class RunOut(BaseModel):
@@ -149,10 +266,23 @@ class ToolOut(BaseModel):
     risk_level: str
     source: str
     metadata: dict[str, Any]
+    available: bool = True
+    availability_reason: str = ""
 
     @classmethod
     def of(cls, definition: ToolDefinition) -> ToolOut:
-        return cls.model_validate(definition)
+        metadata = definition.metadata or {}
+        available = metadata.get("available", True)
+        return cls(
+            name=definition.name,
+            description=definition.description,
+            input_schema=definition.input_schema,
+            risk_level=definition.risk_level.value,
+            source=definition.source.value,
+            metadata=metadata,
+            available=bool(available),
+            availability_reason=str(metadata.get("availability_reason", "")),
+        )
 
 
 class SkillCreateRequest(BaseModel):

@@ -10,10 +10,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent_core.application.scheduler import ScheduleManager
 from agent_core.domain.action import ApprovalRequest, ApprovalStatus
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition
-from agent_core.domain.task import Run
+from agent_core.domain.schedule import Schedule
+from agent_core.domain.task import Run, Task
 from agent_core.domain.trace import EventType, TraceEvent
 from agent_core.errors.exceptions import ApprovalError
 from agent_core.mcp.manager import MCPManager
@@ -45,14 +47,16 @@ class AgentCoreService:
         mcp_registry: MCPRegistry,
         broker: EventStreamBroker,
         store: SqliteStore | None = None,
+        schedules: ScheduleManager | None = None,
     ) -> None:
         self.runtime = runtime
         self.mcp = mcp
         self.mcp_registry = mcp_registry
         self.broker = broker
         self.store = store
+        self.schedules = schedules
 
-    # ------------------------------------------------------------------ runs
+    # ------------------------------------------------------------------ tasks
 
     async def submit_run(
         self,
@@ -61,13 +65,24 @@ class AgentCoreService:
         *,
         parent_run_id: str | None = None,
         wait: bool = False,
-    ) -> Run:
-        """Create and start a run; with ``wait`` return it in a terminal state."""
-        run = self.runtime.create_run(agent_id, task_input, parent_run_id=parent_run_id)
-        task = self.runtime.submit_run(run)
-        if wait:
-            await task
-        return run
+    ) -> Task:
+        """Start a new conversation; with ``wait`` return it fully answered."""
+        task = self.runtime.create_conversation(agent_id, task_input)
+        run = self.runtime.task_active_run(task.id)
+        if run is not None:
+            execution = self.runtime.submit_run(run)
+            if wait:
+                await execution
+        return task
+
+    def get_task(self, task_id: str) -> Task:
+        return self.runtime.get_task(task_id)
+
+    def list_tasks(self, agent_id: str | None = None) -> list[Task]:
+        tasks = self.runtime.list_tasks()
+        if agent_id is not None:
+            tasks = [task for task in tasks if task.agent_id == agent_id]
+        return tasks
 
     def get_run(self, run_id: str) -> Run:
         return self.runtime.get_run(run_id)
@@ -78,22 +93,27 @@ class AgentCoreService:
             runs = [run for run in runs if run.agent_id == agent_id]
         return runs
 
-    def cancel_run(self, run_id: str) -> Run:
-        return self.runtime.cancel_run(run_id)
+    def cancel_task(self, task_id: str) -> Task:
+        """Cancel the conversation's active run; returns the conversation."""
+        run = self.runtime.task_active_run(task_id)
+        if run is not None:
+            self.runtime.cancel_run(run.id)
+        return self.runtime.get_task(task_id)
 
-    async def send_message(self, run_id: str, text: str, *, wait: bool = False) -> Run:
-        """Continue the conversation of ``run_id``'s thread with a new message.
+    async def send_message(self, task_id: str, text: str, *, wait: bool = False) -> Task:
+        """Continue the conversation of ``task_id`` with a new user turn.
 
-        The follow-up run replays the whole stored history, so the agent
-        continues where that run left off (change the deck, fix the file...).
+        The follow-up run reuses the conversation's thread, so the agent
+        continues where it left off with the whole history in context.
         """
-        original = self.get_run(run_id)
-        thread = original.thread_id or original.id
-        run = self.runtime.create_run(original.agent_id, text, thread_id=thread)
-        task = self.runtime.submit_run(run)
+        conversation = self.runtime.get_task(task_id)
+        run = self.runtime.create_run(
+            conversation.agent_id, text, task=conversation
+        )
+        execution = self.runtime.submit_run(run)
         if wait:
-            await task
-        return run
+            await execution
+        return conversation
 
     def task_input(self, run_id: str) -> str:
         run = self.get_run(run_id)
@@ -175,7 +195,7 @@ class AgentCoreService:
     async def disconnect_server(self, server_id: str) -> None:
         await self.mcp.disconnect(server_id)
 
-    # ----------------------------------------------------------------- events
+    # ---------------------------------------------------------------- events
 
     def trace_events(self, run_id: str) -> list[TraceEvent]:
         return self.runtime.tracer.get_events(run_id)
@@ -186,3 +206,40 @@ class AgentCoreService:
 
     def unsubscribe_events(self, stream: EventStream) -> None:
         self.broker.unsubscribe(stream)
+
+    # -------------------------------------------------------------- schedules
+
+    def list_schedules(self) -> list[Schedule]:
+        if self.schedules is None:
+            return []
+        return self.schedules.list()
+
+    def get_schedule(self, schedule_id: str) -> Schedule:
+        if self.schedules is None:
+            raise ApprovalError("schedules are not available", details={"schedule_id": schedule_id})
+        return self.schedules.get(schedule_id)
+
+    def create_schedule(self, schedule: Schedule) -> Schedule:
+        if self.schedules is None:
+            raise ApprovalError("schedules are not available")
+        return self.schedules.add(schedule)
+
+    def update_schedule(self, schedule: Schedule) -> Schedule:
+        if self.schedules is None:
+            raise ApprovalError("schedules are not available")
+        return self.schedules.update(schedule)
+
+    def delete_schedule(self, schedule_id: str) -> None:
+        if self.schedules is None:
+            raise ApprovalError("schedules are not available")
+        self.schedules.remove(schedule_id)
+
+    async def run_schedule_now(self, schedule_id: str) -> Task:
+        """Execute a schedule immediately as a fresh conversation (manual run).
+
+        Returns the created task so the console can jump into the conversation.
+        """
+        if self.schedules is None:
+            raise ApprovalError("schedules are not available")
+        schedule = self.schedules.get(schedule_id)
+        return await self.schedules.run_schedule(schedule)

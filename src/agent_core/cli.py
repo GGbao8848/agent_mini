@@ -2,7 +2,7 @@
 
 Three modes:
 - ``serve`` — start the HTTP API (uvicorn).
-- API client commands (``agents``, ``tools``, ``skills``, ``runs``, ``run``,
+- API client commands (``agents``, ``tools``, ``skills``, ``tasks``, ``run``,
   ``cancel``, ``approvals``, ``resolve``, ``mcp-connect``,
   ``mcp-disconnect``, ``events``) — thin wrappers over the API of a running
   server; state lives in that process, so the client stays stateless.
@@ -53,14 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
         ("agents", "List registered agents"),
         ("tools", "List registered tools"),
         ("skills", "List registered skills"),
-        ("runs", "List runs"),
+        ("tasks", "List conversations"),
         ("approvals", "List pending approvals"),
     ):
         command = sub.add_parser(name, parents=[common], help=help_text)
-        if name == "runs":
+        if name == "tasks":
             command.add_argument("--agent", default=None, help="Filter by agent id")
 
-    run = sub.add_parser("run", parents=[common], help="Start a run via the API")
+    run = sub.add_parser("run", parents=[common], help="Start a conversation via the API")
     run.add_argument("agent_id")
     run.add_argument("input")
     run.add_argument("--no-wait", action="store_true", help="Do not wait for completion")
@@ -68,8 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     events = sub.add_parser("events", parents=[common], help="Stream live events (Ctrl-C to stop)")
     events.add_argument("run_id", nargs="?", default=None)
 
-    cancel = sub.add_parser("cancel", parents=[common], help="Cancel a run")
-    cancel.add_argument("run_id")
+    cancel = sub.add_parser("cancel", parents=[common], help="Cancel a conversation")
+    cancel.add_argument("task_id")
 
     resolve = sub.add_parser("resolve", parents=[common], help="Resolve a pending approval")
     resolve.add_argument("approval_id")
@@ -119,21 +119,21 @@ async def _api_command(args: argparse.Namespace, client: Any) -> int:
         return _show(await client.get("/v1/tools"))
     if name == "skills":
         return _show(await client.get("/v1/skills"))
-    if name == "runs":
+    if name == "tasks":
         params = {"agent_id": args.agent} if args.agent else None
-        return _show(await client.get("/v1/runs", params=params))
+        return _show(await client.get("/v1/tasks", params=params))
     if name == "approvals":
         return _show(await client.get("/v1/approvals/pending"))
     if name == "run":
         return _show(
             await client.post(
-                "/v1/runs",
+                "/v1/tasks",
                 params={"wait": "false" if args.no_wait else "true"},
                 json={"agent_id": args.agent_id, "input": args.input},
             )
         )
     if name == "cancel":
-        return _show(await client.post(f"/v1/runs/{args.run_id}/cancel"))
+        return _show(await client.post(f"/v1/tasks/{args.task_id}/cancel"))
     if name == "mcp-connect":
         return _show(await client.post(f"/v1/mcp/servers/{args.server_id}/connect"))
     if name == "mcp-disconnect":
@@ -218,7 +218,11 @@ async def _demo(question: str) -> int:
             tools=["current_time"],
         )
     )
-    run = await service.submit_run("assistant", question, wait=True)
+    conversation = await service.submit_run("assistant", question, wait=True)
+    run = service.runtime.task_active_run(conversation.id)
+    if run is None:
+        print("error: no run was created")
+        return 1
     print(f"status: {run.status.value}")
     if run.error:
         print(f"error: {run.error}")
