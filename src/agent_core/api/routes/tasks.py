@@ -13,7 +13,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 
 from agent_core.api.deps import ServiceDep
-from agent_core.api.schemas import TaskCreateRequest, TaskMessageRequest, TaskOut
+from agent_core.api.schemas import (
+    TaskCreateRequest,
+    TaskMessageRequest,
+    TaskOut,
+    TaskUpdateRequest,
+)
 from agent_core.domain.task import RunStatus
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -54,6 +59,21 @@ def list_tasks(service: ServiceDep, agent_id: str | None = Query(default=None)) 
 @router.get("/{task_id}", response_model=TaskOut)
 def get_task(task_id: str, service: ServiceDep) -> TaskOut:
     return _conversation_out(service, task_id)
+
+
+@router.patch("/{task_id}", response_model=TaskOut)
+def update_task(task_id: str, payload: TaskUpdateRequest, service: ServiceDep) -> TaskOut:
+    """Rename or pin/unpin a conversation."""
+    task = service.runtime.update_task(
+        task_id, title=payload.title, pinned=payload.pinned
+    )
+    return _conversation_out(service, task.id)
+
+
+@router.delete("/{task_id}", status_code=204)
+def delete_task(task_id: str, service: ServiceDep) -> None:
+    """Delete a conversation and its runs (409 while the active run is live)."""
+    service.runtime.delete_task(task_id)
 
 
 @router.post("/{task_id}/cancel", response_model=TaskOut)

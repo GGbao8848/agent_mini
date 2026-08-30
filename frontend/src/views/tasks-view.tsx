@@ -2,16 +2,8 @@ import * as React from "react"
 import { ApprovalCard } from "@/components/runs/approval-card"
 import { RunChatHeader } from "@/components/runs/run-detail"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  useAgents,
   useApprovals,
   useRun,
   useRunEvents,
@@ -89,38 +81,14 @@ function NewTaskComposer({
   onSubmit,
 }: {
   pending: boolean
-  onSubmit: (agentId: string, text: string) => void
+  onSubmit: (text: string) => void
 }) {
-  const agents = useAgents()
-  const [agentId, setAgentId] = React.useState("")
-  const agentList = agents.data ?? []
-
-  React.useEffect(() => {
-    if (!agentId && agentList.length) {
-      const preferred = agentList.find((a) => a.id === "avatar")
-      setAgentId((preferred ?? agentList[0]).id)
-    }
-  }, [agentList, agentId])
-
   return (
     <Composer
       placeholder="给分身派个任务，例如：把画册的冬天板块加两张图…"
-      pending={pending || !agentId}
-      onSubmit={(text) => onSubmit(agentId, text)}
-    >
-      <Select value={agentId} onValueChange={(v) => setAgentId(v ?? "")}>
-        <SelectTrigger className="w-full" disabled={!agentList.length}>
-          <SelectValue placeholder={agents.isLoading ? "加载中…" : "选择分身"} />
-        </SelectTrigger>
-        <SelectContent>
-          {agentList.map((agent) => (
-            <SelectItem key={agent.id} value={agent.id}>
-              {agent.id}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Composer>
+      pending={pending}
+      onSubmit={onSubmit}
+    />
   )
 }
 
@@ -144,8 +112,8 @@ function EmptyState({
       <div className="w-full max-w-2xl">
         <NewTaskComposer
           pending={submit.isPending}
-          onSubmit={(agentId, text) =>
-            submit.mutate({ agentId, input: text }, { onSuccess: onSubmitted })
+          onSubmit={(text) =>
+            submit.mutate({ input: text }, { onSuccess: onSubmitted })
           }
         />
       </div>
@@ -154,7 +122,7 @@ function EmptyState({
 }
 
 /** One conversation: the active run's header, every turn, and a follow-up box. */
-function ChatThread({ task, onClose }: { task: Task; onClose: () => void }) {
+function ChatThread({ task }: { task: Task }) {
   const { data: fresh } = useTask(task.id)
   const current = fresh ?? task
   const activeRun = useRun(current.active_run_id)
@@ -182,9 +150,7 @@ function ChatThread({ task, onClose }: { task: Task; onClose: () => void }) {
 
   return (
     <>
-      {activeRun.data && (
-        <RunChatHeader run={activeRun.data} events={events} onNewTask={onClose} />
-      )}
+      {activeRun.data && <RunChatHeader run={activeRun.data} events={events} />}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col-reverse gap-3 p-4">
           <div ref={bottomRef} />
@@ -238,7 +204,7 @@ export function TasksView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {listTask ? (
-        <ChatThread key={listTask.id} task={listTask} onClose={() => onSelect(null)} />
+        <ChatThread key={listTask.id} task={listTask} />
       ) : (
         <EmptyState onSubmitted={(task) => onSelect(task.id)} />
       )}

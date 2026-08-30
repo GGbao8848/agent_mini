@@ -161,7 +161,7 @@ class TestScheduleManager:
 
 
 def _fake_runner(calls: list[tuple[str, str]]) -> Any:
-    async def runner(agent_id: str, task_input: str) -> Any:
+    async def runner(agent_id: str, task_input: str, metadata: dict[str, Any] | None = None) -> Any:
         calls.append((agent_id, task_input))
         return type("T", (), {"id": "task-1"})()
 
@@ -199,7 +199,11 @@ class TestScheduleApi:
         service = make_api_service(tmp_path, monkeypatch)
         from agent_core.application.scheduler import ScheduleManager
 
-        service.schedules = ScheduleManager(runner=service.submit_run)
+        service.schedules = ScheduleManager(
+            runner=lambda agent_id, task_input, metadata=None: service.submit_run(
+                agent_id, task_input, metadata=metadata
+            )
+        )
         app = create_app(service)
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -211,7 +215,6 @@ class TestScheduleApi:
             "/v1/schedules",
             json={
                 "name": "hourly",
-                "agent_id": "helper",
                 "task_input": "check logs",
                 "schedule_type": "interval",
                 "interval_minutes": 60,
@@ -229,7 +232,6 @@ class TestScheduleApi:
             "/v1/schedules",
             json={
                 "name": "bad",
-                "agent_id": "helper",
                 "task_input": "x",
                 "schedule_type": "cron",
                 "cron_expr": "99 99 * *",
@@ -243,7 +245,6 @@ class TestScheduleApi:
                 "/v1/schedules",
                 json={
                     "name": "once",
-                    "agent_id": "helper",
                     "task_input": "echo hi",
                     "schedule_type": "one_time",
                     "run_at": (local_now() + timedelta(hours=2)).isoformat(),
@@ -258,6 +259,9 @@ class TestScheduleApi:
         task = (await client.get(f"/v1/tasks/{task_id}")).json()
         assert task["id"] == task_id
         assert task["agent_id"] == "helper"
+        # Provenance is stamped so the sidebar can group it under the schedule.
+        assert task["metadata"]["source_schedule_id"] == created["id"]
+        assert task["metadata"]["source_schedule_name"] == "once"
 
         # Bookkeeping recorded the manual run but the schedule stays enabled.
         updated = (await client.get(f"/v1/schedules/{created['id']}")).json()
@@ -271,7 +275,6 @@ class TestScheduleApi:
                 "/v1/schedules",
                 json={
                     "name": "tmp",
-                    "agent_id": "helper",
                     "task_input": "x",
                     "schedule_type": "interval",
                     "interval_minutes": 5,

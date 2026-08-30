@@ -17,11 +17,12 @@ MAX_ARTIFACTS = 200
 def scan_workspace_artifacts(
     workspace: Path, *, since_ts: float, limit: int = MAX_ARTIFACTS
 ) -> list[dict[str, Any]]:
-    """Return ``[{path, size}]`` for files modified after ``since_ts``.
+    """Return ``[{path, size, mtime}]`` for files modified after ``since_ts``.
 
     Paths are workspace-relative (portable across hosts — a run started on
-    the server can be inspected from any LAN browser later). Hidden entries
-    (dotfiles) are skipped.
+    the server can be inspected from any LAN browser later). ``mtime`` is the
+    file's modification time as an ISO string so the console can show when the
+    artifact appeared. Hidden entries (dotfiles) are skipped.
     """
     if not workspace.is_dir():
         return []
@@ -39,8 +40,20 @@ def scan_workspace_artifacts(
         except OSError:  # raced with deletion — skip
             continue
         if stat.st_mtime >= since_ts:
-            found.append({"path": rel, "size": stat.st_size})
+            found.append(
+                {
+                    "path": rel,
+                    "size": stat.st_size,
+                    "mtime": _iso_mtime(stat.st_mtime),
+                }
+            )
     return found
+
+
+def _iso_mtime(ts: float) -> str:
+    from datetime import UTC, datetime
+
+    return datetime.fromtimestamp(ts, tz=UTC).isoformat()
 
 
 def artifact_abs_path(workspace: Path, relative: str) -> Path | None:

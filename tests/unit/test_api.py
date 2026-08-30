@@ -280,6 +280,46 @@ class TestTaskRoutes:
         tasks = (await client.get("/v1/tasks")).json()
         assert [task["id"] for task in tasks] == [task_id]
 
+    async def test_rename_and_pin_task(self, client: Any) -> None:
+        body = (
+            await client.post(
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "yo"}
+            )
+        ).json()
+        task_id = body["id"]
+
+        renamed = await client.patch(f"/v1/tasks/{task_id}", json={"title": "新名字"})
+        assert renamed.status_code == 200
+        assert renamed.json()["title"] == "新名字"
+
+        pinned = await client.patch(f"/v1/tasks/{task_id}", json={"pinned": True})
+        assert pinned.json()["pinned"] is True
+        assert pinned.json()["title"] == "新名字"  # partial update keeps values
+
+    async def test_delete_task(self, client: Any) -> None:
+        body = (
+            await client.post(
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "yo"}
+            )
+        ).json()
+        task_id = body["id"]
+        run_id = body["active_run_id"]
+
+        deleted = await client.delete(f"/v1/tasks/{task_id}")
+        assert deleted.status_code == 204
+        assert (await client.get(f"/v1/tasks/{task_id}")).status_code == 404
+        assert (await client.get(f"/v1/runs/{run_id}")).status_code == 404  # runs gone too
+
+    async def test_delete_running_task_maps_to_409(self) -> None:
+        app = create_app(make_service(SlowGraph()))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            body = (await client.post("/v1/tasks", json={"agent_id": "helper", "input": "x"})).json()
+            deleted = await client.delete(f"/v1/tasks/{body['id']}")
+            assert deleted.status_code == 409
+            assert deleted.json()["error"]["code"] == "StateError"
+
     async def test_cancel_running_task(self) -> None:
         app = create_app(make_service(SlowGraph()))
         async with httpx.AsyncClient(

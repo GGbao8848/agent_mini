@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useArtifacts } from "@/hooks/use-console"
 import { fmtDateTime, fmtDuration } from "@/lib/format"
 import type { Run, RunEvent } from "@/lib/types"
-import { CircleAlertIcon, CircleCheckIcon, InfoIcon, PlusIcon, TimerIcon } from "lucide-react"
+import { CircleAlertIcon, CircleCheckIcon, InfoIcon, TimerIcon } from "lucide-react"
 
 function UsageLine({ run }: { run: Run }) {
   if (!run.usage) return <span className="text-xs text-muted-foreground">尚无用量统计</span>
@@ -70,6 +70,12 @@ function RunInfoDialog({
         </DialogHeader>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-1.5">
+            <p className="text-xs font-medium text-muted-foreground">事件时间线</p>
+            <div className="rounded-lg border">
+              <EventsPanel events={events} />
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-col gap-1.5">
             <p className="text-xs font-medium text-muted-foreground">产物</p>
             {artifacts.isLoading ? (
               <div className="flex flex-col gap-2">
@@ -79,12 +85,6 @@ function RunInfoDialog({
             ) : (
               <ArtifactsPanel runId={run.id} artifacts={artifacts.data ?? []} />
             )}
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <p className="text-xs font-medium text-muted-foreground">事件时间线</p>
-            <div className="rounded-lg border">
-              <EventsPanel events={events} />
-            </div>
           </div>
         </div>
       </DialogContent>
@@ -96,11 +96,9 @@ function RunInfoDialog({
 export function RunChatHeader({
   run,
   events,
-  onNewTask,
 }: {
   run: Run
   events: RunEvent[]
-  onNewTask: () => void
 }) {
   const [infoOpen, setInfoOpen] = React.useState(false)
   const verification = (run.metadata as { verification?: Verification })?.verification
@@ -118,10 +116,6 @@ export function RunChatHeader({
         <Button variant="ghost" size="sm" onClick={() => setInfoOpen(true)}>
           <InfoIcon data-icon="inline-start" />
           运行详情
-        </Button>
-        <Button variant="ghost" size="icon-sm" onClick={onNewTask} title="新任务">
-          <PlusIcon />
-          <span className="sr-only">新任务</span>
         </Button>
       </div>
       <RunInfoDialog run={run} events={events} open={infoOpen} onOpenChange={setInfoOpen} />

@@ -12,6 +12,8 @@ are restored before the service is returned.
 
 from __future__ import annotations
 
+from typing import Any
+
 from agent_core.application.scheduler import ScheduleManager
 from agent_core.application.service import AgentCoreService
 from agent_core.builtins import register_builtin_tools
@@ -67,8 +69,13 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
         runtime=runtime, mcp=mcp, mcp_registry=mcp_registry, broker=broker, store=store
     )
     # The schedule runner creates a conversation and starts it — the same path
-    # a manual task goes through, so scheduled work lands in the console.
-    schedules = ScheduleManager(runner=service.submit_run, store=store)
+    # a manual task goes through, so scheduled work lands in the console. The
+    # wrapper forwards the schedule's provenance so created tasks can be
+    # grouped under their schedule in the sidebar.
+    async def _schedule_runner(agent_id: str, text: str, metadata: dict[str, Any] | None) -> Any:
+        return await service.submit_run(agent_id, text, metadata=metadata)
+
+    schedules = ScheduleManager(runner=_schedule_runner, store=store)
     if store is not None:
         schedules.restore()
     service.schedules = schedules

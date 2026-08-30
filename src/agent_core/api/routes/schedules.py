@@ -34,7 +34,9 @@ def list_schedules(service: ServiceDep) -> list[ScheduleOut]:
 
 @router.post("", response_model=ScheduleOut, status_code=201)
 def create_schedule(payload: ScheduleCreateRequest, service: ServiceDep) -> ScheduleOut:
-    schedule = Schedule(**payload.model_dump())
+    data = payload.model_dump()
+    data["agent_id"] = service.default_agent()  # schedules always use the default agent
+    schedule = Schedule(**data)
     try:
         return _to_model(service.create_schedule(schedule))
     except ScheduleError as exc:
@@ -53,7 +55,9 @@ def update_schedule(
     schedule_id: str, payload: ScheduleUpdateRequest, service: ServiceDep
 ) -> ScheduleOut:
     existing = service.get_schedule(schedule_id)
-    updated = existing.model_copy(update=payload.model_dump())
+    data = payload.model_dump()
+    data["agent_id"] = existing.agent_id  # agent is fixed at creation
+    updated = existing.model_copy(update=data)
     try:
         return _to_model(service.update_schedule(updated))
     except ScheduleError as exc:

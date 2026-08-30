@@ -51,12 +51,22 @@ class RunMessageRequest(BaseModel):
 
 
 class TaskCreateRequest(BaseModel):
-    agent_id: str = Field(min_length=1)
+    agent_id: str | None = Field(
+        default=None,
+        description="Agent to run; defaults to the default (first registered) agent",
+    )
     input: str = Field(min_length=1, description="Task input, e.g. the user's question")
 
 
 class TaskMessageRequest(BaseModel):
     input: str = Field(min_length=1)
+
+
+class TaskUpdateRequest(BaseModel):
+    """Editable task fields (rename, pin); omitted fields keep values."""
+
+    title: str | None = Field(default=None, min_length=1)
+    pinned: bool | None = None
 
 
 class TurnOut(BaseModel):
@@ -84,6 +94,7 @@ class TaskOut(BaseModel):
     status: str
     active_run_id: str | None
     created_at: Any
+    pinned: bool = False
     metadata: dict[str, Any]
 
     @classmethod
@@ -97,13 +108,13 @@ class TaskOut(BaseModel):
             status=status,
             active_run_id=active_run_id,
             created_at=task.created_at,
+            pinned=task.pinned,
             metadata=task.metadata,
         )
 
 
 class ScheduleBase(BaseModel):
     name: str = Field(min_length=1)
-    agent_id: str = Field(min_length=1)
     task_input: str = Field(min_length=1)
     schedule_type: ScheduleType
     run_at: datetime | None = None

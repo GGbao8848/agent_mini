@@ -53,6 +53,7 @@ export interface Task {
   status: RunStatus | string
   active_run_id: string | null
   created_at: string
+  pinned: boolean
   metadata: Record<string, unknown>
 }
 
@@ -95,6 +96,7 @@ export interface Approval {
 export interface Artifact {
   path: string
   size: number
+  mtime?: string | null
 }
 
 export interface Agent {
@@ -143,7 +145,6 @@ export interface Schedule {
 
 export type SchedulePayload = {
   name: string
-  agent_id: string
   task_input: string
   schedule_type: ScheduleType
   run_at?: string | null

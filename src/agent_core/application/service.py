@@ -58,16 +58,25 @@ class AgentCoreService:
 
     # ------------------------------------------------------------------ tasks
 
+    def default_agent(self) -> str:
+        """The default (first registered) agent id — usually the avatar."""
+        agents = self.runtime.agents.list()
+        if not agents:
+            raise ApprovalError("no agents registered")
+        return agents[0].id
+
     async def submit_run(
         self,
-        agent_id: str,
+        agent_id: str | None,
         task_input: str,
         *,
         parent_run_id: str | None = None,
         wait: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> Task:
         """Start a new conversation; with ``wait`` return it fully answered."""
-        task = self.runtime.create_conversation(agent_id, task_input)
+        resolved_agent = agent_id or self.default_agent()
+        task = self.runtime.create_conversation(resolved_agent, task_input, metadata=metadata)
         run = self.runtime.task_active_run(task.id)
         if run is not None:
             execution = self.runtime.submit_run(run)

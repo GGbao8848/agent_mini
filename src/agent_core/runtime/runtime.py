@@ -178,6 +178,51 @@ class AgentRuntime:
         runs = self.task_root_runs(task_id)
         return runs[-1] if runs else None
 
+    def update_task(
+        self, task_id: str, *, title: str | None = None, pinned: bool | None = None
+    ) -> Task:
+        """Rename or pin/unpin a conversation; returns the updated Task."""
+        task = self.get_task(task_id)
+        update: dict[str, Any] = {}
+        if title is not None:
+            title = title.strip()
+            if not title:
+                raise StateError(
+                    "Task title cannot be empty", details={"task_id": task_id}
+                )
+            update["title"] = title
+        if pinned is not None:
+            update["pinned"] = pinned
+        if update:
+            updated = task.model_copy(update=update)
+            self._tasks[task_id] = updated
+            self._save_task(updated)
+            return updated
+        return task
+
+    def delete_task(self, task_id: str) -> None:
+        """Delete a conversation and every run it produced.
+
+        Rejected while the conversation's active run is still non-terminal —
+        deleting a running task would strand its execution.
+        """
+        task = self.get_task(task_id)
+        active = self.task_active_run(task_id)
+        if active is not None and not active.status.is_terminal:
+            raise StateError(
+                f"Task '{task_id}' has an active run in status '{active.status.value}'",
+                details={"task_id": task_id, "run_id": active.id},
+            )
+        for run in self.task_root_runs(task_id):
+            self._runs.pop(run.id, None)
+            self._running.pop(run.id, None)
+            self._collectors.pop(run.id, None)
+            if self._store is not None:
+                self._store.delete_run(run.id)
+        self._tasks.pop(task_id, None)
+        if self._store is not None:
+            self._store.delete_task(task_id)
+
     def task_input(self, run: Run) -> str:
         """The task text a run was created for (empty for restored strangers)."""
         stored = run.metadata.get("input")
@@ -225,10 +270,12 @@ class AgentRuntime:
 
     # -------------------------------------------------------------- lifecycle
 
-    def create_conversation(self, agent_id: str, text: str) -> Task:
+    def create_conversation(
+        self, agent_id: str, text: str, *, metadata: dict[str, Any] | None = None
+    ) -> Task:
         """Start a new conversation: create its Task and the first root run."""
         spec = self.agents.get(agent_id)  # fail fast on unknown agents
-        task = self._new_task(spec.id, text)
+        task = self._new_task(spec.id, text, metadata=metadata)
         self.create_run(spec.id, text, task=task)
         return task
 
@@ -278,13 +325,16 @@ class AgentRuntime:
         self._save_run(run)
         return run
 
-    def _new_task(self, agent_id: str, text: str) -> Task:
+    def _new_task(
+        self, agent_id: str, text: str, *, metadata: dict[str, Any] | None = None
+    ) -> Task:
         """Create and register a fresh conversation owned by ``agent_id``."""
         task = Task(
             agent_id=agent_id,
             title=make_title(text),
             input=text,
             thread_id=new_id(),
+            metadata=dict(metadata or {}),
         )
         self._tasks[task.id] = task
         self._save_task(task)

@@ -1,5 +1,5 @@
 import { artifactUrl } from "@/lib/api"
-import { fmtSize } from "@/lib/format"
+import { fmtSize, fmtTime } from "@/lib/format"
 import type { Artifact } from "@/lib/types"
 import { FileIcon } from "lucide-react"
 
@@ -7,6 +7,7 @@ const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i
 
 function ArtifactRow({ runId, artifact }: { runId: string; artifact: Artifact }) {
   const url = artifactUrl(runId, artifact.path)
+  const time = artifact.mtime ? fmtTime(artifact.mtime) : "—"
   if (IMAGE_RE.test(artifact.path)) {
     return (
       <div className="flex flex-col gap-1">
@@ -19,7 +20,7 @@ function ArtifactRow({ runId, artifact }: { runId: string; artifact: Artifact })
           />
         </a>
         <p className="truncate text-xs text-muted-foreground" title={artifact.path}>
-          {artifact.path} · {fmtSize(artifact.size)}
+          {artifact.path} · {fmtSize(artifact.size)} · {time}
         </p>
       </div>
     )
@@ -34,7 +35,9 @@ function ArtifactRow({ runId, artifact }: { runId: string; artifact: Artifact })
       <span className="truncate" title={artifact.path}>
         {artifact.path}
       </span>
-      <span className="ml-auto shrink-0 text-xs text-muted-foreground">{fmtSize(artifact.size)}</span>
+      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+        {fmtSize(artifact.size)} · {time}
+      </span>
     </a>
   )
 }

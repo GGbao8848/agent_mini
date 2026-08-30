@@ -110,6 +110,7 @@ class Task(BaseModel):
     thread_id: str | None = None
     turns: list[Turn] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
+    pinned: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def add_user_turn(self, content: str, *, run_id: str | None = None) -> Turn:

@@ -93,7 +93,9 @@ class TestArtifactManifest:
         await service.runtime.execute_run(run)
 
         artifacts = run.metadata["artifacts"]
-        assert any(a["path"] == "out/hello.md" for a in artifacts)
+        hello = next(a for a in artifacts if a["path"] == "out/hello.md")
+        assert hello["size"] > 0
+        assert "mtime" in hello  # timestamp so the console can show when it appeared
 
     async def test_files_from_before_the_run_are_excluded(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

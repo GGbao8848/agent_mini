@@ -31,7 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { useAgents, useScheduleManage, useSchedules } from "@/hooks/use-console"
+import { useScheduleManage, useSchedules } from "@/hooks/use-console"
 import type { Schedule, SchedulePayload, ScheduleType } from "@/lib/types"
 import { PencilIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
@@ -43,7 +43,6 @@ const TYPE_LABELS: Record<ScheduleType, string> = {
 
 type FormState = {
   name: string
-  agent_id: string
   task_input: string
   schedule_type: ScheduleType
   run_at: string
@@ -54,7 +53,6 @@ type FormState = {
 
 const EMPTY_FORM: FormState = {
   name: "",
-  agent_id: "",
   task_input: "",
   schedule_type: "interval",
   run_at: "",
@@ -66,7 +64,6 @@ const EMPTY_FORM: FormState = {
 function toPayload(form: FormState): SchedulePayload {
   return {
     name: form.name.trim(),
-    agent_id: form.agent_id,
     task_input: form.task_input.trim(),
     schedule_type: form.schedule_type,
     run_at: form.schedule_type === "one_time" && form.run_at ? form.run_at : null,
@@ -90,9 +87,7 @@ function ScheduleDialog({
   editing: Schedule | null
   onSaved: (scheduleId: string) => void
 }) {
-  const agents = useAgents()
   const manage = useScheduleManage()
-  const agentList = agents.data ?? []
   const [form, setForm] = React.useState<FormState>(EMPTY_FORM)
   const [error, setError] = React.useState("")
 
@@ -101,7 +96,6 @@ function ScheduleDialog({
       if (editing) {
         setForm({
           name: editing.name,
-          agent_id: editing.agent_id,
           task_input: editing.task_input,
           schedule_type: editing.schedule_type,
           run_at: editing.run_at ?? "",
@@ -110,19 +104,16 @@ function ScheduleDialog({
           enabled: editing.enabled,
         })
       } else {
-        setForm({
-          ...EMPTY_FORM,
-          agent_id: agentList[0]?.id ?? "",
-        })
+        setForm(EMPTY_FORM)
       }
       setError("")
     }
-  }, [open, editing, agentList])
+  }, [open, editing])
 
   const submit = () => {
     setError("")
-    if (!form.name.trim() || !form.task_input.trim() || !form.agent_id) {
-      setError("名称、任务输入、agent 必填")
+    if (!form.name.trim() || !form.task_input.trim()) {
+      setError("名称、任务输入必填")
       return
     }
     const payload = toPayload(form)
@@ -151,38 +142,18 @@ function ScheduleDialog({
         <DialogHeader>
           <DialogTitle>{editing ? "编辑日程" : "新建日程"}</DialogTitle>
           <DialogDescription>
-            到点后会以一条新对话运行任务，之后可以点进对话继续。
+            到点后会以一条新对话运行任务（默认分身），之后可以点进对话继续。
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="grid gap-1.5">
-              <Label htmlFor="sc-name">名称</Label>
-              <Input
-                id="sc-name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="每日早报"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="sc-agent">agent</Label>
-              <Select
-                value={form.agent_id}
-                onValueChange={(v) => setForm({ ...form, agent_id: v ?? "" })}
-              >
-                <SelectTrigger id="sc-agent" className="w-full" disabled={!agentList.length}>
-                  <SelectValue placeholder="选择 agent" />
-                </SelectTrigger>
-                <SelectContent>
-                  {agentList.map((agent) => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="sc-name">名称</Label>
+            <Input
+              id="sc-name"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="每日早报"
+            />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="sc-input">任务输入</Label>
@@ -351,7 +322,7 @@ export function SchedulesPanel({
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">
-                {schedule.trigger_text} · agent {schedule.agent_id}
+                {schedule.trigger_text}
               </p>
               <p className="line-clamp-2 text-xs text-muted-foreground">
                 任务：{schedule.task_input}

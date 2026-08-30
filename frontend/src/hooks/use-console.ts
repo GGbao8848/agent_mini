@@ -163,9 +163,9 @@ function useToastMutation<TData, TVars>(options: UseMutationOptions<TData, Error
 
 export function useSubmitTask() {
   const queryClient = useQueryClient()
-  return useToastMutation<Task, { agentId: string; input: string }>({
-    mutationFn: ({ agentId, input }) =>
-      api.post<Task>("/v1/tasks", { agent_id: agentId, input }),
+  return useToastMutation<Task, { input: string }>({
+    mutationFn: ({ input }) =>
+      api.post<Task>("/v1/tasks", { input }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       queryClient.invalidateQueries({ queryKey: ["agents"] })
@@ -178,6 +178,28 @@ export function useSendFollowup() {
   return useToastMutation<Task, { taskId: string; input: string }>({
     mutationFn: ({ taskId, input }) =>
       api.post<Task>(`/v1/tasks/${taskId}/messages`, { input }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      queryClient.invalidateQueries({ queryKey: ["task"] })
+    },
+  })
+}
+
+export function useUpdateTask() {
+  const queryClient = useQueryClient()
+  return useToastMutation<Task, { taskId: string; patch: { title?: string; pinned?: boolean } }>({
+    mutationFn: ({ taskId, patch }) => api.patch<Task>(`/v1/tasks/${taskId}`, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      queryClient.invalidateQueries({ queryKey: ["task"] })
+    },
+  })
+}
+
+export function useDeleteTask() {
+  const queryClient = useQueryClient()
+  return useToastMutation<unknown, { taskId: string }>({
+    mutationFn: ({ taskId }) => api.del(`/v1/tasks/${taskId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       queryClient.invalidateQueries({ queryKey: ["task"] })

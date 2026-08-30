@@ -12,8 +12,10 @@ import { SkillsView } from "@/views/skills-view"
 import { TasksView } from "@/views/tasks-view"
 import { ToolsView } from "@/views/tools-view"
 
-const VIEWS: Record<string, (props: { onOpenTask?: (taskId: string) => void }) => React.ReactNode> = {
-  "任务台": () => null, // handled below (needs selectedId)
+const OTHER_VIEWS: Record<
+  string,
+  (props: { onOpenTask?: (taskId: string) => void }) => React.ReactNode
+> = {
   "日程": ({ onOpenTask }) => <SchedulesView onOpenTask={onOpenTask} />,
   "技能": () => <SkillsView />,
   "MCP": () => <McpView />,
@@ -21,7 +23,7 @@ const VIEWS: Record<string, (props: { onOpenTask?: (taskId: string) => void }) =
 }
 
 export default function App() {
-  const [view, setView] = React.useState("任务台")
+  const [view, setView] = React.useState("新建任务")
   const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(null)
   const [tokenOpen, setTokenOpen] = React.useState(false)
   const conn = useGlobalEvents()
@@ -29,7 +31,14 @@ export default function App() {
 
   const openTask = React.useCallback((taskId: string) => {
     setSelectedTaskId(taskId)
-    setView("任务台")
+    setView("新建任务")
+  }, [])
+
+  // Clicking the "新建任务" nav entry (or switching to any other view) clears
+  // the open conversation so the main area shows the composer.
+  const changeView = React.useCallback((next: string) => {
+    if (next === "新建任务") setSelectedTaskId(null)
+    setView(next)
   }, [])
 
   // The API layer dispatches this on any 401 — pop the token dialog.
@@ -40,10 +49,10 @@ export default function App() {
   }, [])
 
   const renderView = (() => {
-    if (view === "任务台") {
+    if (view === "新建任务") {
       return <TasksView selectedId={selectedTaskId} onSelect={setSelectedTaskId} />
     }
-    const factory = VIEWS[view]
+    const factory = OTHER_VIEWS[view]
     return factory ? factory({ onOpenTask: openTask }) : <TasksView selectedId={selectedTaskId} onSelect={setSelectedTaskId} />
   })()
 
@@ -51,7 +60,7 @@ export default function App() {
     <SidebarProvider className="h-svh overflow-hidden">
       <AppSidebar
         view={view}
-        onViewChange={setView}
+        onViewChange={changeView}
         selectedTaskId={selectedTaskId}
         onSelectTask={openTask}
       />

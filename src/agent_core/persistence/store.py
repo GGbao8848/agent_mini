@@ -191,6 +191,9 @@ class SqliteStore:
         rows = self._conn.execute("SELECT data FROM tasks ORDER BY rowid").fetchall()
         return [data for (data,) in rows]
 
+    def delete_task(self, task_id: str) -> None:
+        self._write("DELETE FROM tasks WHERE id = ?", (task_id,))
+
     def save_run(self, run_id: str, status: str, data: str) -> None:
         self._write(
             "INSERT INTO runs (id, status, data) VALUES (?, ?, ?) "
@@ -201,6 +204,9 @@ class SqliteStore:
     def load_runs(self) -> list[str]:
         rows = self._conn.execute("SELECT data FROM runs ORDER BY rowid").fetchall()
         return [data for (data,) in rows]
+
+    def delete_run(self, run_id: str) -> None:
+        self._write("DELETE FROM runs WHERE id = ?", (run_id,))
 
     # -------------------------------------------------------------- approvals
 

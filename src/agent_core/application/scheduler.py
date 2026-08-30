@@ -31,8 +31,12 @@ from agent_core.domain.schedule import Schedule, local_now
 from agent_core.errors.exceptions import RegistryError, ScheduleError
 from agent_core.persistence.store import SqliteStore
 
-Runner = Callable[[str, str], Awaitable[Any]]
-"""Signature of a schedule execution: (agent_id, task_input) → new task."""
+Runner = Callable[[str, str, dict[str, Any] | None], Awaitable[Any]]
+"""Signature of a schedule execution: (agent_id, task_input, metadata) → task.
+
+``metadata`` carries the schedule's provenance (source_schedule_id / name) so
+the created conversation can be grouped under its schedule in the console.
+"""
 
 
 def build_trigger(schedule: Schedule) -> Any:
@@ -149,7 +153,14 @@ class ScheduleManager:
         Shared by the scheduler job and the manual "run now" action — the
         manual path does not re-arm or disable a one-time schedule.
         """
-        result = await self._runner(schedule.agent_id, schedule.task_input)
+        result = await self._runner(
+            schedule.agent_id,
+            schedule.task_input,
+            {
+                "source_schedule_id": schedule.id,
+                "source_schedule_name": schedule.name,
+            },
+        )
         schedule.last_run_at = local_now()
         schedule.run_count += 1
         task_id = getattr(result, "id", None)

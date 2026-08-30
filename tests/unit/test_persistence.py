@@ -137,6 +137,19 @@ class TestStore:
         assert restored.interval_minutes == 60
         store.close()
 
+    def test_task_and_run_delete(self, tmp_path: Path) -> None:
+        store = SqliteStore(f"sqlite:///{tmp_path}/agent.db")
+        store.save_task("t1", '{"id": "t1"}')
+        store.save_run("r1", "completed", '{"id": "r1"}')
+
+        store.delete_run("r1")
+        assert store.load_runs() == []
+        assert store.load_tasks() == ['{"id": "t1"}']
+
+        store.delete_task("t1")
+        assert store.load_tasks() == []
+        store.close()
+
     def test_generic_roundtrips(self, tmp_path: Path) -> None:
         store = SqliteStore(f"sqlite:///{tmp_path}/agent.db")
 
