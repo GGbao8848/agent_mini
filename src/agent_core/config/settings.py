@@ -13,6 +13,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import Literal
 
+from dotenv import dotenv_values
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -93,6 +94,24 @@ def apply_proxy(settings: Settings) -> None:
 @lru_cache
 def get_settings() -> Settings:
     """Return the process-wide settings (cached)."""
+    # Read the .env file so provider SDKs and the notification channel — which
+    # read OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, ... directly from os.environ
+    # — see the same values as Settings. pydantic-settings maps AGENT_CORE_*
+    # fields itself (from the .env file), so those must NOT leak into
+    # os.environ: that would corrupt hermetic tests that build
+    # Settings(_env_file=None). override=False keeps real environment
+    # variables authoritative over the .env file.
+    env_file = dotenv_values(".env")
+    for key, value in env_file.items():
+        if value is not None and key not in os.environ:
+            os.environ.setdefault(key, value)
+    # AGENT_CORE_* keys from the .env file stay out of os.environ: pydantic
+    # reads them itself, and leaking them breaks hermetic tests that build
+    # Settings(_env_file=None). Keys that were already real environment
+    # variables are left alone.
+    for key in env_file:
+        if key.startswith("AGENT_CORE_"):
+            os.environ.pop(key, None)
     settings = Settings()
     apply_proxy(settings)
     return settings

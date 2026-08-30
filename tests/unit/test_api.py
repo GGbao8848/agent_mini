@@ -142,6 +142,26 @@ class TestRegistryRoutes:
         assert response.status_code == 200
         assert [item["id"] for item in response.json()] == ["greet"]
 
+    async def test_list_tools_includes_availability(self, client: Any) -> None:
+        """ToolOut carries available/availability_reason on the wire."""
+        from agent_core.domain.tool import ToolDefinition
+
+        client._transport.app.state.service.runtime.tools.register(  # type: ignore[attr-defined]
+            ToolDefinition(
+                name="flaky",
+                description="Flaky",
+                metadata={"available": False, "availability_reason": "missing key"},
+            ),
+            lambda: "ok",
+        )
+
+        tools = (await client.get("/v1/tools")).json()
+        flaky = next(t for t in tools if t["name"] == "flaky")
+        assert flaky["available"] is False
+        assert flaky["availability_reason"] == "missing key"
+        # Built-ins default to available.
+        assert all(t["available"] is True for t in tools if t["name"] != "flaky")
+
 
 class TestMCPRoutes:
     async def test_register_and_get_server(self, client: Any) -> None:
@@ -192,58 +212,98 @@ class TestMCPRoutes:
             assert response.json()["error"]["retryable"] is True
 
 
-class TestRunRoutes:
-    async def test_create_run_wait_returns_completed_with_output(self, client: Any) -> None:
+class TestTaskRoutes:
+    async def test_create_task_wait_returns_completed_with_output(self, client: Any) -> None:
         response = await client.post(
-            "/v1/runs", params={"wait": "true"}, json={"agent_id": "helper", "input": "hi"}
+            "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "hi"}
         )
         assert response.status_code == 201
         body = response.json()
         assert body["status"] == "completed"
-        assert body["output"] == "echo: hi"
-        assert body["finished_at"] is not None
+        assert body["active_run_id"] is not None
+        # The conversation records user + assistant turns.
+        assert [turn["role"] for turn in body["turns"]] == ["user", "assistant"]
+        assert body["turns"][-1]["content"] == "echo: hi"
 
-    async def test_create_run_unknown_agent_maps_to_404(self, client: Any) -> None:
-        response = await client.post("/v1/runs", json={"agent_id": "ghost", "input": "hi"})
+    async def test_create_task_unknown_agent_maps_to_404(self, client: Any) -> None:
+        response = await client.post("/v1/tasks", json={"agent_id": "ghost", "input": "hi"})
         assert response.status_code == 404
 
-    async def test_get_run_and_list_filter(self, client: Any) -> None:
+    async def test_get_task_and_list_filter(self, client: Any) -> None:
         body = (
             await client.post(
-                "/v1/runs", params={"wait": "true"}, json={"agent_id": "helper", "input": "yo"}
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "yo"}
             )
         ).json()
 
-        response = await client.get(f"/v1/runs/{body['id']}")
-        assert response.json()["task_id"] == body["task_id"]
+        response = await client.get(f"/v1/tasks/{body['id']}")
+        assert response.json()["id"] == body["id"]
+        assert response.json()["agent_id"] == "helper"
 
-        response = await client.get("/v1/runs", params={"agent_id": "greeter"})
+        response = await client.get("/v1/tasks", params={"agent_id": "greeter"})
         assert response.json() == []
 
-    async def test_cancel_running_run(self) -> None:
+    async def test_get_run_read_endpoint(self, client: Any) -> None:
+        body = (
+            await client.post(
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "yo"}
+            )
+        ).json()
+        run_id = body["active_run_id"]
+
+        response = await client.get(f"/v1/runs/{run_id}")
+        assert response.status_code == 200
+        assert response.json()["task_id"] == body["id"]
+        assert response.json()["status"] == "completed"
+
+    async def test_send_message_continues_conversation(self, client: Any) -> None:
+        body = (
+            await client.post(
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "hi"}
+            )
+        ).json()
+        task_id = body["id"]
+
+        response = await client.post(
+            f"/v1/tasks/{task_id}/messages",
+            params={"wait": "true"},
+            json={"input": "and now?"},
+        )
+        assert response.status_code == 201
+        followup = response.json()
+        assert followup["id"] == task_id  # same conversation
+        assert followup["status"] == "completed"
+        assert len(followup["turns"]) == 4
+        assert followup["active_run_id"] != body["active_run_id"]
+
+        # The sidebar still shows exactly one entry for this conversation.
+        tasks = (await client.get("/v1/tasks")).json()
+        assert [task["id"] for task in tasks] == [task_id]
+
+    async def test_cancel_running_task(self) -> None:
         app = create_app(make_service(SlowGraph()))
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
-            body = (await client.post("/v1/runs", json={"agent_id": "helper", "input": "x"})).json()
-            response = await client.post(f"/v1/runs/{body['id']}/cancel")
+            body = (await client.post("/v1/tasks", json={"agent_id": "helper", "input": "x"})).json()
+            response = await client.post(f"/v1/tasks/{body['id']}/cancel")
             assert response.status_code == 200
 
             status = "running"
             for _ in range(100):
-                status = (await client.get(f"/v1/runs/{body['id']}")).json()["status"]
+                status = (await client.get(f"/v1/tasks/{body['id']}")).json()["status"]
                 if status == "cancelled":
                     break
                 await asyncio.sleep(0.02)
             assert status == "cancelled"
 
-    async def test_cancel_terminal_run_maps_to_409(self, client: Any) -> None:
+    async def test_cancel_terminal_task_maps_to_409(self, client: Any) -> None:
         body = (
             await client.post(
-                "/v1/runs", params={"wait": "true"}, json={"agent_id": "helper", "input": "x"}
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "x"}
             )
         ).json()
-        response = await client.post(f"/v1/runs/{body['id']}/cancel")
+        response = await client.post(f"/v1/tasks/{body['id']}/cancel")
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "StateError"
 
@@ -293,11 +353,12 @@ class TestSSEEvents:
     async def test_run_stream_replays_then_closes(self, client: Any) -> None:
         body = (
             await client.post(
-                "/v1/runs", params={"wait": "true"}, json={"agent_id": "helper", "input": "hi"}
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "hi"}
             )
         ).json()
+        run_id = body["active_run_id"]
 
-        async with client.stream("GET", f"/v1/runs/{body['id']}/events") as response:
+        async with client.stream("GET", f"/v1/runs/{run_id}/events") as response:
             assert response.headers["content-type"].startswith("text/event-stream")
             text = "".join([chunk async for chunk in response.aiter_text()])
 

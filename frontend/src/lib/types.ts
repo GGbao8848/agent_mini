@@ -36,6 +36,26 @@ export interface Run {
   input?: string
 }
 
+export interface Turn {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+  metadata: Record<string, unknown>
+}
+
+export interface Task {
+  id: string
+  agent_id: string
+  title: string
+  thread_id: string | null
+  turns: Turn[]
+  status: RunStatus | string
+  active_run_id: string | null
+  created_at: string
+  metadata: Record<string, unknown>
+}
+
 export interface RunEvent {
   id: string
   event_type: string
@@ -92,9 +112,44 @@ export interface Agent {
 export interface Tool {
   name: string
   description: string
+  input_schema: Record<string, unknown>
   risk_level: string
   source: string
   metadata: Record<string, unknown>
+  available: boolean
+  availability_reason: string
+}
+
+export type ScheduleType = 'one_time' | 'cron' | 'interval'
+
+export interface Schedule {
+  id: string
+  name: string
+  agent_id: string
+  task_input: string
+  schedule_type: ScheduleType
+  run_at: string | null
+  cron_expr: string | null
+  interval_minutes: number | null
+  enabled: boolean
+  created_at: string
+  last_run_at: string | null
+  next_run_at: string | null
+  last_task_id: string | null
+  run_count: number
+  trigger_text: string
+  metadata: Record<string, unknown>
+}
+
+export type SchedulePayload = {
+  name: string
+  agent_id: string
+  task_input: string
+  schedule_type: ScheduleType
+  run_at?: string | null
+  cron_expr?: string | null
+  interval_minutes?: number | null
+  enabled?: boolean
 }
 
 export interface Skill {

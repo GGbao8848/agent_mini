@@ -15,13 +15,12 @@ import {
   useApprovals,
   useRun,
   useRunEvents,
-  useRuns,
   useSendFollowup,
   useSubmitTask,
+  useTask,
+  useTasks,
 } from "@/hooks/use-console"
-import { STATUS_LABELS } from "@/lib/format"
-import { threadKey, threadRuns } from "@/lib/runs"
-import type { Run } from "@/lib/types"
+import type { Task } from "@/lib/types"
 import { ArrowUpIcon, BotIcon } from "lucide-react"
 
 function Bubble({ role, text }: { role: "user" | "avatar"; text: string }) {
@@ -128,7 +127,7 @@ function NewTaskComposer({
 function EmptyState({
   onSubmitted,
 }: {
-  onSubmitted: (run: Run) => void
+  onSubmitted: (task: Task) => void
 }) {
   const submit = useSubmitTask()
   return (
@@ -154,55 +153,53 @@ function EmptyState({
   )
 }
 
-function ChatThread({
-  initialRun,
-  runs,
-  onClose,
-  onSwitch,
-}: {
-  initialRun: Run
-  runs: Run[]
-  onClose: () => void
-  onSwitch: (runId: string) => void
-}) {
-  const { data: fresh } = useRun(initialRun.id)
-  const run = fresh ?? initialRun
-  const events = useRunEvents(run.id, run.status)
+/** One conversation: the active run's header, every turn, and a follow-up box. */
+function ChatThread({ task, onClose }: { task: Task; onClose: () => void }) {
+  const { data: fresh } = useTask(task.id)
+  const current = fresh ?? task
+  const activeRun = useRun(current.active_run_id)
+  const runStatus = activeRun.data?.status ?? current.status
+  const events = useRunEvents(current.active_run_id, runStatus)
   const approvals = useApprovals()
   const followup = useSendFollowup()
 
-  const chain = threadRuns(runs, run)
-  const display = chain.length ? chain : [run]
-  const chainIds = new Set(display.map((r) => r.id))
-  const pendingHere = (approvals.data ?? []).filter((a) => chainIds.has(a.run_id))
+  // Run ids referenced by this conversation (approvals may sit on any of them).
+  const runIds = React.useMemo(() => {
+    const ids = new Set<string>()
+    for (const turn of current.turns) {
+      const runId = turn.metadata?.run_id
+      if (typeof runId === "string") ids.add(runId)
+    }
+    if (current.active_run_id) ids.add(current.active_run_id)
+    return ids
+  }, [current])
+  const pendingHere = (approvals.data ?? []).filter((a) => runIds.has(a.run_id))
 
   const bottomRef = React.useRef<HTMLDivElement>(null)
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [display.length, events.length])
+  }, [current.turns.length, events.length])
 
   return (
     <>
-      <RunChatHeader run={run} events={events} onNewTask={onClose} />
+      {activeRun.data && (
+        <RunChatHeader run={activeRun.data} events={events} onNewTask={onClose} />
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col-reverse gap-3 p-4">
           <div ref={bottomRef} />
           {/* flex-col-reverse renders DOM order bottom-up: bottomRef pins the
               view to the bottom; each pair lists avatar before user so the
-              visual top-down order is user → avatar, oldest pair first. */}
-          {[...display].reverse().map((r) => (
-            <React.Fragment key={r.id}>
-              <Bubble
-                role="avatar"
-                text={
-                  r.output
-                    ? String(r.output)
-                    : `（${STATUS_LABELS[r.status] ?? r.status}${r.error ? `：${r.error}` : ""}）`
-                }
-              />
-              <Bubble role="user" text={r.input || "（无文本）"} />
+              visual top-down order is user → avatar, oldest first. */}
+          {[...current.turns].reverse().map((turn) => (
+            <React.Fragment key={turn.id}>
+              {turn.role === "assistant" && <Bubble role="avatar" text={turn.content} />}
+              {turn.role === "user" && <Bubble role="user" text={turn.content} />}
             </React.Fragment>
           ))}
+          {!current.turns.length && (
+            <p className="text-center text-sm text-muted-foreground">这条对话还没有内容</p>
+          )}
         </div>
       </div>
       {pendingHere.length > 0 && (
@@ -218,10 +215,7 @@ function ChatThread({
             placeholder="继续这条对话…（分身带着全部上下文）"
             pending={followup.isPending}
             onSubmit={(text) =>
-              followup.mutate(
-                { runId: run.id, input: text },
-                { onSuccess: (next) => onSwitch(next.id) },
-              )
+              followup.mutate({ taskId: current.id, input: text })
             }
           />
         </div>
@@ -230,29 +224,23 @@ function ChatThread({
   )
 }
 
-export function RunsView({
+export function TasksView({
   selectedId,
   onSelect,
 }: {
   selectedId: string | null
-  onSelect: (runId: string | null) => void
+  onSelect: (taskId: string | null) => void
 }) {
-  const runs = useRuns()
-  const runList = runs.data ?? []
-  const listRun = runList.find((r) => r.id === selectedId) ?? null
+  const tasks = useTasks()
+  const taskList = tasks.data ?? []
+  const listTask = taskList.find((t) => t.id === selectedId) ?? null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {listRun ? (
-        <ChatThread
-          key={threadKey(listRun)}
-          initialRun={listRun}
-          runs={runList}
-          onClose={() => onSelect(null)}
-          onSwitch={onSelect}
-        />
+      {listTask ? (
+        <ChatThread key={listTask.id} task={listTask} onClose={() => onSelect(null)} />
       ) : (
-        <EmptyState onSubmitted={(run) => onSelect(run.id)} />
+        <EmptyState onSubmitted={(task) => onSelect(task.id)} />
       )}
     </div>
   )

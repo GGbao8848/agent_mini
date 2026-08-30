@@ -14,7 +14,10 @@ import {
   type MCPServer,
   type Run,
   type RunEvent,
+  type Schedule,
+  type SchedulePayload,
   type Skill,
+  type Task,
   type Tool,
 } from "@/lib/types"
 
@@ -34,11 +37,23 @@ export function useAgents() {
   })
 }
 
-export function useRuns() {
+export function useTasks() {
   return useQuery({
-    queryKey: ["runs"],
-    queryFn: () => api.get<Run[]>("/v1/runs"),
+    queryKey: ["tasks"],
+    queryFn: () => api.get<Task[]>("/v1/tasks"),
     refetchInterval: 15_000,
+  })
+}
+
+export function useTask(taskId: string | null) {
+  return useQuery({
+    queryKey: ["task", taskId],
+    queryFn: () => api.get<Task>(`/v1/tasks/${taskId}`),
+    enabled: !!taskId,
+    refetchInterval: (query) =>
+      query.state.data && !TERMINAL_RUN_STATUSES.has(query.state.data.status)
+        ? 10_000
+        : false,
   })
 }
 
@@ -93,6 +108,50 @@ export function useMcpServers() {
   })
 }
 
+export function useSchedules() {
+  return useQuery({
+    queryKey: ["schedules"],
+    queryFn: () => api.get<Schedule[]>("/v1/schedules"),
+    refetchInterval: 15_000,
+  })
+}
+
+export function useToolReload() {
+  const queryClient = useQueryClient()
+  return useToastMutation<Tool[], unknown>({
+    mutationFn: () => api.post<Tool[]>("/v1/tools/reload"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tools"] })
+    },
+  })
+}
+
+export function useScheduleManage() {
+  const queryClient = useQueryClient()
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["schedules"] })
+    queryClient.invalidateQueries({ queryKey: ["tasks"] })
+  }
+  const create = useToastMutation<Schedule, SchedulePayload>({
+    mutationFn: (payload) => api.post<Schedule>("/v1/schedules", payload),
+    onSuccess: invalidate,
+  })
+  const update = useToastMutation<Schedule, { scheduleId: string; payload: SchedulePayload }>({
+    mutationFn: ({ scheduleId, payload }) =>
+      api.put<Schedule>(`/v1/schedules/${scheduleId}`, payload),
+    onSuccess: invalidate,
+  })
+  const remove = useToastMutation<unknown, string>({
+    mutationFn: (scheduleId) => api.del(`/v1/schedules/${scheduleId}`),
+    onSuccess: invalidate,
+  })
+  const runNow = useToastMutation<{ schedule_id: string; task_id: string }, string>({
+    mutationFn: (scheduleId) => api.post(`/v1/schedules/${scheduleId}/run`),
+    onSuccess: invalidate,
+  })
+  return { create, update, remove, runNow }
+}
+
 /* ---------------------------------------------------------- mutations */
 
 function useToastMutation<TData, TVars>(options: UseMutationOptions<TData, Error, TVars>) {
@@ -104,10 +163,11 @@ function useToastMutation<TData, TVars>(options: UseMutationOptions<TData, Error
 
 export function useSubmitTask() {
   const queryClient = useQueryClient()
-  return useToastMutation<Run, { agentId: string; input: string }>({
-    mutationFn: ({ agentId, input }) => api.post<Run>("/v1/runs", { agent_id: agentId, input }),
+  return useToastMutation<Task, { agentId: string; input: string }>({
+    mutationFn: ({ agentId, input }) =>
+      api.post<Task>("/v1/tasks", { agent_id: agentId, input }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["runs"] })
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
       queryClient.invalidateQueries({ queryKey: ["agents"] })
     },
   })
@@ -115,10 +175,23 @@ export function useSubmitTask() {
 
 export function useSendFollowup() {
   const queryClient = useQueryClient()
-  return useToastMutation<Run, { runId: string; input: string }>({
-    mutationFn: ({ runId, input }) => api.post<Run>(`/v1/runs/${runId}/messages`, { input }),
+  return useToastMutation<Task, { taskId: string; input: string }>({
+    mutationFn: ({ taskId, input }) =>
+      api.post<Task>(`/v1/tasks/${taskId}/messages`, { input }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["runs"] })
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      queryClient.invalidateQueries({ queryKey: ["task"] })
+    },
+  })
+}
+
+export function useCancelTask() {
+  const queryClient = useQueryClient()
+  return useToastMutation<Task, { taskId: string }>({
+    mutationFn: ({ taskId }) => api.post<Task>(`/v1/tasks/${taskId}/cancel`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      queryClient.invalidateQueries({ queryKey: ["task"] })
     },
   })
 }
@@ -205,8 +278,8 @@ export function useGlobalEvents(): ConnState {
         onError: () => setConn("offline"),
         onEvent: (type) => {
           if (type.startsWith("run_") || type.startsWith("agent_")) {
-            queryClient.invalidateQueries({ queryKey: ["runs"] })
-            queryClient.invalidateQueries({ queryKey: ["run"] })
+            queryClient.invalidateQueries({ queryKey: ["tasks"] })
+            queryClient.invalidateQueries({ queryKey: ["task"] })
           }
           if (type.startsWith("action_")) {
             queryClient.invalidateQueries({ queryKey: ["approvals"] })
@@ -248,8 +321,8 @@ export function useRunEvents(runId: string | null, runStatus: string | undefined
           }
           setEvents((prev) => [...prev, event])
           if (TERMINAL_RUN_EVENT_TYPES.has(type)) {
-            queryClient.invalidateQueries({ queryKey: ["runs"] })
-            queryClient.invalidateQueries({ queryKey: ["run", runId] })
+            queryClient.invalidateQueries({ queryKey: ["tasks"] })
+            queryClient.invalidateQueries({ queryKey: ["task"] })
             close?.()
           }
         },

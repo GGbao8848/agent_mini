@@ -34,9 +34,13 @@ def create_app(service: AgentCoreService | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if core.schedules is not None:
+            core.schedules.start()
         try:
             yield
         finally:
+            if core.schedules is not None:
+                core.schedules.stop()
             await core.mcp.disconnect_all()
             if core.store is not None:
                 core.store.close()

@@ -138,3 +138,10 @@ class RegistryError(AgentError):
             retryable=False,
             details={"kind": kind, "key": key},
         )
+
+
+class ScheduleError(AgentError):
+    """A schedule definition is invalid (bad cron, past run_at, missing fields)."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message, retryable=False, details=details)

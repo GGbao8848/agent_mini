@@ -69,7 +69,7 @@ class AgentBuilder:
                 f"above its limit of {spec.limits.max_subagents}",
                 details={"agent_id": spec.id},
             )
-        tools = [self._resolve_tool(name) for name in spec.tools]
+        tools = [self._resolve_tool(name) for name in self._agent_tool_names(spec)]
         system_prompt = spec.system_prompt or None
         if spec.autonomy is not None:
             # Autonomy adds the escape hatch (request_help) and the rules that
@@ -88,6 +88,23 @@ class AgentBuilder:
             name=spec.name,
             **self._backend_kwargs(spec),
         )
+
+    def _agent_tool_names(self, spec: AgentSpec) -> list[str]:
+        """The tool names an agent is bound to.
+
+        An empty ``spec.tools`` means "everything available" — the default for
+        agents that don't opt into a capability list. Unavailable tools
+        (``metadata["available"] is False``) are excluded from the implicit
+        set; an explicit binding still resolves so the call-time error is
+        precise about what is missing.
+        """
+        if spec.tools:
+            return list(spec.tools)
+        return [
+            definition.name
+            for definition in self._tools.list()
+            if definition.metadata.get("available", True)
+        ]
 
     def _backend_kwargs(self, spec: AgentSpec) -> dict[str, Any]:
         """Root the harness file tools on the real workspace.
@@ -134,7 +151,7 @@ class AgentBuilder:
                 f"Agent '{parent_id}' cannot delegate to itself",
                 details={"agent_id": parent_id},
             )
-        sub_tools = [self._resolve_tool(name) for name in sub_spec.tools]
+        sub_tools = [self._resolve_tool(name) for name in self._agent_tool_names(sub_spec)]
         if sub_spec.autonomy is not None and self._help_tool is not None:
             sub_tools.append(self._help_tool)
         return SubAgent(

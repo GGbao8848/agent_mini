@@ -73,7 +73,10 @@ def avatar_spec() -> AgentSpec:
     return AgentSpec(
         id="avatar",
         name="Avatar",
-        tools=["generate_image", "view_image", "telegram_notify", "run_code"],
+        # Empty tools = every available tool (see AgentBuilder._agent_tool_names):
+        # the console no longer binds tools per agent, so the avatar gets
+        # view_image / run_code / telegram_notify / create_schedule automatically,
+        # and unavailable ones (generate_image without an endpoint) are excluded.
         system_prompt=AVATAR_SYSTEM_PROMPT,
         limits=AgentLimits(timeout_seconds=5400),
         resilience=ResiliencePolicy(
@@ -115,7 +118,9 @@ async def log_stream(service: Any, run_id: str, log_path: Path) -> None:
 
 
 async def run_task(service: Any, task_input: str, log_path: Path) -> Any:
-    run = await service.submit_run("avatar", task_input, wait=False)
+    conversation = await service.submit_run("avatar", task_input, wait=False)
+    run = service.runtime.task_active_run(conversation.id)
+    assert run is not None
     logger = asyncio.create_task(log_stream(service, run.id, log_path))
     while not run.status.is_terminal:
         await asyncio.sleep(2)

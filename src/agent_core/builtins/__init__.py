@@ -14,10 +14,12 @@ from agent_core.builtins.image import GENERATE_IMAGE_TOOL, VIEW_IMAGE_TOOL
 from agent_core.builtins.image import register_builtin_tools as register_image_tools
 from agent_core.builtins.notify import TELEGRAM_NOTIFY_TOOL
 from agent_core.builtins.notify import register_builtin_tools as register_telegram_tools
+from agent_core.builtins.schedules import CREATE_SCHEDULE_TOOL
 from agent_core.config.settings import Settings
 from agent_core.registries import ToolRegistry
 
 __all__ = [
+    "CREATE_SCHEDULE_TOOL",
     "GENERATE_IMAGE_TOOL",
     "RUN_CODE_TOOL",
     "TELEGRAM_NOTIFY_TOOL",

@@ -93,6 +93,50 @@ class TestStore:
         SqliteStore(url).close()
         SqliteStore(url).close()  # second open re-runs migration on the same file
 
+    def test_migration_from_v1_adds_schedules(self, tmp_path: Path) -> None:
+        """A v1 database (no schedules table) upgrades to v2 in place."""
+        import sqlite3
+
+        url = f"sqlite:///{tmp_path}/agent.db"
+        conn = sqlite3.connect(tmp_path / "agent.db")
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS registry_items (
+                kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL,
+                PRIMARY KEY (kind, key)
+            );
+            CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, status TEXT NOT NULL, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, status TEXT NOT NULL, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS trace_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, data TEXT NOT NULL);
+            """
+        )
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+        conn.close()
+
+        store = SqliteStore(url)  # migration v1 -> v2
+        store.save_schedule("s1", '{"id": "s1", "name": "x"}')
+        assert store.load_schedules() == ['{"id": "s1", "name": "x"}']
+        store.delete_schedule("s1")
+        assert store.load_schedules() == []
+        store.close()
+
+    def test_schedule_roundtrip(self, tmp_path: Path) -> None:
+        from agent_core.domain.schedule import Schedule
+
+        store = SqliteStore(f"sqlite:///{tmp_path}/agent.db")
+        schedule = Schedule(
+            name="hourly", agent_id="helper", task_input="check", schedule_type="interval",
+            interval_minutes=60,
+        )
+        store.save_schedule(schedule.id, schedule.model_dump_json())
+
+        restored = Schedule.model_validate_json(store.load_schedules()[0])
+        assert restored.name == "hourly"
+        assert restored.interval_minutes == 60
+        store.close()
+
     def test_generic_roundtrips(self, tmp_path: Path) -> None:
         store = SqliteStore(f"sqlite:///{tmp_path}/agent.db")
 
@@ -333,14 +377,20 @@ class TestBootstrapWiring:
         service.runtime.agents.register(make_agent())
         # Swap in a stub graph so the run completes without a model provider.
         service.runtime.builder = StubBuilder(FakeGraph())
-        run = await service.submit_run("helper", "hi", wait=True)
+        conversation = await service.submit_run("helper", "hi", wait=True)
+        run = service.runtime.task_active_run(conversation.id)
+        assert run is not None
+        run_id = run.id
         service.store.close()
 
         restored = default_service(settings)
 
         assert restored.store is not None
         assert restored.runtime.agents.get("helper").name == "Helper"
-        finished = restored.get_run(run.id)
+        # The conversation and its run both survived the restart.
+        restored_task = restored.get_task(conversation.id)
+        assert [turn.role for turn in restored_task.turns] == ["user", "assistant"]
+        finished = restored.get_run(run_id)
         assert finished.status is RunStatus.COMPLETED
-        assert restored.final_output(run.id) == "echo: hi"
+        assert restored.final_output(run_id) == "echo: hi"
         restored.store.close()

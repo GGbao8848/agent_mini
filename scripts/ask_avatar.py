@@ -62,7 +62,9 @@ async def main() -> None:
     if "avatar" not in service.runtime.agents:
         service.runtime.agents.register(avatar_spec())
 
-    run = await service.submit_run("avatar", task, wait=False)
+    conversation = await service.submit_run("avatar", task, wait=False)
+    run = service.runtime.task_active_run(conversation.id)
+    assert run is not None
     print(f"run {run.id[:8]} started — Ctrl-C to cancel\n")
 
     echoer = None if args.quiet else asyncio.create_task(echo_events(service, run.id))
@@ -70,7 +72,7 @@ async def main() -> None:
         while not run.status.is_terminal:
             await asyncio.sleep(1)
     except KeyboardInterrupt:
-        service.cancel_run(run.id)
+        service.cancel_task(conversation.id)
         print("\ncancelling...")
     finally:
         if echoer is not None:

@@ -59,18 +59,21 @@ async def main() -> int:
         assert "demo_add" in [tool["name"] for tool in tools]
 
         response = await client.post(
-            "/v1/runs",
+            "/v1/tasks",
             params={"wait": "true"},
             json={"agent_id": "calculator", "input": "What is 19 + 23? Use the add tool."},
         )
         assert response.status_code == 201, response.text
-        run = response.json()
-        print("run status:", run["status"])
-        print("run output:", run["output"])
+        task = response.json()
+        print("task status:", task["status"])
+        print("task active_run_id:", task["active_run_id"])
+        assert task["status"] == "completed", task
+        run_id = task["active_run_id"]
+        run = (await client.get(f"/v1/runs/{run_id}")).json()
         assert run["status"] == "completed", run
         assert "42" in str(run["output"]), run["output"]
 
-        async with client.stream("GET", f"/v1/runs/{run['id']}/events") as stream:
+        async with client.stream("GET", f"/v1/runs/{run_id}/events") as stream:
             text = "".join([chunk async for chunk in stream.aiter_text()])
         event_types = [
             line.removeprefix("event: ")

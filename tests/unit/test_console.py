@@ -199,13 +199,13 @@ class TestConsoleAuth:
         get_settings.cache_clear()
         client = make_client(make_service(tmp_path, monkeypatch))
 
-        assert (await client.get("/v1/runs")).status_code == 401
+        assert (await client.get("/v1/tasks")).status_code == 401
         # The page itself stays open (it holds no secrets and must be able to
         # collect the token in the browser).
         assert (await client.get("/console/", follow_redirects=False)).status_code == 200
-        ok = await client.get("/v1/runs", headers={"X-Console-Token": "s3cret"})
+        ok = await client.get("/v1/tasks", headers={"X-Console-Token": "s3cret"})
         assert ok.status_code == 200
-        assert (await client.get("/v1/runs?token=s3cret")).status_code == 200
+        assert (await client.get("/v1/tasks?token=s3cret")).status_code == 200
         assert (await client.get("/healthz")).status_code == 200  # healthz stays open
 
         get_settings.cache_clear()
@@ -218,7 +218,7 @@ class TestConsoleAuth:
         get_settings.cache_clear()
         client = make_client(make_service(tmp_path, monkeypatch))
 
-        assert (await client.get("/v1/runs")).status_code == 200
+        assert (await client.get("/v1/tasks")).status_code == 200
         console = await client.get("/console/", follow_redirects=False)
         assert console.status_code == 200
         assert b"Agent Console" in console.content

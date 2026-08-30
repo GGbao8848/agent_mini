@@ -77,9 +77,14 @@ async def _txt2img(
 
 
 def make_generate_image(settings: Settings) -> tuple[ToolDefinition, Any]:
-    """Handler for ``generate_image``; saves the PNG under the workspace."""
+    """Handler for ``generate_image``; saves the PNG under the workspace.
+
+    Registered even when ``image_api_base_url`` is unset, but marked
+    unavailable so the console can show the missing configuration.
+    """
     base_url = settings.image_api_base_url
     workspace = Path(settings.workspace_dir)
+    available = bool(base_url)
 
     async def generate_image(
         prompt: str,
@@ -88,6 +93,11 @@ def make_generate_image(settings: Settings) -> tuple[ToolDefinition, Any]:
         steps: int = 8,
         cfg_scale: float = 1.0,
     ) -> str:
+        if not base_url:
+            raise ToolError(
+                "generate_image is not available: image_api_base_url is not configured",
+                details={"tool": GENERATE_IMAGE_TOOL},
+            )
         raw = await _txt2img(
             base_url or "",
             prompt=prompt,
@@ -123,7 +133,13 @@ def make_generate_image(settings: Settings) -> tuple[ToolDefinition, Any]:
             },
             "required": ["prompt"],
         },
-        metadata={"builtin": True, "endpoint": base_url, "timeout_seconds": 300},
+        metadata={
+            "builtin": True,
+            "endpoint": base_url,
+            "timeout_seconds": 300,
+            "available": available,
+            "availability_reason": "" if available else "未配置 image_api_base_url",
+        },
     )
     return definition, generate_image
 
@@ -169,18 +185,22 @@ def make_view_image(settings: Settings) -> tuple[ToolDefinition, Any]:
             },
             "required": ["path"],
         },
-        metadata={"builtin": True},
+        metadata={"builtin": True, "available": True, "availability_reason": ""},
     )
     return definition, view_image
 
 
 def register_builtin_tools(registry: ToolRegistry, settings: Settings) -> list[str]:
-    """Register built-in tools; returns the names that were added."""
+    """Register built-in tools; returns the names that were added.
+
+    ``generate_image`` is registered even without an image endpoint so the
+    console can show its availability state; the handler raises a clear error
+    until ``image_api_base_url`` is configured.
+    """
     registered: list[str] = []
-    if settings.image_api_base_url:
-        definition, handler = make_generate_image(settings)
-        _register(registry, definition, handler)
-        registered.append(definition.name)
+    definition, handler = make_generate_image(settings)
+    _register(registry, definition, handler)
+    registered.append(definition.name)
     definition, handler = make_view_image(settings)
     _register(registry, definition, handler)
     registered.append(definition.name)
@@ -191,6 +211,7 @@ def _register(registry: ToolRegistry, definition: ToolDefinition, handler: Any) 
     try:
         registry.register(definition, handler)
     except RegistryError:
-        # Definition already present (e.g. hydrated from the persistence store
-        # without its process-local handler): just re-attach the executable.
-        registry.set_handler(definition.name, handler)
+        # Definition already present (e.g. hydrated from the persistence store,
+        # or a previous boot): refresh its metadata and re-attach the handler
+        # so availability flags track the current configuration.
+        registry.replace_with_handler(definition, handler)

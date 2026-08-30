@@ -38,7 +38,9 @@ async def main() -> None:
     if not isinstance(tracer, InMemoryTracer):
         raise SystemExit("demo expects the in-memory tracer")
 
-    run = await service.submit_run("avatar", TASK, wait=True)
+    conversation = await service.submit_run("avatar", TASK, wait=True)
+    run = service.runtime.task_active_run(conversation.id)
+    assert run is not None
     print(f"run {run.id}: {run.status.value}")
     if run.usage:
         print(

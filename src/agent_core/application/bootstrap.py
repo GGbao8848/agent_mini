@@ -12,8 +12,10 @@ are restored before the service is returned.
 
 from __future__ import annotations
 
+from agent_core.application.scheduler import ScheduleManager
 from agent_core.application.service import AgentCoreService
 from agent_core.builtins import register_builtin_tools
+from agent_core.builtins.schedules import make_create_schedule
 from agent_core.config.settings import Settings, apply_proxy, get_settings
 from agent_core.domain.mcp import MCPServerStatus
 from agent_core.mcp.credentials import EnvCredentialResolver
@@ -61,9 +63,23 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
                 mcp_registry.set_status(server.id, MCPServerStatus.UNKNOWN)
     mcp = MCPManager(mcp_registry, tools, credentials=EnvCredentialResolver())
     broker = EventStreamBroker(runtime.bus)
-    return AgentCoreService(
+    service = AgentCoreService(
         runtime=runtime, mcp=mcp, mcp_registry=mcp_registry, broker=broker, store=store
     )
+    # The schedule runner creates a conversation and starts it — the same path
+    # a manual task goes through, so scheduled work lands in the console.
+    schedules = ScheduleManager(runner=service.submit_run, store=store)
+    if store is not None:
+        schedules.restore()
+    service.schedules = schedules
+    # Register the schedule-creation tool against the fully built service.
+    definition, handler = make_create_schedule(service)
+    try:
+        tools.register(definition, handler)
+    except Exception:
+        # Definition persisted from a previous boot: re-attach the executable.
+        tools.replace_with_handler(definition, handler)
+    return service
 
 
 def _restore(

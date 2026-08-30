@@ -17,10 +17,17 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useRuns } from "@/hooks/use-console"
+import { useTasks } from "@/hooks/use-console"
 import { fmtTimeShort } from "@/lib/format"
-import { excerpt } from "@/lib/runs"
-import { BotIcon, LayoutDashboardIcon, WrenchIcon } from "lucide-react"
+import { excerpt } from "@/lib/tasks"
+import {
+  BotIcon,
+  CalendarDaysIcon,
+  LayoutDashboardIcon,
+  PlugIcon,
+  PuzzleIcon,
+  WrenchIcon,
+} from "lucide-react"
 
 const data = {
   brand: {
@@ -34,22 +41,37 @@ const data = {
       icon: <LayoutDashboardIcon />,
     },
     {
-      title: "工具箱",
+      title: "日程",
+      url: "#",
+      icon: <CalendarDaysIcon />,
+    },
+    {
+      title: "技能",
+      url: "#",
+      icon: <PuzzleIcon />,
+    },
+    {
+      title: "MCP",
+      url: "#",
+      icon: <PlugIcon />,
+    },
+    {
+      title: "工具",
       url: "#",
       icon: <WrenchIcon />,
     },
   ],
 }
 
-function SidebarRuns({
-  selectedRunId,
-  onSelectRun,
+function SidebarTasks({
+  selectedTaskId,
+  onSelectTask,
 }: {
-  selectedRunId: string | null
-  onSelectRun: (runId: string) => void
+  selectedTaskId: string | null
+  onSelectTask: (taskId: string) => void
 }) {
-  const runs = useRuns()
-  const list = runs.data ?? []
+  const tasks = useTasks()
+  const list = tasks.data ?? []
   const sorted = [...list]
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .slice(0, 40)
@@ -59,27 +81,27 @@ function SidebarRuns({
       <SidebarGroupLabel>任务</SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
-          {runs.isLoading &&
+          {tasks.isLoading &&
             Array.from({ length: 3 }).map((_, i) => (
               <SidebarMenuItem key={i}>
                 <Skeleton className="h-8 w-full" />
               </SidebarMenuItem>
             ))}
-          {!runs.isLoading && sorted.length === 0 && (
+          {!tasks.isLoading && sorted.length === 0 && (
             <p className="px-2 py-1 text-xs text-muted-foreground">还没有任务，派一个吧</p>
           )}
-          {sorted.map((run) => (
-            <SidebarMenuItem key={run.id}>
+          {sorted.map((task) => (
+            <SidebarMenuItem key={task.id}>
               <SidebarMenuButton
-                isActive={run.id === selectedRunId}
-                onClick={() => onSelectRun(run.id)}
+                isActive={task.id === selectedTaskId}
+                onClick={() => onSelectTask(task.id)}
                 className="gap-2 py-1.5"
-                title={excerpt(run)}
+                title={excerpt(task, 160)}
               >
-                <StatusDot status={run.status} />
-                <span className="flex-1 truncate text-xs">{excerpt(run, 60)}</span>
+                <StatusDot status={task.status} />
+                <span className="flex-1 truncate text-xs">{excerpt(task, 60)}</span>
                 <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground">
-                  {fmtTimeShort(run.created_at)}
+                  {fmtTimeShort(task.created_at)}
                 </span>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -93,14 +115,14 @@ function SidebarRuns({
 export function AppSidebar({
   view,
   onViewChange,
-  selectedRunId,
-  onSelectRun,
+  selectedTaskId,
+  onSelectTask,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
   view: string
   onViewChange: (view: string) => void
-  selectedRunId: string | null
-  onSelectRun: (runId: string) => void
+  selectedTaskId: string | null
+  onSelectTask: (taskId: string) => void
 }) {
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -127,7 +149,7 @@ export function AppSidebar({
             onSelect: () => onViewChange(item.title),
           }))}
         />
-        <SidebarRuns selectedRunId={selectedRunId} onSelectRun={onSelectRun} />
+        <SidebarTasks selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} />
       </SidebarContent>
       <SidebarRail />
     </Sidebar>

@@ -164,12 +164,17 @@ class TestRegistration:
         assert VIEW_IMAGE_TOOL in added
         assert registry.get(GENERATE_IMAGE_TOOL).metadata.get("endpoint")
 
-    def test_generate_image_skipped_without_endpoint(self, tmp_path: Path) -> None:
+    def test_generate_image_registered_but_unavailable_without_endpoint(
+        self, tmp_path: Path
+    ) -> None:
         registry = ToolRegistry()
         added = register_builtin_tools(registry, image_settings(tmp_path, with_image_api=False))
 
-        assert GENERATE_IMAGE_TOOL not in added
-        assert registry.get(VIEW_IMAGE_TOOL).name == VIEW_IMAGE_TOOL
+        assert GENERATE_IMAGE_TOOL in added  # registered so the console can show it
+        definition = registry.get(GENERATE_IMAGE_TOOL)
+        assert definition.metadata["available"] is False
+        assert "image_api_base_url" in definition.metadata["availability_reason"]
+        assert registry.get(VIEW_IMAGE_TOOL).metadata["available"] is True
 
     def test_reregistration_reattaches_handler(self, tmp_path: Path) -> None:
         settings = image_settings(tmp_path)

@@ -5,12 +5,13 @@ from agent_core.errors.exceptions import StateError
 
 
 def test_task_has_generated_id() -> None:
-    a, b = Task(input="one"), Task(input="two")
+    a = Task(agent_id="helper", title="one", input="one")
+    b = Task(agent_id="helper", title="two", input="two")
     assert a.id != b.id
 
 
 def test_happy_path_lifecycle() -> None:
-    run = Run(task_id=Task(input="hi").id, agent_id="assistant")
+    run = Run(task_id=Task(agent_id="helper", title="hi", input="hi").id, agent_id="assistant")
     run.transition_to(RunStatus.RUNNING)
     run.transition_to(RunStatus.WAITING_APPROVAL)
     run.transition_to(RunStatus.RUNNING)
