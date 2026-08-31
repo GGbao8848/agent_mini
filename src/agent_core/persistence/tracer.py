@@ -51,6 +51,20 @@ class PersistingTracer:
     def get_events(self, run_id: str) -> list[TraceEvent]:
         return self._inner.get_events(run_id)
 
+    def get_task_events(self, task_id: str) -> list[TraceEvent]:
+        """All persisted events of ``task_id``'s runs, in emission order.
+
+        Scans the SQLite mirror because the in-memory buffer only keeps the
+        most recent ``max_events_per_run`` events per run.
+        """
+        events = []
+        for _run_id, data in self._store.load_events():
+            event = TraceEvent.model_validate_json(data)
+            if event.task_id == task_id:
+                events.append(event)
+        events.sort(key=lambda event: (event.timestamp, event.id))
+        return events
+
     def restore(self) -> None:
         """Re-seed the in-memory buffer with events from previous processes.
 

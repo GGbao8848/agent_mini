@@ -13,7 +13,7 @@ export function EventsPanel({ events }: { events: RunEvent[] }) {
   if (!events.length) {
     return (
       <p className="p-2 text-sm text-muted-foreground">
-        （实时事件会在这里出现；历史 run 不保留事件流）
+        （这条对话还没有事件；运行时的实时事件会出现在这里）
       </p>
     )
   }

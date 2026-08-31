@@ -20,6 +20,8 @@ logger = get_logger(__name__)
 
 _CLOSE_SENTINEL: TraceEvent | None = None
 
+StreamFilter = tuple[str | None, str | None]
+
 
 class EventStream:
     """One subscriber's live view of events, backed by a bounded queue."""
@@ -66,22 +68,36 @@ class EventStreamBroker:
 
     def __init__(self, bus: EventBus) -> None:
         self._bus = bus
-        self._subscriptions: list[tuple[str | None, EventStream]] = []
+        self._subscriptions: list[tuple[StreamFilter, EventStream]] = []
         bus.subscribe(self.publish)
 
-    def subscribe(self, run_id: str | None = None, *, maxsize: int = 1000) -> EventStream:
-        """Open a stream for one run, or for all runs when ``run_id`` is None."""
+    def subscribe(
+        self,
+        run_id: str | None = None,
+        *,
+        task_id: str | None = None,
+        maxsize: int = 1000,
+    ) -> EventStream:
+        """Open a stream for one run, one conversation, or all runs.
+
+        - ``run_id`` set: only events from that run.
+        - ``task_id`` set: only events whose run belongs to that conversation
+          (covers every root run of a multi-turn task).
+        - Neither: all events.
+        """
         stream = EventStream(maxsize=maxsize)
-        self._subscriptions.append((run_id, stream))
+        self._subscriptions.append(((run_id, task_id), stream))
         return stream
 
     def unsubscribe(self, stream: EventStream) -> None:
         """Close and forget ``stream``."""
         stream.close()
-        self._subscriptions = [(r, s) for r, s in self._subscriptions if s is not stream]
+        self._subscriptions = [(f, s) for f, s in self._subscriptions if s is not stream]
 
     def publish(self, event: TraceEvent) -> None:
         """Fan one event out to matching subscribers (bus listener entry point)."""
-        for want_run, stream in list(self._subscriptions):
-            if want_run is None or want_run == event.run_id:
+        for (want_run, want_task), stream in list(self._subscriptions):
+            if (want_run is None or want_run == event.run_id) and (
+                want_task is None or event.task_id == want_task
+            ):
                 stream.push(event)

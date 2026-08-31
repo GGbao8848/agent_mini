@@ -327,9 +327,12 @@ export function useGlobalEvents(): ConnState {
 
 const TERMINAL_RUN_EVENT_TYPES = new Set(["run_finished", "run_failed", "run_cancelled"])
 
-/** Per-run live event feed (mirrors the old console: replay+live, dedupe by id,
- * close on terminal, and give already-terminal runs 3s to replay). */
-export function useRunEvents(runId: string | null, runStatus: string | undefined): RunEvent[] {
+/** Whole-conversation event feed: one stream per task that replays every run's
+ * recorded events and keeps streaming across follow-up messages, so a
+ * conversation's timeline (the "运行详情" drawer) never resets when a new turn
+ * starts a fresh run. Dedupes by id and stays open indefinitely — a task can
+ * always be continued. */
+export function useTaskEvents(taskId: string | null): RunEvent[] {
   const [events, setEvents] = React.useState<RunEvent[]>([])
   const seenIds = React.useRef(new Set<string>())
   const queryClient = useQueryClient()
@@ -337,12 +340,11 @@ export function useRunEvents(runId: string | null, runStatus: string | undefined
   React.useEffect(() => {
     setEvents([])
     seenIds.current = new Set()
-    if (!runId) return
+    if (!taskId) return
 
     let close: (() => void) | null = null
-    let timeout: ReturnType<typeof setTimeout> | null = null
     close = openEventStream(
-      `/v1/runs/${runId}/events`,
+      `/v1/tasks/${encodeURIComponent(taskId)}/events`,
       {
         onEvent: (type, data) => {
           const event = data as RunEvent
@@ -352,22 +354,16 @@ export function useRunEvents(runId: string | null, runStatus: string | undefined
           }
           setEvents((prev) => [...prev, event])
           if (TERMINAL_RUN_EVENT_TYPES.has(type)) {
+            // Refresh task status but keep the stream open for the next turn.
             queryClient.invalidateQueries({ queryKey: ["tasks"] })
             queryClient.invalidateQueries({ queryKey: ["task"] })
-            close?.()
           }
         },
       },
       EVENT_TYPES,
     )
-    if (runStatus && TERMINAL_RUN_STATUSES.has(runStatus)) {
-      timeout = setTimeout(() => close?.(), 3000)
-    }
-    return () => {
-      if (timeout) clearTimeout(timeout)
-      close?.()
-    }
-  }, [runId, runStatus, queryClient])
+    return () => close?.()
+  }, [taskId, queryClient])
 
   return events
 }
