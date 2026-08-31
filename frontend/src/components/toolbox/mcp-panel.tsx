@@ -18,7 +18,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,10 +30,9 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useMcpServers, useMcpAction, useTools } from "@/hooks/use-console"
 import { normalizeMcpConfig, validateServerPayload } from "@/lib/mcp-config"
-import { PlugIcon, UnplugIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { PlugIcon, UnplugIcon, PlusIcon, Trash2Icon, ServerIcon } from "lucide-react"
 
 const JSON_TEMPLATE = `{
   "id": "demo",
@@ -44,9 +42,14 @@ const JSON_TEMPLATE = `{
   "description": "通过 JSON 粘贴注册的 MCP 服务器"
 }`
 
-function AddServerDialog() {
+function AddServerDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
   const mcp = useMcpAction()
-  const [open, setOpen] = React.useState(false)
   const [mode, setMode] = React.useState("json")
   const [json, setJson] = React.useState("")
   const [form, setForm] = React.useState({
@@ -60,7 +63,7 @@ function AddServerDialog() {
   const [error, setError] = React.useState("")
 
   const openDialog = (isOpen: boolean) => {
-    setOpen(isOpen)
+    onOpenChange(isOpen)
     if (isOpen && !json) setJson(JSON_TEMPLATE)
     if (!isOpen) setError("")
   }
@@ -117,10 +120,6 @@ function AddServerDialog() {
 
   return (
     <Dialog open={open} onOpenChange={openDialog}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>
-        <PlusIcon data-icon="inline-start" />
-        添加服务器
-      </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>添加 MCP 服务器</DialogTitle>
@@ -219,30 +218,53 @@ export function McpPanel() {
   const servers = useMcpServers()
   const tools = useTools()
   const mcp = useMcpAction()
+  const [addOpen, setAddOpen] = React.useState(false)
   const [removingId, setRemovingId] = React.useState<string | null>(null)
 
   const serverList = servers.data ?? []
   const toolList = tools.data ?? []
 
+  // Empty state: a centered add button is the whole page.
+  if (!servers.isLoading && serverList.length === 0) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 p-6">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <div className="flex size-12 items-center justify-center rounded-xl bg-muted">
+            <ServerIcon className="size-6 text-muted-foreground" />
+          </div>
+          <h2 className="text-lg font-medium">还没有 MCP 服务器</h2>
+          <p className="text-sm text-muted-foreground">添加服务器后，它的工具会自动出现在工具页</p>
+        </div>
+        <Button size="sm" onClick={() => setAddOpen(true)}>
+          <PlusIcon data-icon="inline-start" />
+          添加服务器
+        </Button>
+        <AddServerDialog open={addOpen} onOpenChange={setAddOpen} />
+      </div>
+    )
+  }
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-sm">MCP 服务器</CardTitle>
-        <AddServerDialog />
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        {servers.isLoading ? (
-          <p className="text-sm text-muted-foreground">加载中…</p>
-        ) : serverList.length === 0 ? (
-          <p className="text-sm text-muted-foreground">（尚未注册任何 MCP 服务器）</p>
-        ) : (
-          serverList.map((server) => {
+    <div className="flex flex-col gap-4 p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-muted-foreground">MCP 服务器（{serverList.length} 个）</h2>
+        <Button size="sm" onClick={() => setAddOpen(true)}>
+          <PlusIcon data-icon="inline-start" />
+          添加服务器
+        </Button>
+      </div>
+
+      {servers.isLoading ? (
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {serverList.map((server) => {
             const toolCount = toolList.filter((t) => t.metadata?.mcp_server === server.id).length
             const healthy = server.status === "healthy"
             return (
-              <div key={server.id} className="flex flex-col gap-1.5 rounded-lg border p-3">
+              <div key={server.id} className="flex flex-col gap-1.5 rounded-lg border p-4">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{server.name}</span>
+                  <span className="truncate text-sm font-medium">{server.name}</span>
                   <Badge
                     variant="outline"
                     className={
@@ -253,12 +275,12 @@ export function McpPanel() {
                   >
                     {healthy ? "已连接" : "未连接"}
                   </Badge>
-                  <span className="ml-auto text-xs text-muted-foreground">{server.transport}</span>
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">{server.transport}</span>
                 </div>
-                <p className="truncate text-xs text-muted-foreground">
-                  {server.endpoint} · {toolCount} 个工具 · id: {server.id}
+                <p className="truncate text-xs text-muted-foreground" title={server.endpoint}>
+                  {server.endpoint} · {toolCount} 个工具
                 </p>
-                <div className="flex gap-2">
+                <div className="mt-auto flex gap-2 pt-1">
                   {healthy ? (
                     <Button
                       size="xs"
@@ -283,7 +305,7 @@ export function McpPanel() {
                   <Button
                     size="xs"
                     variant="ghost"
-                    className="text-destructive"
+                    className="ml-auto text-destructive"
                     onClick={() => setRemovingId(server.id)}
                   >
                     <Trash2Icon data-icon="inline-start" />
@@ -292,9 +314,11 @@ export function McpPanel() {
                 </div>
               </div>
             )
-          })
-        )}
-      </CardContent>
+          })}
+        </div>
+      )}
+
+      <AddServerDialog open={addOpen} onOpenChange={setAddOpen} />
 
       <AlertDialog open={removingId !== null} onOpenChange={(isOpen) => !isOpen && setRemovingId(null)}>
         <AlertDialogContent>
@@ -317,6 +341,6 @@ export function McpPanel() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </div>
   )
 }

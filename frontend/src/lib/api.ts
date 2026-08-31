@@ -32,7 +32,11 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers)
-  if (!headers.has('Content-Type') && options.body) headers.set('Content-Type', 'application/json')
+  // FormData carries its own multipart content-type (with boundary); JSON bodies
+  // get the default application/json. Don't override either.
+  if (!headers.has('Content-Type') && options.body && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json')
+  }
   const token = getToken()
   if (token) headers.set('X-Console-Token', token)
 
@@ -67,6 +71,9 @@ export const api = {
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /** Multipart upload: sends FormData; the browser sets the content type + boundary. */
+  upload: <T>(path: string, formData: FormData) =>
+    request<T>(path, { method: 'POST', body: formData }),
 }
 
 /** EventSource cannot send headers — the API accepts the token as a query param. */

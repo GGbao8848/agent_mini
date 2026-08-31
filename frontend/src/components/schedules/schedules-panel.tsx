@@ -1,7 +1,6 @@
 import * as React from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -9,7 +8,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import {
   AlertDialog,
@@ -33,7 +31,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { useScheduleManage, useSchedules } from "@/hooks/use-console"
 import type { Schedule, SchedulePayload, ScheduleType } from "@/lib/types"
-import { PencilIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { CalendarClockIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
 const TYPE_LABELS: Record<ScheduleType, string> = {
   one_time: "一次性",
@@ -134,10 +132,6 @@ function ScheduleDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>
-        <PlusIcon data-icon="inline-start" />
-        新建日程
-      </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{editing ? "编辑日程" : "新建日程"}</DialogTitle>
@@ -255,78 +249,56 @@ export function SchedulesPanel({
     setDialogOpen(true)
   }
 
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-sm">日程</CardTitle>
+  // Empty state: a centered create button is the whole page.
+  if (!schedules.isLoading && list.length === 0) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 p-6">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <div className="flex size-12 items-center justify-center rounded-xl bg-muted">
+            <CalendarClockIcon className="size-6 text-muted-foreground" />
+          </div>
+          <h2 className="text-lg font-medium">还没有日程</h2>
+          <p className="text-sm text-muted-foreground">创建定时任务，到点自动以新对话运行</p>
+        </div>
+        <Button size="sm" onClick={openNew}>
+          <PlusIcon data-icon="inline-start" />
+          新建日程
+        </Button>
         <ScheduleDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
           editing={editing}
           onSaved={() => setDialogOpen(false)}
         />
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        {schedules.isLoading ? (
-          <p className="text-sm text-muted-foreground">加载中…</p>
-        ) : list.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-6 text-center">
-            <p className="text-sm text-muted-foreground">还没有日程。</p>
-            <Button size="sm" variant="outline" onClick={openNew}>
-              <PlusIcon data-icon="inline-start" />
-              新建日程
-            </Button>
-          </div>
-        ) : (
-          list.map((schedule) => (
-            <div key={schedule.id} className="flex flex-col gap-1.5 rounded-lg border p-3">
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4 p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-muted-foreground">日程（{list.length} 个）</h2>
+        <Button size="sm" onClick={openNew}>
+          <PlusIcon data-icon="inline-start" />
+          新建日程
+        </Button>
+      </div>
+
+      {schedules.isLoading ? (
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {list.map((schedule) => (
+            <div key={schedule.id} className="flex flex-col gap-1.5 rounded-lg border p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium">{schedule.name}</span>
+                <span className="truncate text-sm font-medium">{schedule.name}</span>
                 <Badge variant="secondary">{TYPE_LABELS[schedule.schedule_type]}</Badge>
                 <Badge variant={schedule.enabled ? "default" : "outline"}>
                   {schedule.enabled ? "启用" : "停用"}
                 </Badge>
-                <span className="ml-auto flex items-center gap-1">
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    disabled={runningId === schedule.id}
-                    onClick={() => {
-                      setRunningId(schedule.id)
-                      manage.runNow.mutate(schedule.id, {
-                        onSuccess: (data) => {
-                          setRunningId(null)
-                          if (onOpenTask && data?.task_id) onOpenTask(data.task_id)
-                        },
-                        onError: () => setRunningId(null),
-                      })
-                    }}
-                    title="运行一次"
-                  >
-                    <PlayIcon data-icon="inline-start" />
-                    运行一次
-                  </Button>
-                  <Button size="xs" variant="ghost" onClick={() => openEdit(schedule)}>
-                    <PencilIcon data-icon="inline-start" />
-                    编辑
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="text-destructive"
-                    onClick={() => setRemovingId(schedule.id)}
-                  >
-                    <Trash2Icon data-icon="inline-start" />
-                    删除
-                  </Button>
-                </span>
               </div>
-              <p className="text-xs text-muted-foreground">
-                {schedule.trigger_text}
-              </p>
-              <p className="line-clamp-2 text-xs text-muted-foreground">
-                任务：{schedule.task_input}
-              </p>
+              <p className="text-xs text-muted-foreground">{schedule.trigger_text}</p>
+              <p className="line-clamp-2 text-xs text-muted-foreground">任务：{schedule.task_input}</p>
               <p className="text-xs text-muted-foreground">
                 {schedule.last_run_at
                   ? `上次运行 ${new Date(schedule.last_run_at).toLocaleString()} · `
@@ -336,10 +308,51 @@ export function SchedulesPanel({
                   ? ` · 下次 ${new Date(schedule.next_run_at).toLocaleString()}`
                   : ""}
               </p>
+              <div className="mt-auto flex items-center gap-1 pt-1">
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={runningId === schedule.id}
+                  onClick={() => {
+                    setRunningId(schedule.id)
+                    manage.runNow.mutate(schedule.id, {
+                      onSuccess: (data) => {
+                        setRunningId(null)
+                        if (onOpenTask && data?.task_id) onOpenTask(data.task_id)
+                      },
+                      onError: () => setRunningId(null),
+                    })
+                  }}
+                  title="运行一次"
+                >
+                  <PlayIcon data-icon="inline-start" />
+                  运行一次
+                </Button>
+                <Button size="xs" variant="ghost" onClick={() => openEdit(schedule)}>
+                  <PencilIcon data-icon="inline-start" />
+                  编辑
+                </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="ml-auto text-destructive"
+                  onClick={() => setRemovingId(schedule.id)}
+                >
+                  <Trash2Icon data-icon="inline-start" />
+                  删除
+                </Button>
+              </div>
             </div>
-          ))
-        )}
-      </CardContent>
+          ))}
+        </div>
+      )}
+
+      <ScheduleDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        editing={editing}
+        onSaved={() => setDialogOpen(false)}
+      />
 
       <AlertDialog
         open={removingId !== null}
@@ -365,6 +378,6 @@ export function SchedulesPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </div>
   )
 }
