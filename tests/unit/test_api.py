@@ -504,3 +504,102 @@ class TestSSEEvents:
     async def test_task_stream_unknown_task_maps_to_404(self, client: Any) -> None:
         response = await client.get("/v1/tasks/ghost/events")
         assert response.status_code == 404
+
+
+class TestTaskAttachments:
+    async def test_upload_attachments_saves_under_uploads(
+        self, client: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        """POST /v1/attachments stores files workspace-relative under uploads/."""
+        from agent_core.api.routes import attachments as attachments_route
+        from agent_core.config.settings import Settings
+
+        monkeypatch.setattr(
+            attachments_route,
+            "get_settings",
+            lambda: Settings(_env_file=None, workspace_dir=str(tmp_path)),
+        )
+
+        response = await client.post(
+            "/v1/attachments",
+            files=[
+                ("files", ("photo.png", b"\x89PNG fake image", "image/png")),
+                ("files", ("notes.txt", b"hello notes", "text/plain")),
+            ],
+        )
+        assert response.status_code == 200
+        saved = response.json()
+        assert len(saved) == 2
+        paths = {item["path"] for item in saved}
+        # Files land under uploads/<batch>/ — workspace-relative.
+        assert any(p.startswith("uploads/") and p.endswith("/photo.png") for p in paths)
+        assert any(p.startswith("uploads/") and p.endswith("/notes.txt") for p in paths)
+        # Files actually landed in the (tmp) workspace.
+        photo_path = next(p for p in paths if p.endswith("/photo.png"))
+        assert (tmp_path / photo_path).read_bytes() == b"\x89PNG fake image"
+
+    async def test_send_message_with_attachments_annotates_input(
+        self, client: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        """attachments on a message are appended to what the agent sees."""
+        from agent_core.api.routes import attachments as attachments_route
+        from agent_core.config.settings import Settings
+
+        monkeypatch.setattr(
+            attachments_route,
+            "get_settings",
+            lambda: Settings(_env_file=None, workspace_dir=str(tmp_path)),
+        )
+        task = (
+            await client.post(
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "hi"}
+            )
+        ).json()
+        task_id = task["id"]
+        # Upload a real attachment through the API.
+        up = await client.post(
+            "/v1/attachments",
+            files={"files": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        )
+        (rel_path,) = [item["path"] for item in up.json()]
+
+        response = await client.post(
+            f"/v1/tasks/{task_id}/messages",
+            params={"wait": "true"},
+            json={"input": "看看这个文件", "attachments": [rel_path]},
+        )
+        assert response.status_code == 201
+        # The FakeGraph echoes the input it received, so the assistant turn shows
+        # the user message plus the attachment note.
+        content = response.json()["turns"][-1]["content"]
+        assert "看看这个文件" in content
+        assert rel_path in content
+
+    async def test_create_task_with_attachments_annotates_input(
+        self, client: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        """attachments on a new task are appended to what the agent sees."""
+        from agent_core.api.routes import attachments as attachments_route
+        from agent_core.config.settings import Settings
+
+        monkeypatch.setattr(
+            attachments_route,
+            "get_settings",
+            lambda: Settings(_env_file=None, workspace_dir=str(tmp_path)),
+        )
+        up = await client.post(
+            "/v1/attachments",
+            files={"files": ("notes.txt", b"hello", "text/plain")},
+        )
+        (rel_path,) = [item["path"] for item in up.json()]
+
+        response = await client.post(
+            "/v1/tasks",
+            params={"wait": "true"},
+            json={"agent_id": "helper", "input": "读一下", "attachments": [rel_path]},
+        )
+        assert response.status_code == 201
+        content = response.json()["turns"][-1]["content"]
+        assert "读一下" in content
+        assert rel_path in content
+

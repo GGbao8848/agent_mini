@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Query
 from sse_starlette import EventSourceResponse
 
+from agent_core.api.attachments import attachment_notes
 from agent_core.api.deps import ServiceDep
 from agent_core.api.schemas import (
     EventOut,
@@ -39,7 +40,11 @@ def _conversation_out(service: ServiceDep, task_id: str) -> TaskOut:
 async def create_task(
     payload: TaskCreateRequest, service: ServiceDep, wait: bool = Query(default=False)
 ) -> TaskOut:
-    task = await service.submit_run(payload.agent_id, payload.input, wait=wait)
+    task = await service.submit_run(
+        payload.agent_id,
+        _with_attachments(payload.input, payload.attachments),
+        wait=wait,
+    )
     return _conversation_out(service, task.id)
 
 
@@ -51,8 +56,15 @@ async def send_message(
     wait: bool = Query(default=False),
 ) -> TaskOut:
     """Continue a conversation; the agent sees the full prior history."""
-    await service.send_message(task_id, payload.input, wait=wait)
+    await service.send_message(
+        task_id, _with_attachments(payload.input, payload.attachments), wait=wait
+    )
     return _conversation_out(service, task_id)
+
+
+def _with_attachments(input: str, attachments: list[str]) -> str:
+    """Append a hint about uploaded files to the message the agent sees."""
+    return input + attachment_notes(attachments)
 
 
 @router.get("", response_model=list[TaskOut])

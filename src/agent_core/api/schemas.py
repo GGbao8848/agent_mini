@@ -56,10 +56,24 @@ class TaskCreateRequest(BaseModel):
         description="Agent to run; defaults to the default (first registered) agent",
     )
     input: str = Field(min_length=1, description="Task input, e.g. the user's question")
+    attachments: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional workspace-relative paths of files uploaded with this message; "
+            "the agent can read them with its file tools."
+        ),
+    )
 
 
 class TaskMessageRequest(BaseModel):
     input: str = Field(min_length=1)
+    attachments: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional workspace-relative paths of files uploaded with this message; "
+            "the agent can read them with its file tools."
+        ),
+    )
 
 
 class TaskUpdateRequest(BaseModel):
