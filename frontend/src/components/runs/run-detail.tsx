@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useArtifacts, useCancelTask } from "@/hooks/use-console"
+import { useArtifacts, useCancelTask, useDeleteTask } from "@/hooks/use-console"
 import { fmtDateTime, fmtDuration } from "@/lib/format"
 import { TERMINAL_RUN_STATUSES } from "@/lib/types"
 import type { Run, RunEvent } from "@/lib/types"
@@ -32,6 +32,7 @@ import {
   CircleStopIcon,
   InfoIcon,
   TimerIcon,
+  Trash2Icon,
 } from "lucide-react"
 
 function UsageLine({ run }: { run: Run }) {
@@ -119,7 +120,9 @@ export function RunChatHeader({
 }) {
   const [infoOpen, setInfoOpen] = React.useState(false)
   const [stopping, setStopping] = React.useState(false)
+  const [removing, setRemoving] = React.useState(false)
   const cancel = useCancelTask()
+  const deleteTask = useDeleteTask()
   const verification = (run.metadata as { verification?: Verification })?.verification
   const running = !TERMINAL_RUN_STATUSES.has(run.status)
 
@@ -171,6 +174,40 @@ export function RunChatHeader({
           <InfoIcon data-icon="inline-start" />
           运行详情
         </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          disabled={deleteTask.isPending}
+          onClick={() => setRemoving(true)}
+        >
+          <Trash2Icon data-icon="inline-start" />
+          删除
+        </Button>
+        <AlertDialog open={removing} onOpenChange={(open) => !open && setRemoving(false)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>删除任务？</AlertDialogTitle>
+              <AlertDialogDescription>
+                {running
+                  ? "任务正在运行，请先停止后再删除。"
+                  : "任务及其全部运行记录将被删除，此操作不可撤销。"}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={running}
+                onClick={() => {
+                  deleteTask.mutate({ taskId: run.task_id })
+                  setRemoving(false)
+                }}
+              >
+                删除
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
       <RunInfoDialog run={run} events={events} open={infoOpen} onOpenChange={setInfoOpen} />
     </div>
