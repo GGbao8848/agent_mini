@@ -15,12 +15,13 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useArtifacts, useCancelTask, useDeleteTask } from "@/hooks/use-console"
 import { fmtDateTime, fmtDuration } from "@/lib/format"
@@ -65,7 +66,7 @@ function VerificationBadge({ verification }: { verification: Verification }) {
   )
 }
 
-function RunInfoDialog({
+function RunInfoDrawer({
   run,
   events,
   open,
@@ -78,15 +79,17 @@ function RunInfoDialog({
 }) {
   const artifacts = useArtifacts(open ? run.id : null)
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>运行详情 · {run.id.slice(0, 8)}</DialogTitle>
-          <DialogDescription>
+    <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
+      <DrawerContent
+        style={{ "--drawer-height": "min(80dvh, 40rem)" } as React.CSSProperties}
+      >
+        <DrawerHeader>
+          <DrawerTitle>运行详情 · {run.id.slice(0, 8)}</DrawerTitle>
+          <DrawerDescription>
             {run.agent_id} · 开始 {fmtDateTime(run.created_at)}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 sm:grid-cols-2">
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="grid gap-4 overflow-y-auto px-4 pb-4 sm:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-1.5">
             <p className="text-xs font-medium text-muted-foreground">事件时间线</p>
             <div className="rounded-lg border">
@@ -105,8 +108,13 @@ function RunInfoDialog({
             )}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+        <DrawerFooter className="border-t">
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
@@ -209,7 +217,7 @@ export function RunChatHeader({
           </AlertDialogContent>
         </AlertDialog>
       </div>
-      <RunInfoDialog run={run} events={events} open={infoOpen} onOpenChange={setInfoOpen} />
+      <RunInfoDrawer run={run} events={events} open={infoOpen} onOpenChange={setInfoOpen} />
     </div>
   )
 }
