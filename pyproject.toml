@@ -18,6 +18,7 @@ dependencies = [
     "uvicorn>=0.52.4",
     "langgraph-checkpoint-sqlite>=3.1.1",
     "apscheduler>=3.11.3",
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]
@@ -26,6 +27,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
     "mypy>=1.13",
+    "types-pyyaml>=6.0.12.20260815",
 ]
 
 [build-system]

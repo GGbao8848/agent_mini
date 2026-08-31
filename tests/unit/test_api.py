@@ -142,6 +142,39 @@ class TestRegistryRoutes:
         assert response.status_code == 200
         assert [item["id"] for item in response.json()] == ["greet"]
 
+    async def test_upload_skill_zip(self, client: Any, tmp_path: Any, monkeypatch: Any) -> None:
+        """POST /v1/skills/upload installs a skill from an uploaded zip."""
+        from agent_core.api.routes import skills as skills_route
+        from agent_core.config.settings import Settings
+
+        # Route resolves the workspace via get_settings() — point it at tmp.
+        monkeypatch.setattr(
+            skills_route,
+            "get_settings",
+            lambda: Settings(_env_file=None, workspace_dir=str(tmp_path)),
+        )
+
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr(
+                "SKILL.md",
+                "---\nname: upload-demo\ndescription: 上传的技能\n---\n# Demo\n",
+            )
+            zf.writestr("scripts/x.py", "print('x')\n")
+
+        response = await client.post(
+            "/v1/skills/upload",
+            files={"file": ("skill.zip", buf.getvalue(), "application/zip")},
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["id"] == "upload-demo"
+        assert (tmp_path / ".skills-upload" / "upload-demo" / "SKILL.md").is_file()
+        assert "upload-demo" in [s["id"] for s in (await client.get("/v1/skills")).json()]
+
     async def test_list_tools_includes_availability(self, client: Any) -> None:
         """ToolOut carries available/availability_reason on the wire."""
         from agent_core.domain.tool import ToolDefinition
