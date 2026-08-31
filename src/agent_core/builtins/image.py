@@ -76,6 +76,25 @@ async def _txt2img(
         raise ToolError("Image service returned invalid base64 data") from exc
 
 
+# The local Forge backend (z_image_turbo) fails with HTTP 500 once the request
+# area exceeds ~0.85MP. ``_clamp_area`` scales oversized requests down to a safe
+# area (keeping the aspect ratio and an 8px-aligned latent) so the tool never
+# trips the backend limit.
+_MAX_IMAGE_AREA = 768 * 768
+
+
+def _clamp_area(width: int, height: int) -> tuple[int, int]:
+    """Clamp width/height so the pixel area stays within ``_MAX_IMAGE_AREA``."""
+    if width * height <= _MAX_IMAGE_AREA:
+        return width, height
+    scale = (_MAX_IMAGE_AREA / (width * height)) ** 0.5
+    w = max(8, int(width * scale) - int(width * scale) % 8)
+    h = max(8, int(height * scale) - int(height * scale) % 8)
+    if w * h > _MAX_IMAGE_AREA:
+        w -= 8
+    return w, h
+
+
 def make_generate_image(settings: Settings) -> tuple[ToolDefinition, Any]:
     """Handler for ``generate_image``; saves the PNG under the workspace.
 
@@ -98,11 +117,13 @@ def make_generate_image(settings: Settings) -> tuple[ToolDefinition, Any]:
                 "generate_image is not available: image_api_base_url is not configured",
                 details={"tool": GENERATE_IMAGE_TOOL},
             )
+        actual_w, actual_h = _clamp_area(width, height)
+        clamped = (actual_w, actual_h) != (width, height)
         raw = await _txt2img(
             base_url or "",
             prompt=prompt,
-            width=width,
-            height=height,
+            width=actual_w,
+            height=actual_h,
             steps=steps,
             cfg_scale=cfg_scale,
         )
@@ -110,9 +131,15 @@ def make_generate_image(settings: Settings) -> tuple[ToolDefinition, Any]:
         out_dir.mkdir(parents=True, exist_ok=True)
         path = (out_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-txt2img.png").resolve()
         path.write_bytes(raw)
+        size_note = (
+            f" (requested {width}x{height}, clamped to {actual_w}x{actual_h} "
+            f"because the local image backend rejects larger sizes)"
+            if clamped
+            else f" ({actual_w}x{actual_h}, {steps} steps, cfg {cfg_scale})"
+        )
         return (
-            f"Image generated and saved to {path} ({width}x{height}, {steps} steps, "
-            f"cfg {cfg_scale}). Call {VIEW_IMAGE_TOOL} with this path to inspect it."
+            f"Image generated and saved to {path}{size_note}. "
+            f"Call {VIEW_IMAGE_TOOL} with this path to inspect it."
         )
 
     definition = ToolDefinition(

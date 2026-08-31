@@ -11,6 +11,7 @@ import pytest
 from agent_core.builtins.image import (
     GENERATE_IMAGE_TOOL,
     VIEW_IMAGE_TOOL,
+    _clamp_area,
     make_generate_image,
     make_view_image,
     register_builtin_tools,
@@ -67,6 +68,36 @@ class TestGenerateImage:
         saved = Path(result.split("saved to ")[1].split(" ")[0])
         assert saved.read_bytes() == png
         assert VIEW_IMAGE_TOOL in result
+
+    async def test_oversized_request_is_clamped(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """The local backend 500s above ~0.85MP — clamp 1024x1024 down."""
+        captured: dict[str, Any] = {}
+
+        async def fake_txt2img(base_url: str, **payload: Any) -> bytes:
+            captured.update(payload)
+            return _solid_png((10, 20, 30))
+
+        monkeypatch.setattr("agent_core.builtins.image._txt2img", fake_txt2img)
+        _, handler = make_generate_image(image_settings(tmp_path))
+
+        result = await handler(prompt="big scene", width=1024, height=1024)
+
+        assert captured["width"] * captured["height"] <= 768 * 768
+        assert captured["width"] % 8 == 0 and captured["height"] % 8 == 0
+        assert "clamped" in result
+        saved = Path(result.split("saved to ")[1].split(" ")[0])
+        assert saved.read_bytes() == _solid_png((10, 20, 30))
+
+    def test_clamp_area_keeps_safe_aligned_bounds(self) -> None:
+        for w, h in [(512, 512), (768, 768), (896, 896), (1024, 1024), (1920, 1080), (1536, 1024)]:
+            cw, ch = _clamp_area(w, h)
+            assert cw * ch <= 768 * 768
+            assert cw % 8 == 0 and ch % 8 == 0
+        # Safe sizes pass through untouched.
+        assert _clamp_area(512, 512) == (512, 512)
+        assert _clamp_area(768, 768) == (768, 768)
 
     async def test_unreachable_service_raises_tool_error(self, tmp_path: Path) -> None:
         # Port 1 on localhost: connection refused immediately, no real network.
