@@ -2,6 +2,16 @@ import * as React from "react"
 import { ArtifactsPanel } from "@/components/runs/artifacts-panel"
 import { EventsPanel } from "@/components/runs/events-panel"
 import { StatusBadge } from "@/components/runs/status-badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,10 +22,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useArtifacts } from "@/hooks/use-console"
+import { useArtifacts, useCancelTask } from "@/hooks/use-console"
 import { fmtDateTime, fmtDuration } from "@/lib/format"
+import { TERMINAL_RUN_STATUSES } from "@/lib/types"
 import type { Run, RunEvent } from "@/lib/types"
-import { CircleAlertIcon, CircleCheckIcon, InfoIcon, TimerIcon } from "lucide-react"
+import {
+  CircleAlertIcon,
+  CircleCheckIcon,
+  CircleStopIcon,
+  InfoIcon,
+  TimerIcon,
+} from "lucide-react"
 
 function UsageLine({ run }: { run: Run }) {
   if (!run.usage) return <span className="text-xs text-muted-foreground">尚无用量统计</span>
@@ -101,7 +118,10 @@ export function RunChatHeader({
   events: RunEvent[]
 }) {
   const [infoOpen, setInfoOpen] = React.useState(false)
+  const [stopping, setStopping] = React.useState(false)
+  const cancel = useCancelTask()
   const verification = (run.metadata as { verification?: Verification })?.verification
+  const running = !TERMINAL_RUN_STATUSES.has(run.status)
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
@@ -113,6 +133,40 @@ export function RunChatHeader({
         <span className="w-full text-xs break-words text-destructive">{run.error}</span>
       )}
       <div className="ml-auto flex items-center gap-1">
+        {running && (
+          <>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={cancel.isPending}
+              onClick={() => setStopping(true)}
+            >
+              <CircleStopIcon data-icon="inline-start" />
+              {cancel.isPending ? "正在停止…" : "停止"}
+            </Button>
+            <AlertDialog open={stopping} onOpenChange={(open) => !open && setStopping(false)}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>停止任务？</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    将中断当前运行，已生成的产物会保留。停止后可在对话里继续下达指令。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>取消</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      cancel.mutate({ taskId: run.task_id })
+                      setStopping(false)
+                    }}
+                  >
+                    停止
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
+        )}
         <Button variant="ghost" size="sm" onClick={() => setInfoOpen(true)}>
           <InfoIcon data-icon="inline-start" />
           运行详情

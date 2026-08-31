@@ -43,7 +43,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useDeleteTask, useTasks, useUpdateTask } from "@/hooks/use-console"
 import { fmtTimeShort } from "@/lib/format"
-import { excerpt } from "@/lib/tasks"
+import { excerpt, isTerminalTask } from "@/lib/tasks"
 import type { Task } from "@/lib/types"
 import {
   BotIcon,
@@ -342,12 +342,15 @@ function SidebarTasks({
           <AlertDialogHeader>
             <AlertDialogTitle>删除任务「{removing?.title ?? ""}」？</AlertDialogTitle>
             <AlertDialogDescription>
-              任务及其全部运行记录将被删除，此操作不可撤销。
+              {removing && !isTerminalTask(removing)
+                ? "任务正在运行，请先停止后再删除。"
+                : "任务及其全部运行记录将被删除，此操作不可撤销。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
+              disabled={removing !== null && !isTerminalTask(removing)}
               onClick={() => {
                 if (removing) deleteTask.mutate({ taskId: removing.id })
                 setRemoving(null)
