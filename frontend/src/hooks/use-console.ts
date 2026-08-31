@@ -194,7 +194,7 @@ export function useUploadAttachments() {
     mutationFn: ({ files }) => {
       const form = new FormData()
       for (const file of files) form.append("files", file)
-      return api.post(`/v1/attachments`, form)
+      return api.upload(`/v1/attachments`, form)
     },
   })
 }
