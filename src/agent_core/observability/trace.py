@@ -23,6 +23,10 @@ class Tracer(Protocol):
         """Recorded events for ``run_id`` (read side used by the API layer)."""
         ...
 
+    def get_task_events(self, task_id: str) -> list[TraceEvent]:
+        """Recorded events for every run of ``task_id``, in emission order."""
+        ...
+
 
 class InMemoryTracer:
     """Keeps trace events in process memory, bounded per run."""
@@ -46,3 +50,20 @@ class InMemoryTracer:
 
     def get_events(self, run_id: str) -> list[TraceEvent]:
         return list(self._events.get(run_id, []))
+
+    def get_task_events(self, task_id: str) -> list[TraceEvent]:
+        """All recorded events whose run belongs to ``task_id``.
+
+        Events are buffered per run and each carries the conversation it
+        belongs to (nested sub-agent events inherit the root run's task), so a
+        conversation's full timeline is the union of its runs' events, ordered
+        by emission timestamp.
+        """
+        events = [
+            event
+            for run_events in self._events.values()
+            for event in run_events
+            if event.task_id == task_id
+        ]
+        events.sort(key=lambda event: (event.timestamp, event.id))
+        return events

@@ -209,9 +209,14 @@ class AgentCoreService:
     def trace_events(self, run_id: str) -> list[TraceEvent]:
         return self.runtime.tracer.get_events(run_id)
 
-    def subscribe_events(self, run_id: str | None = None) -> EventStream:
-        """Live event stream for one run, or for all runs when ``run_id`` is None."""
-        return self.broker.subscribe(run_id)
+    def trace_task_events(self, task_id: str) -> list[TraceEvent]:
+        return self.runtime.tracer.get_task_events(task_id)
+
+    def subscribe_events(
+        self, run_id: str | None = None, *, task_id: str | None = None
+    ) -> EventStream:
+        """Live event stream for one run, one conversation, or all runs."""
+        return self.broker.subscribe(run_id, task_id=task_id)
 
     def unsubscribe_events(self, stream: EventStream) -> None:
         self.broker.unsubscribe(stream)

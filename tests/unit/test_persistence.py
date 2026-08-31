@@ -307,6 +307,50 @@ class TestRunPersistence:
         assert finished_events and finished_events[0].output == "echo: hi"
         store2.close()
 
+    async def test_task_events_aggregate_across_follow_up_runs(
+        self, tmp_path: Path
+    ) -> None:
+        """get_task_events() reconstructs a whole conversation's timeline from
+        the SQLite mirror — even when the in-memory buffer has been dropped."""
+        url = f"sqlite:///{tmp_path}/agent.db"
+        store = SqliteStore(url)
+        agents = AgentRegistry(store)
+        agents.register(make_agent())
+        runtime = AgentRuntime(
+            agents,
+            ToolRegistry(store),
+            SkillRegistry(store),
+            tracer=PersistingTracer(InMemoryTracer(), store),
+            store=store,
+            builder=StubBuilder(FakeGraph()),
+        )
+
+        first = runtime.create_run("helper", "hi")
+        await runtime.execute_run(first)
+        task_id = first.task_id
+        follow = runtime.create_run(
+            "helper", "again", task=runtime.get_task(task_id)
+        )
+        await runtime.execute_run(follow)
+        assert follow.id != first.id
+        assert follow.task_id == task_id
+        store.close()
+
+        # Fresh components over the same file: in-memory buffer gone, but the
+        # persisted mirror still reconstructs both runs' events.
+        store2 = SqliteStore(url)
+        tracer2 = PersistingTracer(InMemoryTracer(), store2)
+        tracer2.restore()
+        events = tracer2.get_task_events(task_id)
+        run_ids = {event.run_id for event in events}
+        assert first.id in run_ids
+        assert follow.id in run_ids
+        assert {event.event_type for event in events} >= {
+            EventType.RUN_STARTED,
+            EventType.RUN_FINISHED,
+        }
+        store2.close()
+
     async def test_created_run_becomes_failed_after_restart(self, tmp_path: Path) -> None:
         url = f"sqlite:///{tmp_path}/agent.db"
         store = SqliteStore(url)

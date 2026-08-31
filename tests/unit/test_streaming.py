@@ -14,6 +14,14 @@ def make_event(run_id: str, event_type: EventType = EventType.AGENT_THINKING) ->
     return TraceEvent(event_type=event_type, run_id=run_id)
 
 
+def make_task_event(
+    run_id: str, task_id: str, event_type: EventType = EventType.AGENT_THINKING
+) -> TraceEvent:
+    run = Run(task_id=task_id, agent_id="a")
+    run.id = run_id
+    return TraceEvent(event_type=event_type, run_id=run_id, task_id=task_id)
+
+
 async def collect(stream, count: int) -> list[TraceEvent]:
     received: list[TraceEvent] = []
     async for event in stream.events():
@@ -47,6 +55,22 @@ class TestEventStreamBroker:
 
         received = await collect(stream, 1)
         assert received == [mine]
+
+    async def test_task_scoped_subscription_covers_all_runs_of_the_task(self) -> None:
+        """A conversation's stream sees every root run of the task — the fix
+        for the console's run detail resetting on each follow-up message."""
+        bus = EventBus()
+        broker = EventStreamBroker(bus)
+        stream = broker.subscribe(task_id="task-1")
+        turn1, turn2 = make_task_event("run-1", "task-1"), make_task_event("run-2", "task-1")
+        other_task = make_task_event("run-3", "task-2")
+
+        bus.publish(other_task)
+        bus.publish(turn1)
+        bus.publish(turn2)
+
+        received = await collect(stream, 2)
+        assert received == [turn1, turn2]
 
     async def test_slow_consumer_drops_instead_of_blocking(self) -> None:
         bus = EventBus()

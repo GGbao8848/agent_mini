@@ -10,10 +10,14 @@ terminal.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 from fastapi import APIRouter, Query
+from sse_starlette import EventSourceResponse
 
 from agent_core.api.deps import ServiceDep
 from agent_core.api.schemas import (
+    EventOut,
     TaskCreateRequest,
     TaskMessageRequest,
     TaskOut,
@@ -59,6 +63,32 @@ def list_tasks(service: ServiceDep, agent_id: str | None = Query(default=None)) 
 @router.get("/{task_id}", response_model=TaskOut)
 def get_task(task_id: str, service: ServiceDep) -> TaskOut:
     return _conversation_out(service, task_id)
+
+
+@router.get("/{task_id}/events")
+async def stream_task_events(task_id: str, service: ServiceDep) -> EventSourceResponse:
+    """Whole-conversation event stream.
+
+    Replays every run of ``task_id`` and keeps streaming across follow-up
+    messages, so a multi-turn conversation's timeline survives each new turn's
+    fresh root run. Unlike the per-run stream it never closes on a terminal
+    event — a conversation can always be continued.
+    """
+    service.get_task(task_id)  # fail fast with 404 before opening the stream
+
+    async def generator() -> AsyncIterator[dict[str, str]]:
+        stream = service.subscribe_events(task_id=task_id)
+        try:
+            stream.replay(service.trace_task_events(task_id))
+            async for event in stream.events():
+                yield {
+                    "event": event.event_type.value,
+                    "data": EventOut.of(event).model_dump_json(),
+                }
+        finally:
+            service.unsubscribe_events(stream)
+
+    return EventSourceResponse(generator())
 
 
 @router.patch("/{task_id}", response_model=TaskOut)

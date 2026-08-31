@@ -6,10 +6,10 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   useApprovals,
   useRun,
-  useRunEvents,
   useSendFollowup,
   useSubmitTask,
   useTask,
+  useTaskEvents,
   useTasks,
 } from "@/hooks/use-console"
 import type { Task } from "@/lib/types"
@@ -126,8 +126,7 @@ function ChatThread({ task }: { task: Task }) {
   const { data: fresh } = useTask(task.id)
   const current = fresh ?? task
   const activeRun = useRun(current.active_run_id)
-  const runStatus = activeRun.data?.status ?? current.status
-  const events = useRunEvents(current.active_run_id, runStatus)
+  const events = useTaskEvents(current.id)
   const approvals = useApprovals()
   const followup = useSendFollowup()
 

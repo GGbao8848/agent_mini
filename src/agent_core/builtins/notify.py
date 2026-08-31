@@ -1,21 +1,28 @@
-"""Built-in ``telegram_notify`` tool: the agent messages its human.
+"""Built-in Telegram tools: message the human, and ship them a finished artifact.
 
-Registered always, so the console can show its availability state. It is
-marked unavailable (and its handler raises a clear error) until BOTH
-``TELEGRAM_BOT_TOKEN`` and ``TELEGRAM_CHAT_ID`` are set. Uses the same Tool
+Registered always, so the console can show their availability state. Both are
+marked unavailable (and their handlers raise a clear error) until BOTH
+``TELEGRAM_BOT_TOKEN`` and ``TELEGRAM_CHAT_ID`` are set. Use the same Tool
 Registry → Action Gate path as any other tool.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from agent_core.artifacts import artifact_abs_path
 from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError, ToolError
 from agent_core.notify.telegram import TelegramChannel, telegram_chat_id, telegram_token
 from agent_core.registries import ToolRegistry
 
 TELEGRAM_NOTIFY_TOOL = "telegram_notify"
+TELEGRAM_SEND_ARTIFACT_TOOL = "telegram_send_artifact"
+
+
+def _available(token: str | None, chat_id: str | None) -> bool:
+    return bool(token and chat_id)
 
 
 def make_telegram_notify(
@@ -25,7 +32,7 @@ def make_telegram_notify(
     channel: TelegramChannel | None = None,
 ) -> tuple[ToolDefinition, Any]:
     """Handler bound to a fixed bot token + chat (the operator's chat)."""
-    available = bool(token and chat_id)
+    available = _available(token, chat_id)
 
     async def telegram_notify(message: str) -> str:
         if not token or not chat_id:
@@ -65,13 +72,93 @@ def make_telegram_notify(
     return definition, telegram_notify
 
 
-def register_builtin_tools(registry: ToolRegistry) -> list[str]:
-    """Register ``telegram_notify`` (unavailable until the channel is configured)."""
-    definition, handler = make_telegram_notify(telegram_token(), telegram_chat_id())
-    try:
-        registry.register(definition, handler)
-    except RegistryError:
-        # Definition persisted from a previous run or boot: refresh metadata
-        # (availability tracks the current credentials) and re-attach handler.
-        registry.replace_with_handler(definition, handler)
-    return [definition.name]
+def make_telegram_send_artifact(
+    token: str | None,
+    chat_id: str | None,
+    workspace_dir: str,
+    *,
+    channel: TelegramChannel | None = None,
+) -> tuple[ToolDefinition, Any]:
+    """Handler that uploads a finished workspace artifact to the human's chat.
+
+    ``path`` is workspace-relative (the same convention as the console's
+    artifact download). The workspace is the only place files are served from,
+    so ``..`` escapes, absolute paths and dotfiles are rejected before the file
+    is ever opened.
+    """
+    available = _available(token, chat_id)
+    workspace = Path(workspace_dir)
+
+    async def telegram_send_artifact(path: str) -> str:
+        if not token or not chat_id:
+            raise ToolError(
+                "telegram_send_artifact is not available: TELEGRAM_BOT_TOKEN / "
+                "TELEGRAM_CHAT_ID are not configured",
+                details={"tool": TELEGRAM_SEND_ARTIFACT_TOOL},
+            )
+        target = artifact_abs_path(workspace, path)
+        if target is None:
+            raise ToolError(
+                f"Artifact '{path}' not found in workspace — it must be a "
+                "workspace-relative path (e.g. album/2026-spring.pptx)",
+                details={"path": path, "tool": TELEGRAM_SEND_ARTIFACT_TOOL},
+            )
+        resolved = channel or TelegramChannel(token, chat_id)
+        message_id = await resolved.send_document(target)
+        return f"Sent {target.name} to chat {chat_id} (message {message_id})."
+
+    definition = ToolDefinition(
+        name=TELEGRAM_SEND_ARTIFACT_TOOL,
+        description=(
+            "Send a finished artifact (pptx, pdf, png, zip, ...) to your human "
+            "operator via Telegram as a downloadable file. Use it when you have "
+            "produced a deliverable in the workspace and want to hand it over. "
+            "Pass the workspace-relative path of the file, e.g. "
+            "'album/2026-spring.pptx' or 'report.pdf'."
+        ),
+        source=ToolSource.PYTHON,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Workspace-relative path of the artifact file to send",
+                },
+            },
+            "required": ["path"],
+        },
+        metadata={
+            "builtin": True,
+            "channel": "telegram",
+            "available": available,
+            "availability_reason": (
+                "" if available else "未配置 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID"
+            ),
+        },
+    )
+    return definition, telegram_send_artifact
+
+
+def register_builtin_tools(registry: ToolRegistry, settings: Any = None) -> list[str]:
+    """Register the Telegram tools (unavailable until the channel is configured).
+
+    ``settings`` is optional for backwards-compatibility with the existing test
+    call sites; when absent the workspace default is used.
+    """
+    token, chat_id = telegram_token(), telegram_chat_id()
+    workspace = (
+        getattr(settings, "workspace_dir", "./workspace") if settings is not None else "./workspace"
+    )
+    names: list[str] = []
+    for definition, handler in (
+        make_telegram_notify(token, chat_id),
+        make_telegram_send_artifact(token, chat_id, workspace),
+    ):
+        try:
+            registry.register(definition, handler)
+        except RegistryError:
+            # Definition persisted from a previous run or boot: refresh metadata
+            # (availability tracks the current credentials) and re-attach handler.
+            registry.replace_with_handler(definition, handler)
+        names.append(definition.name)
+    return names

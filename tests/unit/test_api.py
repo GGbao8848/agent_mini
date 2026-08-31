@@ -21,6 +21,7 @@ from agent_core.domain.action import Action, RiskLevel
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.skill import SkillManifest
 from agent_core.domain.tool import ToolDefinition
+from agent_core.domain.trace import EventType
 from agent_core.mcp.manager import MCPManager
 from agent_core.observability.stream import EventStreamBroker
 from agent_core.observability.trace import InMemoryTracer
@@ -444,4 +445,62 @@ class TestSSEEvents:
 
     async def test_stream_unknown_run_maps_to_404(self, client: Any) -> None:
         response = await client.get("/v1/runs/ghost/events")
+        assert response.status_code == 404
+
+    async def test_task_stream_spans_multiple_turns(self, client: Any) -> None:
+        """A conversation's event stream keeps replaying across follow-ups —
+        the bug was the console's run-detail resetting on every new message.
+
+        ASGI transport buffers the never-closing stream until it ends, so the
+        SSE body itself is exercised over real HTTP elsewhere; here we assert
+        the conversation-scoped subscription and replay that back the stream:
+        a task-scoped stream delivers every run's events.
+        """
+        first = (
+            await client.post(
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "hi"}
+            )
+        ).json()
+        task_id = first["id"]
+        core = client._transport.app.state.service
+
+        # The endpoint subscribes task-scoped and replays the conversation's
+        # recorded events; emulate that to assert cross-run aggregation. The
+        # stream never closes, so consume a bounded window.
+        stream = core.subscribe_events(task_id=task_id)
+        stream.replay(core.trace_task_events(task_id))
+        seen: list[Any] = []
+
+        async def drain() -> None:
+            async for event in stream.events():
+                seen.append(event)
+                if len(seen) >= 6:
+                    break
+
+        await asyncio.wait_for(drain(), timeout=5)
+        first_events = seen
+        assert {e.event_type for e in first_events} >= {
+            EventType.RUN_STARTED,
+            EventType.RUN_FINISHED,
+        }
+        assert all(e.task_id == task_id for e in first_events)
+
+        # Follow up on the same conversation; the aggregation must now include
+        # both runs (replay of the whole conversation).
+        follow = (
+            await client.post(
+                f"/v1/tasks/{task_id}/messages",
+                params={"wait": "true"},
+                json={"input": "again"},
+            )
+        ).json()
+        assert follow["id"] == task_id
+        assert follow["active_run_id"] != first["active_run_id"]
+
+        run_ids = {e.run_id for e in core.trace_task_events(task_id)}
+        assert first["active_run_id"] in run_ids
+        assert follow["active_run_id"] in run_ids
+
+    async def test_task_stream_unknown_task_maps_to_404(self, client: Any) -> None:
+        response = await client.get("/v1/tasks/ghost/events")
         assert response.status_code == 404
