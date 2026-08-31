@@ -15,10 +15,14 @@ from agent_core.api import app as api_app
 from agent_core.application import bootstrap as bootstrap_mod
 from agent_core.config.settings import Settings, get_settings
 from agent_core.runtime import builder as builder_mod
+from agent_core.runtime import model as model_mod
 from agent_core.runtime import runtime as runtime_mod
 
 # Modules that imported ``get_settings`` by name and resolve settings lazily.
-_SETTINGS_SITES = (api_app, bootstrap_mod, runtime_mod, builder_mod)
+# model_mod must be patched too: build_model() calls get_settings(), whose
+# .env-injection would otherwise leak LOCAL_LLM_BASE_URL etc. into os.environ
+# and defeat monkeypatch.delenv in tests like test_local_model_without_base_url.
+_SETTINGS_SITES = (api_app, bootstrap_mod, runtime_mod, builder_mod, model_mod)
 
 
 @pytest.fixture(autouse=True)

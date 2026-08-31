@@ -1,8 +1,11 @@
 """Unit tests for the model factory (no network access)."""
 
+import os
+
 import pytest
 from langchain_openai import ChatOpenAI
 
+from agent_core.config.settings import Settings
 from agent_core.errors.exceptions import ConfigurationError
 from agent_core.runtime.model import build_model, parse_model_spec
 
@@ -92,3 +95,18 @@ class TestLocalProvider:
         with pytest.raises(ConfigurationError) as excinfo:
             build_model("local:qwen3.8-27b")
         assert excinfo.value.details["env_var"] == "LOCAL_LLM_BASE_URL"
+
+    def test_local_model_does_not_inject_base_url_from_env_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Building with a hermetic Settings must not leak .env into os.environ.
+
+        Regression guard: get_settings() (patched away here) injects non-
+        AGENT_CORE_ .env keys into os.environ; build_model must not re-run that
+        injection when given explicit settings.
+        """
+        monkeypatch.delenv("LOCAL_LLM_BASE_URL", raising=False)
+
+        with pytest.raises(ConfigurationError):
+            build_model("local:qwen3.8-27b", settings=Settings(_env_file=None))
+        assert "LOCAL_LLM_BASE_URL" not in os.environ
