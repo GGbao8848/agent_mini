@@ -603,3 +603,64 @@ class TestTaskAttachments:
         assert "读一下" in content
         assert rel_path in content
 
+    async def test_zip_attachment_is_extracted(
+        self, client: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        """Uploading a .zip auto-extracts its members as attachments."""
+        from agent_core.api.routes import attachments as attachments_route
+        from agent_core.config.settings import Settings
+
+        monkeypatch.setattr(
+            attachments_route,
+            "get_settings",
+            lambda: Settings(_env_file=None, workspace_dir=str(tmp_path)),
+        )
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("images/cover.png", b"\x89PNG cover")
+            zf.writestr("notes.md", "# hi")
+        zipped = buf.getvalue()
+
+        response = await client.post(
+            "/v1/attachments",
+            files={"files": ("bundle.zip", zipped, "application/zip")},
+        )
+        assert response.status_code == 200
+        saved = response.json()
+        paths = {item["path"] for item in saved}
+        assert any(p.endswith("/bundle/images/cover.png") for p in paths)
+        assert any(p.endswith("/bundle/notes.md") for p in paths)
+        # Members actually landed in the (tmp) workspace.
+        cover = next(p for p in paths if p.endswith("images/cover.png"))
+        assert (tmp_path / cover).read_bytes() == b"\x89PNG cover"
+
+    async def test_zip_attachment_rejects_path_escape(
+        self, client: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        """A zip with ../ paths is rejected outright (zip-slip guard)."""
+        from agent_core.api.routes import attachments as attachments_route
+        from agent_core.config.settings import Settings
+
+        monkeypatch.setattr(
+            attachments_route,
+            "get_settings",
+            lambda: Settings(_env_file=None, workspace_dir=str(tmp_path)),
+        )
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("../../evil.sh", "rm -rf /")
+        zipped = buf.getvalue()
+
+        response = await client.post(
+            "/v1/attachments",
+            files={"files": ("evil.zip", zipped, "application/zip")},
+        )
+        assert response.status_code == 400
+        assert "unsafe path" in str(response.json()).lower()
+

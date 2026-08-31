@@ -4,6 +4,8 @@ One endpoint, no task id: the client uploads first (getting workspace-relative
 paths back), then sends them as the ``attachments`` field on task create or
 follow-up. Files land under ``<workspace>/uploads/<uuid>/`` so they are unique
 per batch and stay inside the workspace the agent's file tools are rooted on.
+``.zip`` archives are extracted in place; a malformed archive (bad zip, unsafe
+member path, over budget) is a client error and maps to 400.
 """
 
 from __future__ import annotations
@@ -13,9 +15,11 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, UploadFile
+from fastapi.responses import JSONResponse
 
 from agent_core.api.attachments import save_attachments
 from agent_core.config.settings import get_settings
+from agent_core.errors.exceptions import ToolError
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
@@ -23,7 +27,7 @@ router = APIRouter(prefix="/attachments", tags=["attachments"])
 @router.post("", response_model=list[dict[str, Any]])
 async def upload_attachments(
     files: Annotated[list[UploadFile], File()],
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]] | JSONResponse:
     """Persist chat attachments; returns ``[{path, name, size}]``."""
     workspace = Path(get_settings().workspace_dir)
     batch_id = uuid.uuid4().hex[:12]
@@ -31,4 +35,17 @@ async def upload_attachments(
         (file.filename or "attachment", await file.read())
         for file in files
     ]
-    return save_attachments(workspace, batch_id, uploads)
+    try:
+        return save_attachments(workspace, batch_id, uploads)
+    except ToolError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": type(exc).__name__,
+                    "message": exc.message,
+                    "retryable": exc.retryable,
+                    "details": exc.details,
+                }
+            },
+        )

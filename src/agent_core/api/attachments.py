@@ -2,15 +2,17 @@
 
 The console composer lets a user drag files / paste screenshots to hand them
 to the agent. Files land under ``<workspace>/uploads/<task_id>/`` with a
-sanitized basename (never overwriting, deduped on collision), and the message
-endpoint records their workspace-relative paths so the agent can read them
-with its file tools. Only the ``uploads`` subtree is writable this way — a
-malformed name can never escape it.
+sanitized basename (never overwriting, deduped on collision). ``.zip``
+archives are extracted in place so the agent can read every member directly
+with its file tools; every other file is stored as-is. Only the ``uploads``
+subtree is writable this way — a malformed name can never escape it.
 """
 
 from __future__ import annotations
 
+import io
 import re
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +36,8 @@ def save_attachments(
 
     ``uploads`` is ``[(filename, bytes)]`` as parsed from the multipart form.
     Each file is written to ``<workspace>/uploads/<task_id>/<basename>``; a
-    collision (same basename twice in one request) gets a numeric suffix so
+    ``.zip`` archive is extracted under ``<workspace>/uploads/<task_id>/<name>/``
+    (members become sibling attachments). A collision gets a numeric suffix so
     nothing is ever silently overwritten. Paths are workspace-relative and
     ``..``-free by construction.
     """
@@ -59,10 +62,75 @@ def save_attachments(
                 f"Attachment '{filename}' exceeds {max_bytes // (1024 * 1024)} MiB",
                 details={"tool": "chat_attachment", "file": filename},
             )
-        target = _dedupe(target_dir / filename)
-        target.write_bytes(content)
-        rel = target.relative_to(workspace).as_posix()
-        saved.append({"path": rel, "name": target.name, "size": len(content)})
+        if filename.lower().endswith(".zip"):
+            saved.extend(_save_zip(workspace, target_dir, filename, content))
+        else:
+            target = _dedupe(target_dir / filename)
+            target.write_bytes(content)
+            rel = target.relative_to(workspace).as_posix()
+            saved.append({"path": rel, "name": target.name, "size": len(content)})
+    return saved
+
+
+def _save_zip(
+    workspace: Path, target_dir: Path, filename: str, content: bytes
+) -> list[dict[str, Any]]:
+    """Extract ``content`` (a zip) under ``target_dir/<name>/``; zip-slip safe.
+
+    Returns one ``{path, name, size}`` per member, paths workspace-relative.
+    """
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile as exc:
+        raise ToolError(
+            f"Attachment '{filename}' is not a valid zip archive",
+            details={"tool": "chat_attachment", "file": filename},
+        ) from exc
+    members = [info for info in zf.infolist() if not info.is_dir()]
+    if not members:
+        raise ToolError(
+            f"Attachment '{filename}' is an empty zip archive",
+            details={"tool": "chat_attachment", "file": filename},
+        )
+    # A zip bomb guard: refuse to unpack past the per-attachment byte budget.
+    total = sum(info.file_size for info in members)
+    if total > _MAX_ATTACHMENT_BYTES:
+        raise ToolError(
+            f"Attachment '{filename}' unpacks to more than "
+            f"{_MAX_ATTACHMENT_BYTES // (1024 * 1024)} MiB",
+            details={"tool": "chat_attachment", "file": filename},
+        )
+
+    stem = Path(filename).stem
+    root = _dedupe(target_dir / stem)
+    saved: list[dict[str, Any]] = []
+    for info in members:
+        name = info.filename
+        parts = Path(name).parts
+        if not name or ".." in parts or name.startswith("/") or (
+            len(parts) > 1 and parts[0] in ("..", "")
+        ):
+            raise ToolError(
+                f"Attachment '{filename}' contains an unsafe path: {name}",
+                details={"tool": "chat_attachment"},
+            )
+        dest = (root / name).resolve()
+        if not dest.is_relative_to(root.resolve()):
+            raise ToolError(
+                f"Attachment '{filename}' contains an unsafe path: {name}",
+                details={"tool": "chat_attachment"},
+            )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info) as src, open(dest, "wb") as out:
+            while chunk := src.read(64 * 1024):
+                out.write(chunk)
+        saved.append(
+            {
+                "path": dest.relative_to(workspace.resolve()).as_posix(),
+                "name": name,
+                "size": info.file_size,
+            }
+        )
     return saved
 
 
