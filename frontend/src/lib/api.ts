@@ -50,6 +50,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
     throw new ApiError(response.status, path, body)
   }
+  // 204 No Content (e.g. DELETE) carries no body — calling .json() on it
+  // throws "Unexpected end of JSON input".
+  if (response.status === 204) {
+    return undefined as T
+  }
   return (await response.json()) as T
 }
 
