@@ -2,6 +2,7 @@ import * as React from "react"
 import { ArtifactsPanel } from "@/components/runs/artifacts-panel"
 import { EventsPanel } from "@/components/runs/events-panel"
 import { StatusBadge } from "@/components/runs/status-badge"
+import { TaskIdChip } from "@/components/runs/task-stats"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,7 +40,8 @@ import {
 function UsageLine({ run }: { run: Run }) {
   if (!run.usage) return <span className="text-xs text-muted-foreground">尚无用量统计</span>
   return (
-    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <TaskIdChip taskId={run.task_id} />
       <TimerIcon className="size-3.5" />
       {run.usage.duration_ms != null ? `${fmtDuration(run.usage.duration_ms)} · ` : ""}
       {run.usage.total_tokens} tokens · {run.usage.model_calls} 模型 · {run.usage.tool_calls} 工具

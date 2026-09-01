@@ -2,6 +2,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { LiveTaskStats } from "@/components/runs/task-stats"
 import { KeyRoundIcon, TriangleAlertIcon } from "lucide-react"
 import type { ConnState } from "@/hooks/use-console"
 
@@ -25,11 +26,14 @@ export function SiteHeader({
   conn,
   pendingApprovals,
   onOpenTokenDialog,
+  taskId,
 }: {
   title: string
   conn: ConnState
   pendingApprovals: number
   onOpenTokenDialog: () => void
+  /** The currently open conversation (from the "新建任务" view); live stats shown when set. */
+  taskId?: string | null
 }) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b">
@@ -39,6 +43,7 @@ export function SiteHeader({
         <span className="text-sm font-medium">{title}</span>
       </div>
       <div className="flex items-center gap-2 px-3">
+        {taskId && <LiveTaskStats taskId={taskId} />}
         {pendingApprovals > 0 && (
           <Badge variant="outline" className="border-amber-500/30 bg-amber-500/15 text-amber-700 dark:text-amber-400">
             <TriangleAlertIcon />

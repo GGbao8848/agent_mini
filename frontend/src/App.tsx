@@ -70,6 +70,7 @@ export default function App() {
           conn={conn}
           pendingApprovals={approvals.data?.length ?? 0}
           onOpenTokenDialog={() => setTokenOpen(true)}
+          taskId={view === "新建任务" ? selectedTaskId : null}
         />
         <div className="flex min-h-0 flex-1 flex-col">{renderView}</div>
       </SidebarInset>
