@@ -27,11 +27,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from agent_core.artifacts import task_workspace
 from agent_core.config.settings import Settings
 from agent_core.domain.action import RiskLevel
 from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError, ToolError
 from agent_core.registries import ToolRegistry
+from agent_core.runtime.context import get_current_task_id
 
 RUN_CODE_TOOL = "run_code"
 _MAX_OUTPUT_CHARS = 8000
@@ -136,14 +138,20 @@ def make_run_code(settings: Settings) -> tuple[ToolDefinition, Any]:
     sandboxed = settings.sandbox == "podman"
 
     async def run_code(command: str, timeout_seconds: float = 300.0) -> str:
-        workspace.mkdir(parents=True, exist_ok=True)
+        # Run inside the current task's private directory so files it creates
+        # land in the task's own folder (the console's 产物 scope), not the
+        # shared root. Uses this handler's captured workspace (not the global
+        # settings) so a task-context run always targets the right root.
+        task_id = get_current_task_id()
+        cwd = task_workspace(workspace, task_id) if task_id is not None else workspace
+        cwd.mkdir(parents=True, exist_ok=True)
         capped = min(max(timeout_seconds, 1.0), _MAX_TIMEOUT_SECONDS)
         if sandboxed:
-            return await asyncio.to_thread(_run_podman, workspace, settings, command, capped)
+            return await asyncio.to_thread(_run_podman, cwd, settings, command, capped)
         # Host backend: put this project's venv first on PATH so agent scripts
         # see the installed libraries (no resolve(): venv python is a symlink).
         full_command = f'export PATH="{venv_bin}:$PATH"; {command}'
-        return await asyncio.to_thread(_run_host, full_command, workspace, capped)
+        return await asyncio.to_thread(_run_host, full_command, cwd, capped)
 
     backend_note = (
         "Runs inside a rootless podman sandbox: only this workspace is mounted, "

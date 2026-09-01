@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import re
+import shutil
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -158,3 +159,31 @@ def attachment_notes(paths: list[str]) -> str:
     for path in paths:
         lines.append(f"- {path}")
     return "\n".join(lines)
+
+
+def mirror_attachments(workspace: Path, task_id: str, paths: list[str]) -> None:
+    """Copy referenced attachment batches into the task's private directory.
+
+    Files are uploaded *before* a task exists (``uploads/<batch_id>/``), but a
+    task's file tools are rooted at ``tasks/<task_id>/``. Mirroring each
+    referenced ``uploads/<batch_id>/`` subtree into the task dir — at the same
+    relative path — keeps the ``uploads/<batch>/...`` paths the message hints
+    at resolvable against the task root. Idempotent: already-mirrored batches
+    are skipped.
+    """
+    if not paths:
+        return
+    task_root = workspace / "tasks" / task_id
+    for path in paths:
+        parts = Path(path).parts
+        if len(parts) < 2 or parts[0] != "uploads":
+            continue  # not an upload reference
+        batch = parts[1]
+        source = workspace / "uploads" / batch
+        if not source.is_dir():
+            continue
+        dest = task_root / "uploads" / batch
+        if dest.exists():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, dest)

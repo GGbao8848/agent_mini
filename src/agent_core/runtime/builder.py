@@ -18,11 +18,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
+from agent_core.artifacts import task_workspace
 from agent_core.config.settings import Settings, get_settings
 from agent_core.domain.agent import AgentSpec, SubAgentRef
 from agent_core.domain.metrics import RunUsage
 from agent_core.errors.exceptions import ConfigurationError, SkillError
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
+from agent_core.runtime.context import get_current_task_id
 from agent_core.runtime.help_tool import autonomy_prompt_addendum
 from agent_core.runtime.middleware import build_middleware
 from agent_core.runtime.model import ModelFactory, build_model
@@ -107,43 +109,48 @@ class AgentBuilder:
         ]
 
     def _backend_kwargs(self, spec: AgentSpec) -> dict[str, Any]:
-        """Root the harness file tools on the real workspace.
+        """Root the harness file tools on the workspace the task writes into.
 
         With a workspace the agent's ``write_file``/``read_file``/... land on
         actual disk (contained by FilesystemBackend), which is what makes
-        ``run_code``-built artifacts (pptx, sites, images) possible. DeepAgents
-        serves skills and file tools from ONE backend, so skills are staged
-        under ``.skills/`` inside the workspace instead of re-rooting the
-        backend — file tools stay workspace-rooted and skill scripts stay
-        visible to the sandboxed ``run_code`` workspace mount.
+        ``run_code``-built artifacts (pptx, sites, images) possible. When a
+        task is executing (the ``current_task_id`` context var is set — build
+        runs inside the run), the backend is rooted at the task's private
+        directory ``workspace/tasks/<task_id>/`` so every task's outputs stay
+        isolated; skills are staged *inside that same directory* (DeepAgents
+        serves skills and file tools from ONE backend, and skill source paths
+        resolve relative to the backend root).
         """
         settings = self._settings or get_settings()
-        backend = FilesystemBackend(root_dir=settings.workspace_dir)
-        skill_source = self._stage_skills(settings)
+        workspace = Path(settings.workspace_dir)
+        task_id = get_current_task_id()
+        backend_root = task_workspace(workspace, task_id) if task_id is not None else workspace
+        backend = FilesystemBackend(root_dir=backend_root)
+        skill_source = self._stage_skills(backend_root, settings)
         if skill_source is not None:
             return {"skills": [skill_source], "backend": backend}
         return {"backend": backend}
 
-    def _stage_skills(self, settings: Settings) -> str | None:
-        """Copy every registered skill into the workspace; return their source.
+    def _stage_skills(self, stage_root: Path, settings: Settings) -> str | None:
+        """Copy every registered skill into ``stage_root``; return their source.
 
         Skills are a shared pool: anything registered in the SkillRegistry is
-        loaded for every agent under one ``.skills/`` root (registration is
-        the only step needed — there is no per-agent binding and no per-agent
-        staging directory). ``.skills/`` is wiped and rebuilt on every build so
-        the staged copy always matches the registry.
+        loaded for every agent. The staged copy lives under the *same* root the
+        file backend uses (``stage_root/.skills/``), so DeepAgents can find it
+        relative to the backend. ``.skills/`` is wiped and rebuilt on every
+        build so the staged copy always matches the registry.
         """
         manifests = self._skills.list()
         if not manifests:
             return None
-        stage_root = Path(settings.workspace_dir) / ".skills"
-        if stage_root.exists():
-            shutil.rmtree(stage_root)
+        staged = stage_root / ".skills"
+        if staged.exists():
+            shutil.rmtree(staged)
         for manifest in manifests:
             source = self._resolve_skill_path(manifest.id)
             shutil.copytree(
                 source,
-                stage_root / manifest.id,
+                staged / manifest.id,
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
             )
         return ".skills"

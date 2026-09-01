@@ -18,10 +18,12 @@ from typing import Any
 
 import httpx
 
+from agent_core.artifacts import register_artifact, task_workspace
 from agent_core.config.settings import Settings
 from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError, ToolError
 from agent_core.registries import ToolRegistry
+from agent_core.runtime.context import get_current_task_id
 
 GENERATE_IMAGE_TOOL = "generate_image"
 VIEW_IMAGE_TOOL = "view_image"
@@ -127,10 +129,19 @@ def make_generate_image(settings: Settings) -> tuple[ToolDefinition, Any]:
             steps=steps,
             cfg_scale=cfg_scale,
         )
-        out_dir = workspace / "images"
+        # Write into the running task's private directory so every task owns
+        # its outputs; the console then shows the image under that task. Uses
+        # this handler's captured workspace, not the global settings.
+        task_id = get_current_task_id()
+        if task_id is not None:
+            out_dir = task_workspace(workspace, task_id) / "images"
+        else:
+            out_dir = workspace / "images"
         out_dir.mkdir(parents=True, exist_ok=True)
         path = (out_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-txt2img.png").resolve()
         path.write_bytes(raw)
+        if task_id is not None:
+            register_artifact(workspace, task_id, path)
         size_note = (
             f" (requested {width}x{height}, clamped to {actual_w}x{actual_h} "
             f"because the local image backend rejects larger sizes)"
@@ -177,8 +188,17 @@ def make_view_image(settings: Settings) -> tuple[ToolDefinition, Any]:
     async def view_image(path: str) -> list[dict[str, Any]]:
         file_path = Path(path).expanduser()
         if not file_path.is_absolute() and not file_path.exists():
-            # Relative paths may be meant against the workspace, not the CWD.
-            file_path = Path(settings.workspace_dir) / file_path
+            # Relative paths may be meant against the task directory (or, for
+            # legacy callers, the workspace root), not the process CWD.
+            task_id = get_current_task_id()
+            if task_id is not None:
+                base = task_workspace(Path(settings.workspace_dir), task_id)
+            else:
+                base = Path(settings.workspace_dir)
+            if (base / file_path).exists():
+                file_path = base / file_path
+            else:
+                file_path = Path(settings.workspace_dir) / file_path
         mime = _IMAGE_MIME.get(file_path.suffix.lower())
         if mime is None or not file_path.is_file():
             raise ToolError(

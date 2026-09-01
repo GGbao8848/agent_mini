@@ -11,12 +11,13 @@ terminal.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query
 from sse_starlette import EventSourceResponse
 
-from agent_core.api.attachments import attachment_notes
+from agent_core.api.attachments import attachment_notes, mirror_attachments
 from agent_core.api.deps import ServiceDep
 from agent_core.api.schemas import (
     EventOut,
@@ -25,6 +26,7 @@ from agent_core.api.schemas import (
     TaskOut,
     TaskUpdateRequest,
 )
+from agent_core.config.settings import get_settings
 from agent_core.domain.task import RunStatus
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -46,6 +48,9 @@ async def create_task(
         _with_attachments(payload.input, payload.attachments),
         wait=wait,
     )
+    mirror_attachments(
+        Path(get_settings().workspace_dir), task.id, payload.attachments
+    )
     return _conversation_out(service, task.id)
 
 
@@ -60,6 +65,7 @@ async def send_message(
     await service.send_message(
         task_id, _with_attachments(payload.input, payload.attachments), wait=wait
     )
+    mirror_attachments(Path(get_settings().workspace_dir), task_id, payload.attachments)
     return _conversation_out(service, task_id)
 
 

@@ -11,11 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agent_core.artifacts import artifact_abs_path
+from agent_core.artifacts import artifact_abs_path, task_workspace
 from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError, ToolError
 from agent_core.notify.telegram import TelegramChannel, telegram_chat_id, telegram_token
 from agent_core.registries import ToolRegistry
+from agent_core.runtime.context import get_current_task_id
 
 TELEGRAM_NOTIFY_TOOL = "telegram_notify"
 TELEGRAM_SEND_ARTIFACT_TOOL = "telegram_send_artifact"
@@ -81,10 +82,12 @@ def make_telegram_send_artifact(
 ) -> tuple[ToolDefinition, Any]:
     """Handler that uploads a finished workspace artifact to the human's chat.
 
-    ``path`` is workspace-relative (the same convention as the console's
-    artifact download). The workspace is the only place files are served from,
-    so ``..`` escapes, absolute paths and dotfiles are rejected before the file
-    is ever opened.
+    ``path`` is task-relative (the same convention as the console's artifact
+    download): resolved against the *current* task's private directory, so an
+    agent sends ``album/index.html`` and it resolves under
+    ``workspace/tasks/<task_id>/album/index.html``. The workspace is the only
+    place files are served from, so ``..`` escapes, absolute paths and dotfiles
+    are rejected before the file is ever opened.
     """
     available = _available(token, chat_id)
     workspace = Path(workspace_dir)
@@ -96,11 +99,18 @@ def make_telegram_send_artifact(
                 "TELEGRAM_CHAT_ID are not configured",
                 details={"tool": TELEGRAM_SEND_ARTIFACT_TOOL},
             )
-        target = artifact_abs_path(workspace, path)
+        task_id = get_current_task_id()
+        # Files live in the task's own directory; fall back to the shared root
+        # for one-shot runs (no task context).
+        target = None
+        if task_id is not None:
+            target = artifact_abs_path(task_workspace(workspace, task_id), path)
+        if target is None:
+            target = artifact_abs_path(workspace, path)
         if target is None:
             raise ToolError(
                 f"Artifact '{path}' not found in workspace — it must be a "
-                "workspace-relative path (e.g. album/2026-spring.pptx)",
+                "task-relative path (e.g. album/index.html)",
                 details={"path": path, "tool": TELEGRAM_SEND_ARTIFACT_TOOL},
             )
         resolved = channel or TelegramChannel(token, chat_id)

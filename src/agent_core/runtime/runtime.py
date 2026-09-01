@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING, Any
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import ValidationError
 
-from agent_core.artifacts import scan_workspace_artifacts
+from agent_core.artifacts import (
+    claimed_artifacts,
+    clear_claims,
+    scan_task_artifacts,
+)
 from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
@@ -43,7 +47,7 @@ from agent_core.persistence.checkpointer import build_checkpointer
 from agent_core.persistence.store import SqliteStore
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.builder import AgentBuilder
-from agent_core.runtime.context import current_run
+from agent_core.runtime.context import current_run, current_task_id
 from agent_core.runtime.executor import AgentExecutor
 from agent_core.runtime.help_tool import make_help_tool
 from agent_core.runtime.model import ModelFactory
@@ -239,6 +243,10 @@ class AgentRuntime:
         task order) keeps the 产物 panel showing the whole conversation's
         deliverables, deduplicated by path. Every entry carries the ``run_id``
         that produced it so the console can build a download URL.
+
+        The ``path`` here is the *task-relative* path (what tools wrote); the
+        console prefixes ``tasks/<task_id>/`` when it builds the download URL,
+        so files with the same name in different conversations never collide.
         """
         merged: dict[str, dict[str, Any]] = {}
         for run in self._runs.values():
@@ -377,6 +385,7 @@ class AgentRuntime:
             EventType.RUN_STARTED, run=run, agent_id=run.agent_id, input=task.input
         )
         run_token = current_run.set(run)
+        task_token = current_task_id.set(run.task_id)
         collector = UsageCollector()
         self._collectors[run.id] = collector
         try:
@@ -411,6 +420,7 @@ class AgentRuntime:
             self._collectors.pop(run.id, None)
             self.loop_guard.forget_run(run.id)
             current_run.reset(run_token)
+            current_task_id.reset(task_token)
         return run
 
     def submit_run(self, run: Run) -> asyncio.Task[Run]:
@@ -453,19 +463,26 @@ class AgentRuntime:
         self._checkpointer_ready = True
 
     def _collect_artifacts(self, run: Run) -> None:
-        """Record the workspace files this run created (the console's 产物窗口).
+        """Record the files this run created in the task's private directory.
 
-        Only top-level runs collect: nested runs (verifier) share the workspace
-        and would double-claim the same files. A small clock-skew allowance
-        keeps files written microseconds after run creation from being missed.
+        Only top-level runs collect: nested runs (verifier) share the task dir
+        and would double-claim the same files. The scan is bounded to
+        ``workspace/tasks/<task_id>/`` so a concurrent task's files can never
+        leak in; tools that explicitly claimed artifacts (generate_image,
+        run_code) are merged in and take precedence.
         """
         if run.parent_run_id is not None:
             return
         workspace = Path(get_settings().workspace_dir)
         since = run.created_at.timestamp() - 2.0
-        files = scan_workspace_artifacts(workspace, since_ts=since)
-        if files:
-            run.metadata["artifacts"] = files
+        merged: dict[str, dict[str, Any]] = {
+            str(a["path"]): a for a in claimed_artifacts(run.task_id)
+        }
+        for a in scan_task_artifacts(workspace, run.task_id, since_ts=since):
+            merged.setdefault(str(a["path"]), a)
+        clear_claims(run.task_id)
+        if merged:
+            run.metadata["artifacts"] = list(merged.values())
             self._save_run(run)
 
     async def _self_verify(

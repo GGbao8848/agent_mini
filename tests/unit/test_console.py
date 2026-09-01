@@ -25,8 +25,15 @@ from agent_core.runtime.runtime import AgentRuntime
 class _StubBuilder:
     class _Graph:
         async def ainvoke(self, state: Any, config: Any = None) -> dict[str, Any]:
-            # The "agent" produces a file inside the workspace during the run.
-            out = Path("workspace/out/hello.md")
+            # The "agent" produces a file inside the task's workspace during
+            # the run (no task context → shared root, mirroring the builder).
+            from agent_core.runtime.context import get_current_task_id
+
+            task_id = get_current_task_id()
+            if task_id:
+                out = Path("workspace") / "tasks" / task_id / "out" / "hello.md"
+            else:
+                out = Path("workspace") / "out" / "hello.md"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text("# hi")
             return {"messages": [AIMessage(content="done")]}
@@ -198,9 +205,10 @@ class TestArtifactApi:
         service = make_service(tmp_path, monkeypatch)
         client = make_client(service)
         workspace = tmp_path / "workspace"
-        (workspace / "ppt").mkdir(parents=True)
-        (workspace / "ppt" / "智能体科普扫盲.pptx").write_bytes(b"PK\x03\x04fake")
         run = service.runtime.create_run("helper", "make a deck")
+        task_dir = workspace / "tasks" / run.task_id / "ppt"
+        task_dir.mkdir(parents=True)
+        (task_dir / "智能体科普扫盲.pptx").write_bytes(b"PK\x03\x04fake")
 
         response = await client.get(
             f"/v1/artifacts/{run.id}/download", params={"path": "ppt/智能体科普扫盲.pptx"}
