@@ -182,28 +182,70 @@ def make_generate_image(settings: Settings) -> tuple[ToolDefinition, Any]:
     return definition, generate_image
 
 
+def _resolve_image_path(settings: Settings, path: str) -> Path | None:
+    """Resolve an image path to a readable file, or None.
+
+    The agent runs in a sandbox where ``/work`` is its task directory, but it
+    sometimes hands back host-absolute paths (``/home/.../workspace/...`` from
+    an old habit), task-relative paths (``video/slides/slide_01.png``), or
+    paths with a wrong prefix (``work/video/video/slides/...`` from a nested
+    cwd). Resolution order:
+
+    1. exact file (absolute or already-existing relative)
+    2. against the current task's directory
+    3. against the shared workspace root (legacy callers)
+    4. by basename anywhere under the task directory (covers prefixed/relocated
+       files: the name is what the agent cares about, not the exact prefix)
+    """
+    candidate = Path(path).expanduser()
+    if candidate.is_file():
+        return candidate
+    task_id = get_current_task_id()
+    bases: list[Path] = []
+    if task_id is not None:
+        bases.append(task_workspace(Path(settings.workspace_dir), task_id))
+    bases.append(Path(settings.workspace_dir))
+    for base in bases:
+        joined = base / candidate
+        if joined.is_file():
+            return joined
+    # A host-absolute path (e.g. /home/.../workspace/video/slides/x.png) names
+    # a file the agent believes is in the shared root, but under task
+    # isolation it lives in the task dir. Re-resolve the part after the
+    # workspace prefix against the task root.
+    if task_id is not None and candidate.is_absolute():
+        workspace = Path(settings.workspace_dir).resolve()
+        try:
+            rel = candidate.resolve().relative_to(workspace)
+        except ValueError:
+            rel = None
+        if rel is not None:
+            task_hit = task_workspace(Path(settings.workspace_dir), task_id) / rel
+            if task_hit.is_file():
+                return task_hit
+    # Fallback: the file exists somewhere under the task dir under a different
+    # prefix (e.g. agent wrote it from a nested cwd). Match by basename.
+    if task_id is not None:
+        task_root = task_workspace(Path(settings.workspace_dir), task_id)
+        try:
+            matches = [p for p in task_root.rglob(candidate.name) if p.is_file()]
+        except OSError:
+            matches = []
+        if matches:
+            return matches[0]
+    return None
+
+
 def make_view_image(settings: Settings) -> tuple[ToolDefinition, Any]:
     """Handler for ``view_image``; returns multimodal content blocks."""
 
     async def view_image(path: str) -> list[dict[str, Any]]:
-        file_path = Path(path).expanduser()
-        if not file_path.is_absolute() and not file_path.exists():
-            # Relative paths may be meant against the task directory (or, for
-            # legacy callers, the workspace root), not the process CWD.
-            task_id = get_current_task_id()
-            if task_id is not None:
-                base = task_workspace(Path(settings.workspace_dir), task_id)
-            else:
-                base = Path(settings.workspace_dir)
-            if (base / file_path).exists():
-                file_path = base / file_path
-            else:
-                file_path = Path(settings.workspace_dir) / file_path
-        mime = _IMAGE_MIME.get(file_path.suffix.lower())
-        if mime is None or not file_path.is_file():
+        file_path = _resolve_image_path(settings, path)
+        mime = _IMAGE_MIME.get(file_path.suffix.lower()) if file_path else None
+        if mime is None or file_path is None:
             raise ToolError(
                 f"No readable image at '{path}' (supported: {', '.join(sorted(_IMAGE_MIME))})",
-                details={"path": str(file_path)},
+                details={"path": str(file_path or path)},
             )
         raw = file_path.read_bytes()
         data_url = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
