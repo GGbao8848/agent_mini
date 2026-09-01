@@ -56,13 +56,17 @@ class TestResolution:
         with pytest.raises(RegistryError):
             builder.build(base_spec(tools=["nope"]))
 
-    def test_tool_without_handler_fails_fast(self) -> None:
+    def test_tool_without_handler_is_skipped(self) -> None:
+        """A registered tool without a live handler (e.g. MCP while its server
+        is disconnected) is dropped from the build instead of failing it."""
         tools = ToolRegistry()
         tools.register(ToolDefinition(name="noop", description="Noop"))
+        tools.register(ToolDefinition(name="ready", description="Ready"), lambda: "ok")
         builder = make_builder(tools=tools)
 
-        with pytest.raises(RegistryError):
-            builder.build(base_spec(tools=["noop"]))
+        resolved = builder._resolve_available_tools(base_spec(tools=["noop", "ready"]))
+
+        assert [tool.name for tool in resolved] == ["ready"]
 
     def test_unknown_subagent_fails_fast(self) -> None:
         builder = make_builder()

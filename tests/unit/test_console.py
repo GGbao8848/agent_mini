@@ -112,6 +112,29 @@ class TestArtifactManifest:
 
         assert all("before.txt" not in a["path"] for a in run.metadata["artifacts"])
 
+    async def test_task_artifacts_aggregates_across_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A follow-up message starts a fresh run; the task-level endpoint must
+        still surface earlier turns' files (the 产物 panel loss bug)."""
+        service = make_service(tmp_path, monkeypatch)
+        task = service.runtime.create_conversation("helper", "first")
+        run1 = service.runtime.task_active_run(task.id)
+        await service.runtime.execute_run(run1)
+        first_artifacts = run1.metadata.get("artifacts", [])
+        assert first_artifacts  # the stub graph wrote out/hello.md
+
+        # Simulate the follow-up: a new root run on the same conversation.
+        run2 = service.runtime.create_run("helper", "second", task=task)
+        await service.runtime.execute_run(run2)
+
+        aggregated = service.runtime.task_artifacts(task.id)
+
+        paths = [a["path"] for a in aggregated]
+        assert "out/hello.md" in paths  # artifact from run1 survives
+        for entry in aggregated:
+            assert "run_id" in entry  # console can build a download URL
+
     def test_scan_skips_dotfiles_and_missing_dirs(self, tmp_path: Path) -> None:
         workspace = tmp_path / "workspace"
         (workspace / ".hidden").mkdir(parents=True)

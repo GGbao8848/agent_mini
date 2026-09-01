@@ -72,3 +72,12 @@ class ToolRegistry(BaseRegistry[ToolDefinition]):
             raise RegistryError(
                 kind=self.kind, key=tool_name, detail="no executable handler registered"
             ) from None
+
+    def has_handler(self, tool_name: str) -> bool:
+        """True when the tool is registered AND has a live executable handler.
+
+        Used by the builder to drop tools that exist as metadata (e.g. MCP
+        tools restored from persistence) but have no callable handler yet —
+        typically while their server is disconnected.
+        """
+        return tool_name in self._items and tool_name in self._handlers

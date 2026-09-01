@@ -69,7 +69,7 @@ class AgentBuilder:
                 f"above its limit of {spec.limits.max_subagents}",
                 details={"agent_id": spec.id},
             )
-        tools = [self._resolve_tool(name) for name in self._agent_tool_names(spec)]
+        tools = self._resolve_available_tools(spec)
         system_prompt = spec.system_prompt or None
         if spec.autonomy is not None:
             # Autonomy adds the escape hatch (request_help) and the rules that
@@ -153,6 +153,24 @@ class AgentBuilder:
         definition = self._tools.get(name)
         return self._tool_factory(definition, self._tools.handler_for(name))
 
+    def _resolve_available_tools(self, spec: AgentSpec) -> list[BaseTool]:
+        """Resolve the agent's tools, skipping ones without a live handler.
+
+        A tool may be registered (definition restored from persistence) while
+        its handler is process-local and not yet attached — most commonly MCP
+        tools whose server is currently disconnected. Instead of failing the
+        whole run at build time, those tools are silently dropped; the agent
+        still runs with the tools that are actually callable. Unknown tool
+        names still fail fast (a typo must surface, not be swallowed).
+        """
+        tools: list[BaseTool] = []
+        for name in self._agent_tool_names(spec):
+            self._tools.get(name)  # fail fast on unknown tools
+            if not self._tools.has_handler(name):
+                continue
+            tools.append(self._resolve_tool(name))
+        return tools
+
     def _resolve_subagent(self, ref: SubAgentRef, *, parent_id: str) -> SubAgent:
         sub_spec = self._agents.get(ref.agent_id)
         if sub_spec.id == parent_id:
@@ -160,7 +178,7 @@ class AgentBuilder:
                 f"Agent '{parent_id}' cannot delegate to itself",
                 details={"agent_id": parent_id},
             )
-        sub_tools = [self._resolve_tool(name) for name in self._agent_tool_names(sub_spec)]
+        sub_tools = self._resolve_available_tools(sub_spec)
         if sub_spec.autonomy is not None and self._help_tool is not None:
             sub_tools.append(self._help_tool)
         return SubAgent(

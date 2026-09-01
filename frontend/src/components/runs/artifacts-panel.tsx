@@ -6,7 +6,9 @@ import { FileIcon } from "lucide-react"
 const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i
 
 function ArtifactRow({ runId, artifact }: { runId: string; artifact: Artifact }) {
-  const url = artifactUrl(runId, artifact.path)
+  // Aggregated artifacts carry the run that produced them; the panel's runId
+  // is the fallback for per-run queries.
+  const url = artifactUrl(artifact.run_id ?? runId, artifact.path)
   const time = artifact.mtime ? fmtTime(artifact.mtime) : "—"
   if (IMAGE_RE.test(artifact.path)) {
     return (

@@ -11,6 +11,7 @@ terminal.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Query
 from sse_starlette import EventSourceResponse
@@ -63,6 +64,18 @@ def list_tasks(service: ServiceDep, agent_id: str | None = Query(default=None)) 
 @router.get("/{task_id}", response_model=TaskOut)
 def get_task(task_id: str, service: ServiceDep) -> TaskOut:
     return _conversation_out(service, task_id)
+
+
+@router.get("/{task_id}/artifacts", response_model=list[dict[str, Any]])
+def task_artifacts(task_id: str, service: ServiceDep) -> list[dict[str, Any]]:
+    """Every artifact a conversation has produced across all its runs.
+
+    A follow-up message starts a fresh run whose own artifact list is empty at
+    first — the 产物 panel must look at the whole conversation, not just the
+    active run, or earlier turns' files vanish on each new message.
+    """
+    service.get_task(task_id)  # fail fast with 404 for unknown conversations
+    return service.task_artifacts(task_id)
 
 
 @router.get("/{task_id}/events")

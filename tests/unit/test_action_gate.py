@@ -142,6 +142,32 @@ class TestActionGate:
             EventType.TOOL_EXECUTED,
         ]
 
+    async def test_long_tool_result_is_capped(self) -> None:
+        big = "x" * 20_000
+
+        def loud(city: str) -> str:
+            return big
+
+        gate, _, _, tracer = make_gate(handler=loud)
+        run = make_run()
+
+        result = await gate.execute(run=run, tool_name="get_weather", arguments={"city": "Oslo"})
+
+        assert len(result) < 5000  # 20k chars collapsed to ~4k
+        assert "[middle" in result  # truncation marker present
+        executed = [
+            e for e in tracer.get_events(run.id) if e.event_type is EventType.TOOL_EXECUTED
+        ]
+        assert executed and len(str(executed[0].output)) < 5000
+
+    async def test_short_tool_result_is_untouched(self) -> None:
+        gate, _, _, tracer = make_gate()
+        run = make_run()
+
+        result = await gate.execute(run=run, tool_name="get_weather", arguments={"city": "Oslo"})
+
+        assert result == "Oslo: sunny"
+
     async def test_deny_blocks_execution(self) -> None:
         gate, _, _, tracer = make_gate(
             rules=[PermissionRule(tool="get_weather", decision=PermissionDecision.DENY)]

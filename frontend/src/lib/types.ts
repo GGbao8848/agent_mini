@@ -97,6 +97,7 @@ export interface Artifact {
   path: string
   size: number
   mtime?: string | null
+  run_id?: string
 }
 
 export interface Agent {

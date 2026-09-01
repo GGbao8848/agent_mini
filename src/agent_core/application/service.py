@@ -135,6 +135,10 @@ class AgentCoreService:
                 return event.output
         return None
 
+    def task_artifacts(self, task_id: str) -> list[dict[str, Any]]:
+        """All artifacts produced across a conversation's runs."""
+        return self.runtime.task_artifacts(task_id)
+
     # -------------------------------------------------------------- approvals
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:

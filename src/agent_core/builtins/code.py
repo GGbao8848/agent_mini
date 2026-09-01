@@ -61,6 +61,14 @@ def build_sandbox_command(
         "--cpus", str(settings.sandbox_cpus),
         "--pids-limit", str(settings.sandbox_pids_limit),
         "--pull", "never",
+        # Host networking: the sandbox runs on the same LAN as the local model
+        # / TTS services (10.10.10.146, 10.10.10.169), and a default bridge
+        # container cannot route back to the host's own LAN IP — the agent's
+        # curl to those services failed with connection refused. Security is
+        # enforced by the filesystem (only workspace mounted), so sharing the
+        # host netstack restores those reachable endpoints without widening
+        # what the agent can read or write.
+        "--network", "host",
     ]
     for var, value in _proxy_env().items():
         argv.extend(["--env", f"{var}={value}"])

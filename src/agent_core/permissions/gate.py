@@ -36,6 +36,7 @@ from agent_core.permissions.approval import ApprovalManager
 from agent_core.permissions.loop_guard import LoopGuard, LoopVerdict
 from agent_core.permissions.policy import ActionPolicy
 from agent_core.registries import AgentRegistry, ToolHandler, ToolRegistry
+from agent_core.runtime.text import cap_text
 
 if TYPE_CHECKING:
     # Runtime import would be circular (runtime/__init__ pulls the builder,
@@ -290,6 +291,10 @@ class ActionGate:
             )
             raise
         action.status = ActionStatus.COMPLETED
+        # Cap the result before it reaches both the model context (return
+        # value → ToolMessage) and the trace event: multi-KB tool outputs are
+        # the main driver of context bloat and per-step prefill latency.
+        result = cap_text(result) if isinstance(result, str) else result
         action.result = result
         self._fanout.emit(
             EventType.TOOL_EXECUTED,

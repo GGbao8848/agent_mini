@@ -84,6 +84,15 @@ export function useArtifacts(runId: string | null) {
   })
 }
 
+export function useTaskArtifacts(taskId: string | null) {
+  return useQuery({
+    queryKey: ["task-artifacts", taskId],
+    queryFn: () => api.get<Artifact[]>(`/v1/tasks/${encodeURIComponent(taskId!)}/artifacts`),
+    enabled: !!taskId,
+    staleTime: 30_000,
+  })
+}
+
 export function useTools() {
   return useQuery({
     queryKey: ["tools"],

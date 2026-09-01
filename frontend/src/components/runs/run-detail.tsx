@@ -23,7 +23,7 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useArtifacts, useCancelTask, useDeleteTask } from "@/hooks/use-console"
+import { useCancelTask, useDeleteTask, useTaskArtifacts } from "@/hooks/use-console"
 import { fmtDateTime, fmtDuration } from "@/lib/format"
 import { TERMINAL_RUN_STATUSES } from "@/lib/types"
 import type { Run, RunEvent } from "@/lib/types"
@@ -77,7 +77,10 @@ function RunInfoDrawer({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const artifacts = useArtifacts(open ? run.id : null)
+  // Aggregate the whole conversation's artifacts: the active run's own list is
+  // empty when a follow-up message just started a fresh run, which would make
+  // earlier turns' files vanish from the panel.
+  const artifacts = useTaskArtifacts(open ? run.task_id : null)
   return (
     <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
       <DrawerContent

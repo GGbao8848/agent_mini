@@ -137,6 +137,83 @@ class TestMCPManager:
         with pytest.raises(RegistryError):
             await manager.connect("ghost")
 
+    async def test_auto_connect_all_connects_every_server(self) -> None:
+        registry = MCPRegistry()
+        registry.register(
+            MCPServerDefinition(
+                id="demo", name="Demo", transport=MCPTransport.STDIO, endpoint="python demo.py"
+            )
+        )
+        registry.register(
+            MCPServerDefinition(
+                id="other", name="Other", transport=MCPTransport.STDIO, endpoint="python other.py"
+            )
+        )
+        manager, tools, _ = make_manager(
+            opener=fake_opener(FakeSession([echo_tool()], {"echo": "echoed"})),
+            registry=registry,
+        )
+
+        results = await manager.auto_connect_all()
+
+        assert results == {"demo": ["demo_echo"], "other": ["demo_echo"]}
+        assert manager.is_connected("demo")
+        assert manager.is_connected("other")
+        assert registry.get("demo").status is MCPServerStatus.HEALTHY
+
+    async def test_auto_connect_all_skips_failed_servers(self) -> None:
+        registry = MCPRegistry()
+        registry.register(
+            MCPServerDefinition(
+                id="good", name="Good", transport=MCPTransport.STDIO, endpoint="python g.py"
+            )
+        )
+        registry.register(
+            MCPServerDefinition(
+                id="bad", name="Bad", transport=MCPTransport.STDIO, endpoint="python b.py"
+            )
+        )
+
+        @asynccontextmanager
+        async def per_server_opener(
+            definition: MCPServerDefinition, credential: str | None
+        ) -> AsyncIterator[MCPSession]:
+            if definition.id == "bad":
+                raise OSError("connection refused")
+            yield FakeSession([echo_tool()], {"echo": "echoed"})  # type: ignore[misc]
+
+        manager, tools, _ = make_manager(opener=per_server_opener, registry=registry)
+
+        results = await manager.auto_connect_all()
+
+        assert results["good"] == ["demo_echo"]
+        assert results["bad"] is None
+        assert not manager.is_connected("bad")
+        assert registry.get("bad").status is MCPServerStatus.UNREACHABLE
+
+    async def test_reconnect_replaces_handler_for_restored_definition(self) -> None:
+        """A definition restored from persistence has no handler; reconnecting
+        must attach one in place rather than tripping the duplicate rule."""
+        registry = MCPRegistry()
+        registry.register(
+            MCPServerDefinition(
+                id="demo", name="Demo", transport=MCPTransport.STDIO, endpoint="python demo.py"
+            )
+        )
+        manager, tools, _ = make_manager(
+            opener=fake_opener(FakeSession([echo_tool()], {"echo": "echoed"})),
+            registry=registry,
+        )
+        # Simulate the restored state: definition + tool metadata, no handler.
+        tools.register(echo_tool())
+        with pytest.raises(RegistryError):
+            tools.handler_for("demo_echo")
+
+        names = await manager.connect("demo")
+
+        assert names == ["demo_echo"]
+        assert tools.has_handler("demo_echo")
+
     async def test_disconnect_removes_tools_and_marks_unknown(self) -> None:
         session = FakeSession([echo_tool()], {"echo": "echoed"})
         manager, tools, registry = make_manager(opener=fake_opener(session))

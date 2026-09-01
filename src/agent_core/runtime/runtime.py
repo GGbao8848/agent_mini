@@ -15,9 +15,8 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
-
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from pydantic import ValidationError
 
 from agent_core.artifacts import scan_workspace_artifacts
 from agent_core.config.settings import get_settings
@@ -230,6 +229,26 @@ class AgentRuntime:
             return str(stored)
         task = self._tasks.get(run.task_id)
         return task.input if task else ""
+
+    def task_artifacts(self, task_id: str) -> list[dict[str, Any]]:
+        """Aggregate every artifact produced across all of a conversation's runs.
+
+        Each root run records the files it created in ``metadata["artifacts"]``
+        at finish; a follow-up message starts a fresh run, so looking at only
+        the active run would drop earlier turns' outputs. Merging all runs (in
+        task order) keeps the 产物 panel showing the whole conversation's
+        deliverables, deduplicated by path. Every entry carries the ``run_id``
+        that produced it so the console can build a download URL.
+        """
+        merged: dict[str, dict[str, Any]] = {}
+        for run in self._runs.values():
+            if run.task_id != task_id:
+                continue
+            for artifact in run.metadata.get("artifacts") or []:
+                entry = dict(artifact)
+                entry.setdefault("run_id", run.id)
+                merged[str(entry.get("path"))] = entry
+        return list(merged.values())
 
     # ---------------------------------------------------------------- restore
 

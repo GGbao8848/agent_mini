@@ -142,20 +142,30 @@ function ChatThread({ task }: { task: Task }) {
   }, [current])
   const pendingHere = (approvals.data ?? []).filter((a) => runIds.has(a.run_id))
 
-  const bottomRef = React.useRef<HTMLDivElement>(null)
+  const scrollRef = React.useRef<HTMLDivElement>(null)
+  const prevTurnsRef = React.useRef(current.turns.length)
   React.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [current.turns.length, events.length])
+    // Scroll-to-bottom only when a new turn actually arrives. On conversation
+    // switch the thread remounts and the event stream replays history — a
+    // blind scrollIntoView on every change yanks the page to the bottom once
+    // (the "从头滚到底一次" bug). Anchoring to scrollTop here avoids that and
+    // keeps the view pinned when the user has scrolled up to read.
+    const el = scrollRef.current
+    const prev = prevTurnsRef.current
+    prevTurnsRef.current = current.turns.length
+    if (!el) return
+    if (current.turns.length <= prev) return
+    el.scrollTop = el.scrollHeight
+  }, [current.turns.length])
 
   return (
     <>
       {activeRun.data && <RunChatHeader run={activeRun.data} events={events} />}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col-reverse gap-3 p-4">
-          <div ref={bottomRef} />
-          {/* flex-col-reverse renders DOM order bottom-up: bottomRef pins the
-              view to the bottom; each pair lists avatar before user so the
-              visual top-down order is user → avatar, oldest first. */}
+          {/* flex-col-reverse renders DOM order bottom-up: the visual top-down
+              order is user → avatar, oldest first. Scroll anchoring is manual
+              (see above) so replays during switch don't trigger a full scroll. */}
           {[...current.turns].reverse().map((turn) => (
             <React.Fragment key={turn.id}>
               {turn.role === "assistant" && <Bubble role="avatar" text={turn.content} />}

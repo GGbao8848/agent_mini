@@ -10,6 +10,7 @@ Run it with::
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,6 +37,13 @@ def create_app(service: AgentCoreService | None = None) -> FastAPI:
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if core.schedules is not None:
             core.schedules.start()
+        # Restored MCP servers have no live connection (connections are
+        # process-local). Reconnect them best-effort so tools are ready for
+        # the first run instead of the console requiring a manual click.
+        # A server that fails to connect stays UNREACHABLE and can be retried
+        # from the console; the API must come up regardless.
+        with contextlib.suppress(Exception):
+            await core.mcp.auto_connect_all()
         try:
             yield
         finally:

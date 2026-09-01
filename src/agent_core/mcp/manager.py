@@ -73,12 +73,34 @@ class MCPManager:
         self._registry.set_status(server_id, MCPServerStatus.HEALTHY)
         names: list[str] = []
         for tool_definition in discovered:
-            self._tools.register(
-                tool_definition, handler=self._make_handler(server_id, tool_definition)
-            )
+            handler = self._make_handler(server_id, tool_definition)
+            if tool_definition.name in self._tools:
+                # Reconnect after restart: the definition was restored from
+                # persistence without a live handler — refresh it in place.
+                self._tools.replace_with_handler(tool_definition, handler)
+            else:
+                self._tools.register(tool_definition, handler=handler)
             names.append(tool_definition.name)
         self._registered[server_id] = names
         return names
+
+    async def auto_connect_all(self) -> dict[str, list[str] | None]:
+        """Best-effort connect every registered server (restart recovery).
+
+        A server that fails to connect is left disconnected (status
+        UNREACHABLE); callers can retry from the console. Returns
+        ``{server_id: tool names}`` — or ``None`` for a server that failed.
+        """
+        results: dict[str, list[str] | None] = {}
+        for server in self._registry.list():
+            if server.id in self._connections:
+                results[server.id] = list(self._registered.get(server.id, []))
+                continue
+            try:
+                results[server.id] = await self.connect(server.id)
+            except Exception:  # noqa: BLE001 - per-server best effort
+                results[server.id] = None
+        return results
 
     async def disconnect(self, server_id: str) -> None:
         """Close the connection and unregister the server's tools."""

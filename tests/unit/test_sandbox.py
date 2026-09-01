@@ -57,6 +57,9 @@ class TestSandboxArgv:
         assert argv[argv.index("--cpus") + 1] == "2.0"
         assert argv[argv.index("--pids-limit") + 1] == "256"
         assert argv[argv.index("--pull") + 1] == "never"
+        # Host networking so the sandbox can reach LAN model/TTS services —
+        # a default bridge cannot route back to the host's own LAN IP.
+        assert argv[argv.index("--network") + 1] == "host"
         assert argv[-4] == settings.sandbox_image
         assert argv[-3] == "bash"
         assert argv[-2] == "-lc"

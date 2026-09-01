@@ -6,8 +6,11 @@ import type { RunEvent } from "@/lib/types"
 export function EventsPanel({ events }: { events: RunEvent[] }) {
   const bottomRef = React.useRef<HTMLDivElement>(null)
 
+  // Stick to the latest event: new timeline entries scroll the list to the
+  // bottom. The anchor sits at the END of the list (visually the bottom) —
+  // placing it first would yank the scrollbar to the top on every event.
   React.useEffect(() => {
-    bottomRef.current?.scrollIntoView()
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [events.length])
 
   if (!events.length) {
@@ -20,7 +23,7 @@ export function EventsPanel({ events }: { events: RunEvent[] }) {
 
   return (
     <ScrollArea className="h-[calc(100vh-26rem)]">
-      <div ref={bottomRef} className="flex flex-col gap-1 p-2 font-mono text-xs">
+      <div className="flex flex-col gap-1 p-2 font-mono text-xs">
         {events.map((event) => {
           const info = event.tool
             ? `${event.tool} ${str(event.output) || str(event.error)}`
@@ -33,6 +36,7 @@ export function EventsPanel({ events }: { events: RunEvent[] }) {
             </div>
           )
         })}
+        <div ref={bottomRef} />
       </div>
     </ScrollArea>
   )
