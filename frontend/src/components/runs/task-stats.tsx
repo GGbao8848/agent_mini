@@ -6,8 +6,6 @@ import { useRun, useTask } from "@/hooks/use-console"
 import { fmtDuration } from "@/lib/format"
 import { CheckIcon, CopyIcon, TimerIcon } from "lucide-react"
 
-const SHORT_ID = (id: string) => id.slice(0, 8)
-
 /** One-click copy of a full task id, with a brief "已复制" confirmation. */
 function useCopyId() {
   const [copied, setCopied] = React.useState(false)
@@ -28,7 +26,9 @@ function useCopyId() {
   return { copied, copy }
 }
 
-/** Compact "task <id> [copy]" chip used in the conversation header. */
+/** Compact "task <id> [copy]" chip used in the conversation header. Shows the
+ * full id (truncated visually only when the space truly runs out, never
+ * shortened data-wise) and copies the complete id on click. */
 export function TaskIdChip({ taskId }: { taskId: string }) {
   const { copied, copy } = useCopyId()
   return (
@@ -40,7 +40,7 @@ export function TaskIdChip({ taskId }: { taskId: string }) {
       className="h-6 gap-1 px-1.5 text-xs font-normal"
     >
       <span className="text-muted-foreground">task</span>
-      <span className="font-mono">{SHORT_ID(taskId)}</span>
+      <span className="font-mono max-w-40 truncate">{taskId}</span>
       {copied ? (
         <CheckIcon className="size-3 text-emerald-500" />
       ) : (
@@ -67,7 +67,7 @@ export function LiveTaskStats({ taskId }: { taskId: string }) {
     <div className="flex items-center gap-2">
       <Badge variant="outline" className="gap-1 font-mono text-xs font-normal">
         <span className="text-muted-foreground">task</span>
-        {SHORT_ID(taskId)}
+        <span className="max-w-40 truncate">{taskId}</span>
         <button
           type="button"
           title={`复制任务 id：${taskId}`}

@@ -89,7 +89,7 @@ function RunInfoDrawer({
         style={{ "--drawer-height": "min(80dvh, 40rem)" } as React.CSSProperties}
       >
         <DrawerHeader>
-          <DrawerTitle>运行详情 · {run.id.slice(0, 8)}</DrawerTitle>
+          <DrawerTitle>运行详情 · {run.id}</DrawerTitle>
           <DrawerDescription>
             {run.agent_id} · 开始 {fmtDateTime(run.created_at)}
           </DrawerDescription>

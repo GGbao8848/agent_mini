@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input"
 import { useResolveApproval } from "@/hooks/use-console"
 import { fmtTime } from "@/lib/format"
 import type { Approval } from "@/lib/types"
-import { CircleCheckIcon, CircleXIcon, HandIcon, WrenchIcon } from "lucide-react"
+import { CircleCheckIcon, CircleXIcon, CopyIcon, CheckIcon, HandIcon, WrenchIcon } from "lucide-react"
 
 function approvalTitle(approval: Approval): string {
   return approval.kind === "task_help"
@@ -15,6 +15,17 @@ function approvalTitle(approval: Approval): string {
 export function ApprovalCard({ approval }: { approval: Approval }) {
   const resolve = useResolveApproval()
   const [note, setNote] = React.useState("")
+  const [copied, setCopied] = React.useState(false)
+
+  const copyRunId = async () => {
+    try {
+      await navigator.clipboard.writeText(approval.run_id)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // clipboard may be unavailable; just no-op
+    }
+  }
 
   const decide = (decision: "approved" | "rejected") =>
     resolve.mutate({
@@ -30,7 +41,15 @@ export function ApprovalCard({ approval }: { approval: Approval }) {
       </p>
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         {approval.kind === "task_help" ? <HandIcon className="size-3.5" /> : <WrenchIcon className="size-3.5" />}
-        {approvalTitle(approval)} · run {approval.run_id.slice(0, 8)} · {fmtTime(approval.created_at)}
+        {approvalTitle(approval)} · run {approval.run_id} · {fmtTime(approval.created_at)}
+        <button
+          type="button"
+          title={`复制 run id：${approval.run_id}`}
+          onClick={() => void copyRunId()}
+          className="flex items-center text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {copied ? <CheckIcon className="size-3 text-emerald-500" /> : <CopyIcon className="size-3" />}
+        </button>
       </p>
       <div className="flex gap-2">
         <Input

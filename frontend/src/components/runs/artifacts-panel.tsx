@@ -80,7 +80,7 @@ export function ArtifactsPanel({ runId, artifacts }: { runId: string; artifacts:
       {groups.map((group, index) => (
         <div key={group.runId} className="flex flex-col gap-1.5">
           <p className="text-[11px] font-medium text-muted-foreground">
-            第 {index + 1} 轮 · {group.runId.slice(0, 8)}
+            第 {index + 1} 轮 · {group.runId}
           </p>
           <div className="flex flex-col gap-2">
             {group.items.map((artifact) => (
