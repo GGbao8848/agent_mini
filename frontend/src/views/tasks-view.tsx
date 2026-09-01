@@ -283,12 +283,19 @@ function ChatThread({ task }: { task: Task }) {
 
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const prevTurnsRef = React.useRef(current.turns.length)
+
+  // On conversation switch the thread remounts with scrollTop=0 (top). Pin to
+  // the latest message instantly — an animated scrollIntoView here is what
+  // caused the old "从头滚到底一次" yank; a silent scrollTop assignment paints
+  // once, already at the bottom.
+  React.useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [])
+
+  // A new turn arriving sticks the view to the bottom so the fresh answer is
+  // visible; while reading history (no new turns) the scroll stays put.
   React.useEffect(() => {
-    // Scroll-to-bottom only when a new turn actually arrives. On conversation
-    // switch the thread remounts and the event stream replays history — a
-    // blind scrollIntoView on every change yanks the page to the bottom once
-    // (the "从头滚到底一次" bug). Anchoring to scrollTop here avoids that and
-    // keeps the view pinned when the user has scrolled up to read.
     const el = scrollRef.current
     const prev = prevTurnsRef.current
     prevTurnsRef.current = current.turns.length
