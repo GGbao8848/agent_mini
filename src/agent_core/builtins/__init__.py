@@ -18,12 +18,14 @@ from agent_core.builtins.notify import (
 )
 from agent_core.builtins.notify import register_builtin_tools as register_telegram_tools
 from agent_core.builtins.schedules import CREATE_SCHEDULE_TOOL
+from agent_core.builtins.skills import INSTALL_SKILL_TOOL
 from agent_core.config.settings import Settings
 from agent_core.registries import ToolRegistry
 
 __all__ = [
     "CREATE_SCHEDULE_TOOL",
     "GENERATE_IMAGE_TOOL",
+    "INSTALL_SKILL_TOOL",
     "RUN_CODE_TOOL",
     "TELEGRAM_NOTIFY_TOOL",
     "TELEGRAM_SEND_ARTIFACT_TOOL",

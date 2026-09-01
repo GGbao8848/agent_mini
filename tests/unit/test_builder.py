@@ -163,19 +163,19 @@ class TestBuild:
         builder = make_builder(skills=skills, workspace=workspace)
 
         # Skills are a shared pool: the spec's own skills field is ignored and
-        # every registered skill is staged for the agent.
+        # every registered skill is staged under a single .skills/ root.
         spec = base_spec()
         graph = builder.build(spec)
 
         assert hasattr(graph, "ainvoke")
         # Staged under the workspace (not re-rooted there): file tools keep
         # workspace-rooted behavior while skills stay backend-readable.
-        staged = workspace / ".skills" / "orchestrator" / "web-research" / "SKILL.md"
+        staged = workspace / ".skills" / "web-research" / "SKILL.md"
         assert staged.is_file()
-        assert (workspace / ".skills" / "orchestrator" / "data-plot" / "SKILL.md").is_file()
+        assert (workspace / ".skills" / "data-plot" / "SKILL.md").is_file()
         kwargs = builder._backend_kwargs(spec)
         assert kwargs["backend"].cwd == workspace.resolve()
-        assert kwargs["skills"] == [".skills/orchestrator"]
+        assert kwargs["skills"] == [".skills"]
 
     def test_registered_skill_without_path_raises(self, tmp_path: Path) -> None:
         skills = SkillRegistry()

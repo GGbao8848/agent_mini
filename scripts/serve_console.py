@@ -29,8 +29,11 @@ def main() -> None:
     args = parser.parse_args()
 
     service = default_service()
-    if "avatar" not in service.runtime.agents:
-        service.runtime.agents.register(avatar_spec())
+    # The avatar is code-defined: always sync it to the current spec, so a
+    # stale persisted copy (e.g. an old explicit tools whitelist) can't leak
+    # into runs. Empty tools means "every available tool", which is how new
+    # built-ins (install_skill, create_schedule) reach the avatar.
+    service.runtime.agents.replace(avatar_spec())
     app = create_app(service)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

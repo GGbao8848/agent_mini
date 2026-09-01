@@ -18,6 +18,7 @@ from agent_core.application.scheduler import ScheduleManager
 from agent_core.application.service import AgentCoreService
 from agent_core.builtins import register_builtin_tools
 from agent_core.builtins.schedules import make_create_schedule
+from agent_core.builtins.skills import make_install_skill
 from agent_core.config.settings import Settings, apply_proxy, get_settings
 from agent_core.domain.mcp import MCPServerStatus
 from agent_core.mcp.credentials import EnvCredentialResolver
@@ -79,13 +80,17 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     if store is not None:
         schedules.restore()
     service.schedules = schedules
-    # Register the schedule-creation tool against the fully built service.
-    definition, handler = make_create_schedule(service)
-    try:
-        tools.register(definition, handler)
-    except Exception:
-        # Definition persisted from a previous boot: re-attach the executable.
-        tools.replace_with_handler(definition, handler)
+    # Register service-bound tools (schedule + skill creation) against the
+    # fully built service.
+    for definition, handler in (
+        make_create_schedule(service),
+        make_install_skill(service),
+    ):
+        try:
+            tools.register(definition, handler)
+        except Exception:
+            # Definition persisted from a previous boot: re-attach the executable.
+            tools.replace_with_handler(definition, handler)
     return service
 
 

@@ -36,7 +36,10 @@ AVATAR_SYSTEM_PROMPT = """你是用户的个人 AI 分身，独立完成长任�
   直接 `pip install xxx && python xxx.py` 拼在一条命令里（有缓存，重装很快）。
   命令失败时读错误信息、修好再跑，不要原样重试。
 - 汇报：开始时、完成一半时、结束时各用 telegram_notify 给主人发一条简短进展（中文）。
-- 交付物必须是真实落盘的文件；结束前用 run_code 验证文件存在且尺寸合理。"""
+- 交付物必须是真实落盘的文件；结束前用 run_code 验证文件存在且尺寸合理。
+- 写技能：当用户让你"写一个 skill / 技能"时，在 workspace 下建目录、写好 SKILL.md
+  （含 YAML frontmatter：name + description，写清适用时机），然后用 install_skill 工具
+  把该目录注册为技能——注册成功后它对所有 agent 生效。没有这一步，光有文件不算安装。"""
 
 
 TASK_A = """任务：制作一份 30 页的中文 PPT《人工智能简史与未来》，保存到 workspace/ppt/。
