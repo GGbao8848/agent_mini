@@ -28,3 +28,4 @@ logs/
 agent_core.db*
 agent_core-checkpoints.db*
 .playwright-mcp/
+.db_backup/
