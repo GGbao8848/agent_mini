@@ -242,10 +242,13 @@ class ApprovalOut(BaseModel):
 
 
 class AgentUpdateRequest(BaseModel):
-    """Editable agent fields (tool/skill binding); omitted fields keep values."""
+    """Editable agent fields (tool binding); omitted fields keep values.
+
+    Skills are not editable — every registered skill is loaded for every
+    agent, so there is no per-agent skill list to set.
+    """
 
     tools: list[str] | None = None
-    skills: list[str] | None = None
 
 
 class AgentOut(BaseModel):

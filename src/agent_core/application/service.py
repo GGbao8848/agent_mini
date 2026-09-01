@@ -168,22 +168,19 @@ class AgentCoreService:
         )
 
     def update_agent(
-        self, agent_id: str, *, tools: list[str] | None = None, skills: list[str] | None = None
+        self, agent_id: str, *, tools: list[str] | None = None
     ) -> AgentSpec:
-        """Update an agent's tool/skill binding; takes effect on the next run.
+        """Update an agent's tool binding; takes effect on the next run.
 
-        Skills are validated against the Skill Registry. Tools are not — MCP
-        tools exist only while their server is connected — but a run with an
-        unregistered tool fails fast with a clear error.
+        Tools are not validated here — MCP tools exist only while their server
+        is connected — but a run with an unregistered tool fails fast with a
+        clear error. Skills are not editable: every registered skill is loaded
+        for every agent (no per-agent binding).
         """
         spec = self.runtime.agents.get(agent_id)
         update: dict[str, Any] = {}
         if tools is not None:
             update["tools"] = tools
-        if skills is not None:
-            for skill_id in skills:
-                self.runtime.skills.get(skill_id)  # 404 on unknown skills
-            update["skills"] = skills
         updated = spec.model_copy(update=update)
         self.runtime.agents.replace(updated)
         return updated

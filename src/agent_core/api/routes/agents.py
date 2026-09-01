@@ -1,7 +1,7 @@
 """Agent registry endpoints.
 
 Agents are code-defined artifacts; the API exposes the registry plus a
-narrow editing surface (tool/skill binding) used by the Console toolbox.
+narrow editing surface (tool binding) used by the Console toolbox.
 """
 
 from __future__ import annotations
@@ -29,5 +29,5 @@ def update_agent(
     agent_id: str, payload: AgentUpdateRequest, service: ServiceDep
 ) -> AgentOut:
     return AgentOut.of(
-        service.update_agent(agent_id, tools=payload.tools, skills=payload.skills)
+        service.update_agent(agent_id, tools=payload.tools)
     )

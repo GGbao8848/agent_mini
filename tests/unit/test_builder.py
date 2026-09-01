@@ -144,17 +144,23 @@ class TestBuild:
 
         assert builder._agent_tool_names(base_spec()) == []
 
-    def test_skills_stage_into_workspace_backend(self, tmp_path: Path) -> None:
+    def test_skills_stage_all_registered_into_workspace_backend(self, tmp_path: Path) -> None:
         skills_root = tmp_path / "skills"
         skill_dir = skills_root / "web-research"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("# Web Research")
+        second_dir = skills_root / "data-plot"
+        second_dir.mkdir(parents=True)
+        (second_dir / "SKILL.md").write_text("# Data Plot")
         skills = SkillRegistry()
         skills.register(SkillManifest(id="web-research", name="Web Research", path=skill_dir))
+        skills.register(SkillManifest(id="data-plot", name="Data Plot", path=second_dir))
         workspace = tmp_path / "workspace"
         builder = make_builder(skills=skills, workspace=workspace)
 
-        spec = base_spec(skills=["web-research"])
+        # Skills are a shared pool: the spec's own skills field is ignored and
+        # every registered skill is staged for the agent.
+        spec = base_spec()
         graph = builder.build(spec)
 
         assert hasattr(graph, "ainvoke")
@@ -162,25 +168,34 @@ class TestBuild:
         # workspace-rooted behavior while skills stay backend-readable.
         staged = workspace / ".skills" / "orchestrator" / "web-research" / "SKILL.md"
         assert staged.is_file()
+        assert (workspace / ".skills" / "orchestrator" / "data-plot" / "SKILL.md").is_file()
         kwargs = builder._backend_kwargs(spec)
         assert kwargs["backend"].cwd == workspace.resolve()
         assert kwargs["skills"] == [".skills/orchestrator"]
 
-    def test_skill_without_path_raises(self, tmp_path: Path) -> None:
+    def test_registered_skill_without_path_raises(self, tmp_path: Path) -> None:
         skills = SkillRegistry()
         skills.register(SkillManifest(id="floating", name="Floating"))
         builder = make_builder(skills=skills, workspace=tmp_path / "workspace")
 
         with pytest.raises(SkillError):
-            builder.build(base_spec(skills=["floating"]))
+            builder.build(base_spec())
 
-    def test_skill_with_missing_directory_raises(self, tmp_path: Path) -> None:
+    def test_registered_skill_with_missing_directory_raises(self, tmp_path: Path) -> None:
         skills = SkillRegistry()
         skills.register(SkillManifest(id="gone", name="Gone", path=Path("/nonexistent/skill")))
         builder = make_builder(skills=skills, workspace=tmp_path / "workspace")
 
         with pytest.raises(SkillError):
-            builder.build(base_spec(skills=["gone"]))
+            builder.build(base_spec())
+
+    def test_no_registered_skills_returns_backend_only(self, tmp_path: Path) -> None:
+        builder = make_builder(workspace=tmp_path / "workspace")
+
+        kwargs = builder._backend_kwargs(base_spec())
+
+        assert kwargs["backend"].cwd == (tmp_path / "workspace").resolve()
+        assert "skills" not in kwargs
 
     def test_resilience_policy_builds_with_middleware(self) -> None:
         spec = base_spec(

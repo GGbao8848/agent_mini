@@ -367,39 +367,30 @@ class TestMcpMetadataAndStd:
 
 
 class TestAgentBinding:
-    async def test_update_tools_and_skills(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        skill_dir = tmp_path / "skills" / "greet"
-        skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("# Greet")
+    async def test_update_tools_only(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         client = toolbox_client(tmp_path, monkeypatch)
 
-        installed = await client.post("/v1/skills", json={
-            "id": "greet", "name": "Greet", "path": str(skill_dir),
-        })
-        assert installed.status_code == 201, installed.text
-
         updated = await client.put("/v1/agents/helper", json={
-            "tools": ["demo_echo", "run_code"], "skills": ["greet"],
+            "tools": ["demo_echo", "run_code"],
         })
         assert updated.status_code == 200, updated.text
         body = updated.json()
         assert body["tools"] == ["demo_echo", "run_code"]
-        assert body["skills"] == ["greet"]
 
         # Omitted fields keep their values.
         tools_only = await client.put("/v1/agents/helper", json={"tools": ["run_code"]})
         assert tools_only.json()["tools"] == ["run_code"]
-        assert tools_only.json()["skills"] == ["greet"]
         await client.aclose()
 
-    async def test_unknown_skill_maps_to_404(
+    async def test_skills_field_is_ignored(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # Skills are a shared pool loaded for every agent — a client sending
+        # the legacy skills field must not error and must not change anything.
         client = toolbox_client(tmp_path, monkeypatch)
-        missing = await client.put("/v1/agents/helper", json={"skills": ["nope"]})
-        assert missing.status_code == 404
+        resp = await client.put("/v1/agents/helper", json={"skills": ["greet"]})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["skills"] == []
         await client.aclose()
 
     async def test_binding_survives_restart(self, tmp_path: Path) -> None:

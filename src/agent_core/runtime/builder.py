@@ -112,8 +112,8 @@ class AgentBuilder:
         With a workspace the agent's ``write_file``/``read_file``/... land on
         actual disk (contained by FilesystemBackend), which is what makes
         ``run_code``-built artifacts (pptx, sites, images) possible. DeepAgents
-        serves skills and file tools from ONE backend, so bound skills are
-        staged under ``.skills/<agent_id>/`` inside the workspace instead of
+        serves skills and file tools from ONE backend, so skills are staged
+        under ``.skills/<agent_id>/`` inside the workspace instead of
         re-rooting the backend — file tools stay workspace-rooted and skill
         scripts stay visible to the sandboxed ``run_code`` workspace mount.
         """
@@ -125,17 +125,26 @@ class AgentBuilder:
         return {"backend": backend}
 
     def _stage_skills(self, spec: AgentSpec, settings: Settings) -> str | None:
-        """Copy bound skills into the workspace; return their backend source."""
-        if not spec.skills:
+        """Copy every registered skill into the workspace; return their source.
+
+        Skills are a shared pool: anything registered in the SkillRegistry is
+        loaded for every agent (registration is the only step needed — there
+        is no per-agent binding). Each agent stages its own copy under
+        ``.skills/<agent_id>/`` so parallel runs and per-agent sandboxes stay
+        isolated. Returns None when nothing is registered (no skills param for
+        the harness).
+        """
+        manifests = self._skills.list()
+        if not manifests:
             return None
         stage_root = Path(settings.workspace_dir) / ".skills" / spec.id
         if stage_root.exists():
             shutil.rmtree(stage_root)
-        for skill_id in spec.skills:
-            source = self._resolve_skill_path(skill_id)
+        for manifest in manifests:
+            source = self._resolve_skill_path(manifest.id)
             shutil.copytree(
                 source,
-                stage_root / skill_id,
+                stage_root / manifest.id,
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
             )
         return f".skills/{spec.id}"
