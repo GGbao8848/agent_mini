@@ -172,9 +172,9 @@ function useToastMutation<TData, TVars>(options: UseMutationOptions<TData, Error
 
 export function useSubmitTask() {
   const queryClient = useQueryClient()
-  return useToastMutation<Task, { input: string }>({
-    mutationFn: ({ input }) =>
-      api.post<Task>("/v1/tasks", { input }),
+  return useToastMutation<Task, { input: string; attachments?: string[] }>({
+    mutationFn: ({ input, attachments }) =>
+      api.post<Task>("/v1/tasks", { input, ...(attachments?.length ? { attachments } : {}) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       queryClient.invalidateQueries({ queryKey: ["agents"] })
@@ -184,12 +184,26 @@ export function useSubmitTask() {
 
 export function useSendFollowup() {
   const queryClient = useQueryClient()
-  return useToastMutation<Task, { taskId: string; input: string }>({
-    mutationFn: ({ taskId, input }) =>
-      api.post<Task>(`/v1/tasks/${taskId}/messages`, { input }),
+  return useToastMutation<Task, { taskId: string; input: string; attachments?: string[] }>({
+    mutationFn: ({ taskId, input, attachments }) =>
+      api.post<Task>(`/v1/tasks/${taskId}/messages`, {
+        input,
+        ...(attachments?.length ? { attachments } : {}),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       queryClient.invalidateQueries({ queryKey: ["task"] })
+    },
+  })
+}
+
+/** Upload files dropped/pasted into the chat box; returns workspace-relative paths. */
+export function useUploadAttachments() {
+  return useToastMutation<{ path: string; name: string; size: number }[], { files: File[] }>({
+    mutationFn: ({ files }) => {
+      const form = new FormData()
+      for (const file of files) form.append("files", file)
+      return api.upload(`/v1/attachments`, form)
     },
   })
 }
