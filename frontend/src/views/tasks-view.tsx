@@ -238,7 +238,7 @@ function EmptyState({
     <div className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
       <div className="flex flex-col items-center gap-2 text-center">
         <div className="flex size-12 items-center justify-center overflow-hidden rounded-xl bg-muted">
-          <img src="/app-icon.png" alt="Agent Console" className="size-full object-cover" />
+          <img src="./app-icon.png" alt="Agent Console" className="size-full object-cover" />
         </div>
         <h2 className="text-lg font-medium">给分身派个任务</h2>
         <p className="text-sm text-muted-foreground">

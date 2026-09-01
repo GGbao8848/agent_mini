@@ -383,7 +383,7 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" className="pointer-events-none" tabIndex={-1}>
               <div className="flex aspect-square size-8 items-center justify-center overflow-hidden rounded-lg bg-sidebar-primary">
-                <img src="/app-icon.png" alt="Agent Console" className="size-full object-cover" />
+                <img src="./app-icon.png" alt="Agent Console" className="size-full object-cover" />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{data.brand.name}</span>
