@@ -44,14 +44,50 @@ function ArtifactRow({ runId, artifact }: { runId: string; artifact: Artifact })
   )
 }
 
+/** Group the conversation's artifacts by the run that produced them, so the
+ * panel reads "this turn made these files" instead of one flat list. Runs that
+ * made nothing are omitted; a single run's rows render ungrouped. */
+function grouped(artifacts: Artifact[]): { runId: string; items: Artifact[] }[] {
+  const order: string[] = []
+  const byRun = new Map<string, Artifact[]>()
+  for (const artifact of artifacts) {
+    const runId = artifact.run_id ?? ""
+    if (!byRun.has(runId)) {
+      byRun.set(runId, [])
+      order.push(runId)
+    }
+    byRun.get(runId)!.push(artifact)
+  }
+  return order.map((runId) => ({ runId, items: byRun.get(runId)! }))
+}
+
 export function ArtifactsPanel({ runId, artifacts }: { runId: string; artifacts: Artifact[] }) {
   if (!artifacts.length) {
     return <p className="p-2 text-sm text-muted-foreground">（无）</p>
   }
+  const groups = grouped(artifacts)
+  if (groups.length <= 1) {
+    return (
+      <div className="flex flex-col gap-2">
+        {groups[0]?.items.map((artifact) => (
+          <ArtifactRow key={artifact.path} runId={runId} artifact={artifact} />
+        ))}
+      </div>
+    )
+  }
   return (
-    <div className="flex flex-col gap-2">
-      {artifacts.map((artifact) => (
-        <ArtifactRow key={artifact.path} runId={runId} artifact={artifact} />
+    <div className="flex flex-col gap-3">
+      {groups.map((group, index) => (
+        <div key={group.runId} className="flex flex-col gap-1.5">
+          <p className="text-[11px] font-medium text-muted-foreground">
+            第 {index + 1} 轮 · {group.runId.slice(0, 8)}
+          </p>
+          <div className="flex flex-col gap-2">
+            {group.items.map((artifact) => (
+              <ArtifactRow key={artifact.path} runId={runId} artifact={artifact} />
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   )
