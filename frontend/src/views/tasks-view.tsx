@@ -1,5 +1,6 @@
 import * as React from "react"
 import { ApprovalCard } from "@/components/runs/approval-card"
+import { RunStatsLine } from "@/components/runs/task-stats"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -308,7 +309,14 @@ function ChatThread({ task }: { task: Task }) {
               (see above) so replays during switch don't trigger a full scroll. */}
           {[...current.turns].reverse().map((turn) => (
             <React.Fragment key={turn.id}>
-              {turn.role === "assistant" && <Bubble role="avatar" text={turn.content} />}
+              {turn.role === "assistant" && (
+                <div className="flex flex-col gap-0.5">
+                  <Bubble role="avatar" text={turn.content} />
+                  {typeof turn.metadata?.run_id === "string" && (
+                    <RunStatsLine runId={turn.metadata.run_id} />
+                  )}
+                </div>
+              )}
               {turn.role === "user" && <Bubble role="user" text={turn.content} />}
             </React.Fragment>
           ))}

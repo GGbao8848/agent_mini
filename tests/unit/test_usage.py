@@ -127,3 +127,51 @@ class TestExecutorWiring:
             if event.event_type is EventType.AGENT_FINISHED
         ]
         assert finished[0].metadata["usage"]["total_tokens"] == 150
+
+    def test_live_usage_surfaces_inflight_collector(self) -> None:
+        """The console's top stats need usage *while* a run executes, but the
+        run's own ``usage`` field is only written at the end. ``live_usage``
+        must read the live collector instead of returning None."""
+        from agent_core.domain.agent import AgentSpec
+        from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
+        from agent_core.runtime.runtime import AgentRuntime
+
+        class NeverBuilder:
+            def build(self, spec: Any) -> Any:
+                raise AssertionError("not used")
+
+        agents = AgentRegistry()
+        agents.register(AgentSpec(id="helper", name="Helper"))
+        runtime = AgentRuntime(
+            agents, ToolRegistry(), SkillRegistry(), builder=NeverBuilder()
+        )
+        run = runtime.create_run("helper", "hello")
+
+        # Simulate an executing run: a live collector accrues usage, while the
+        # run's own usage field is still unset (final-only).
+        collector = UsageCollector()
+        collector.on_chat_model_start()
+        collector.on_llm_end(_result(100, 20))
+        collector.on_tool_end()
+        runtime._collectors[run.id] = collector
+
+        live = runtime.live_usage(run.id)
+        assert live is not None
+        assert live.total_tokens == 120
+        assert live.model_calls == 1
+        assert live.tool_calls == 1
+
+        # Once the run ends the collector is popped; fall back to run.usage.
+        runtime._collectors.pop(run.id, None)
+        run.usage = collector.usage
+        assert runtime.live_usage(run.id) is not None
+
+    def test_live_usage_unknown_run_returns_none(self) -> None:
+        from agent_core.domain.agent import AgentSpec
+        from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
+        from agent_core.runtime.runtime import AgentRuntime
+
+        agents = AgentRegistry()
+        agents.register(AgentSpec(id="helper", name="Helper"))
+        runtime = AgentRuntime(agents, ToolRegistry(), SkillRegistry())
+        assert runtime.live_usage("nope") is None

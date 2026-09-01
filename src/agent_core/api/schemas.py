@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent_core.domain.action import ApprovalRequest
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
+from agent_core.domain.metrics import RunUsage
 from agent_core.domain.schedule import Schedule, ScheduleType
 from agent_core.domain.skill import SkillManifest
 from agent_core.domain.task import Run, Task, Turn
@@ -209,10 +210,20 @@ class RunOut(BaseModel):
     input: str = ""
 
     @classmethod
-    def of(cls, run: Run, output: Any | None = None, input: str = "") -> RunOut:
+    def of(
+        cls,
+        run: Run,
+        output: Any | None = None,
+        input: str = "",
+        usage: RunUsage | None = None,
+    ) -> RunOut:
         data = run.model_dump()
         data["output"] = output
         data["input"] = input
+        if usage is not None:
+            # Live usage (executing run) or a merged total — the run's own
+            # ``usage`` field is only final, so callers may supply a snapshot.
+            data["usage"] = usage.model_dump()
         return cls.model_validate(data)
 
 

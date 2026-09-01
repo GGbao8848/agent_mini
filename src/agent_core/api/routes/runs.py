@@ -19,4 +19,11 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 @router.get("/{run_id}", response_model=RunOut)
 def get_run(run_id: str, service: ServiceDep) -> RunOut:
     run = service.get_run(run_id)
-    return RunOut.of(run, output=service.final_output(run.id), input=service.task_input(run.id))
+    # Live usage for an executing run (the run's own usage field is final-only);
+    # the console's top stats stay populated while a task is in flight.
+    return RunOut.of(
+        run,
+        output=service.final_output(run.id),
+        input=service.task_input(run.id),
+        usage=service.run_usage(run.id),
+    )

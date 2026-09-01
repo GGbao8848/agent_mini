@@ -14,6 +14,7 @@ from agent_core.application.scheduler import ScheduleManager
 from agent_core.domain.action import ApprovalRequest, ApprovalStatus
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition
+from agent_core.domain.metrics import RunUsage
 from agent_core.domain.schedule import Schedule
 from agent_core.domain.task import Run, Task
 from agent_core.domain.trace import EventType, TraceEvent
@@ -95,6 +96,10 @@ class AgentCoreService:
 
     def get_run(self, run_id: str) -> Run:
         return self.runtime.get_run(run_id)
+
+    def run_usage(self, run_id: str) -> RunUsage | None:
+        """The run's usage so far — live while executing, final once done."""
+        return self.runtime.live_usage(run_id)
 
     def list_runs(self, agent_id: str | None = None) -> list[Run]:
         runs = self.runtime.list_runs()

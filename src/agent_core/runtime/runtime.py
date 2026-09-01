@@ -153,6 +153,21 @@ class AgentRuntime:
         except KeyError:
             raise RegistryError(kind="run", key=run_id, detail="not found") from None
 
+    def live_usage(self, run_id: str) -> RunUsage | None:
+        """Usage accrued so far, live for an executing run.
+
+        ``run.usage`` is only written when execution ends (the executor's
+        finally block), so a *running* task would otherwise report no stats.
+        The live collector (attached by ``execute_run``) accumulates tokens and
+        call counts as the graph runs; this surfaces that instead, so the
+        console's top stats update while a task is in flight.
+        """
+        collector = self._collectors.get(run_id)
+        if collector is not None:
+            return collector.usage
+        run = self._runs.get(run_id)
+        return run.usage if run is not None else None
+
     def get_task(self, task_id: str) -> Task:
         """Return the conversation with ``task_id``."""
         try:
@@ -606,7 +621,8 @@ class AgentRuntime:
         conversation = self._tasks.get(run.task_id)
         if conversation is None:
             return
-        conversation.add_assistant_turn(output)
+        # Carry the run id so the console can show that reply's usage/stats.
+        conversation.add_assistant_turn(output, run_id=run.id)
         self._save_task(conversation)
 
     def _transition(self, run: Run, status: RunStatus) -> None:

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useRun, useTask } from "@/hooks/use-console"
 import { fmtDuration } from "@/lib/format"
-import { CheckIcon, CopyIcon } from "lucide-react"
+import { CheckIcon, CopyIcon, TimerIcon } from "lucide-react"
 
 const SHORT_ID = (id: string) => id.slice(0, 8)
 
@@ -88,5 +88,23 @@ export function LiveTaskStats({ taskId }: { taskId: string }) {
         </span>
       )}
     </div>
+  )
+}
+
+/** Per-run usage line shown under an assistant bubble (the "child" of the
+ *  header's live stats): same format, scoped to the run that produced that
+ *  reply. ``useRun`` refetches while the run is active, so the newest bubble's
+ *  stats grow as the task runs and settle once it completes.
+ */
+export function RunStatsLine({ runId }: { runId: string }) {
+  const { data: run } = useRun(runId)
+  const usage = run?.usage
+  if (!usage) return null
+  return (
+    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+      <TimerIcon className="size-3.5" />
+      {usage.duration_ms != null ? `${fmtDuration(usage.duration_ms)} · ` : ""}
+      {usage.total_tokens} tokens · {usage.model_calls} 模型 · {usage.tool_calls} 工具
+    </span>
   )
 }

@@ -176,6 +176,10 @@ class TestConversationApi:
         assert [turn.role for turn in followup.turns] == [
             "user", "assistant", "user", "assistant",
         ]
+        # Every turn carries the run that produced it, so the console can show
+        # per-bubble usage stats (each assistant reply ↔ its root run).
+        for index, turn in enumerate(followup.turns):
+            assert isinstance(turn.metadata.get("run_id"), str), f"turn {index} lacks run_id"
         runs = service.runtime.task_root_runs(conversation.id)
         assert len(runs) == 2
         assert runs[0].thread_id == runs[1].thread_id  # same conversation thread
