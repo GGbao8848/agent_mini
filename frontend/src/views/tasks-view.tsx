@@ -1,15 +1,12 @@
 import * as React from "react"
 import { ApprovalCard } from "@/components/runs/approval-card"
-import { RunChatHeader } from "@/components/runs/run-detail"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
   useApprovals,
-  useRun,
   useSendFollowup,
   useSubmitTask,
   useTask,
-  useTaskEvents,
   useTasks,
   useUploadAttachments,
 } from "@/hooks/use-console"
@@ -264,8 +261,6 @@ function EmptyState({
 function ChatThread({ task }: { task: Task }) {
   const { data: fresh } = useTask(task.id)
   const current = fresh ?? task
-  const activeRun = useRun(current.active_run_id)
-  const events = useTaskEvents(current.id)
   const approvals = useApprovals()
   const followup = useSendFollowup()
 
@@ -306,7 +301,6 @@ function ChatThread({ task }: { task: Task }) {
 
   return (
     <>
-      {activeRun.data && <RunChatHeader run={activeRun.data} events={events} />}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col-reverse gap-3 p-4">
           {/* flex-col-reverse renders DOM order bottom-up: the visual top-down
