@@ -60,7 +60,7 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
     provider, model = parse_model_spec(spec or overrides.model or resolved.model)
 
     if provider == "local":
-        return _build_local(model, overrides.local_base_url)
+        return _build_local(model, overrides.local_base_url, streaming=resolved.model_streaming)
 
     env_var = PROVIDER_ENV_VARS.get(provider)
     if env_var is None:
@@ -82,11 +82,19 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
             api_key=SecretStr(api_key),
             base_url=OPENROUTER_BASE_URL,
             temperature=0,
+            streaming=resolved.model_streaming,
         )
-    return ChatOpenAI(model=model, api_key=SecretStr(api_key), temperature=0)
+    return ChatOpenAI(
+        model=model,
+        api_key=SecretStr(api_key),
+        temperature=0,
+        streaming=resolved.model_streaming,
+    )
 
 
-def _build_local(model: str, base_url_override: str | None = None) -> BaseChatModel:
+def _build_local(
+    model: str, base_url_override: str | None = None, *, streaming: bool = True
+) -> BaseChatModel:
     """Any OpenAI-compatible self-hosted endpoint (vLLM, llama.cpp server, ...).
 
     ``LOCAL_LLM_API_KEY`` (or the console override) is optional — many local
@@ -107,4 +115,5 @@ def _build_local(model: str, base_url_override: str | None = None) -> BaseChatMo
         api_key=SecretStr(api_key),
         base_url=base_url,
         temperature=0,
+        streaming=streaming,
     )

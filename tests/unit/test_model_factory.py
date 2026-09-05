@@ -110,3 +110,18 @@ class TestLocalProvider:
         with pytest.raises(ConfigurationError):
             build_model("local:qwen3.8-27b", settings=Settings(_env_file=None))
         assert "LOCAL_LLM_BASE_URL" not in os.environ
+
+
+class TestStreaming:
+    def test_models_stream_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        model = build_model("openai:gpt-4o-mini", settings=Settings(_env_file=None))
+        assert isinstance(model, ChatOpenAI)
+        assert model.streaming is True
+
+    def test_streaming_can_be_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        settings = Settings(_env_file=None, model_streaming=False)
+        model = build_model("openai:gpt-4o-mini", settings=settings)
+        assert isinstance(model, ChatOpenAI)
+        assert model.streaming is False

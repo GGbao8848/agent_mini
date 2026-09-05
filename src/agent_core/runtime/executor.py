@@ -21,6 +21,7 @@ from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import AgentError, AgentExecutionError, RunTimeoutError
 from agent_core.observability.emitter import EventFanout
 from agent_core.runtime.subagent_trace import SubagentTraceHandler
+from agent_core.runtime.thinking import ThinkingStreamHandler
 from agent_core.runtime.text import extract_text
 from agent_core.runtime.usage import UsageCollector
 
@@ -57,7 +58,7 @@ class AgentExecutor:
             EventType.AGENT_STARTED, run=run, agent_id=run.agent_id, input=input_text
         )
         started = time.monotonic()
-        callbacks: list[Any] = [usage_collector]
+        callbacks: list[Any] = [usage_collector, ThinkingStreamHandler(self._fanout, run)]
         if spec.subagents:
             callbacks.append(
                 SubagentTraceHandler(

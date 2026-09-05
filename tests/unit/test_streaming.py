@@ -107,3 +107,44 @@ class TestEventStreamBroker:
         bus.publish(live)
 
         assert await collect(stream, 2) == [past, live]
+
+
+class TestThinkingStreamHandler:
+    def test_tokens_buffer_into_deltas(self) -> None:
+        from agent_core.observability.emitter import EventFanout
+        from agent_core.observability.events import EventBus
+        from agent_core.observability.trace import InMemoryTracer
+        from agent_core.runtime.thinking import ThinkingStreamHandler
+
+        tracer = InMemoryTracer()
+        fanout = EventFanout(tracer, EventBus())
+        run = Run(task_id="t", agent_id="a")
+        handler = ThinkingStreamHandler(fanout, run)
+
+        payload = "abcdefghij" * 8  # 80 chars → crosses the 32-char flush bound
+        for ch in payload:
+            handler.on_llm_new_token(ch)
+        handler.on_llm_end()
+
+        thinking = [
+            e for e in tracer.get_events(run.id) if e.event_type is EventType.AGENT_THINKING
+        ]
+        assert thinking, "expected at least one agent_thinking delta"
+        assert "".join(e.output or "" for e in thinking) == payload
+        # Chunked (not one event per token, not one giant blob).
+        assert 1 < len(thinking) < len(payload)
+        assert all(len(e.output or "") <= 64 for e in thinking)
+
+    def test_empty_tokens_ignored(self) -> None:
+        from agent_core.observability.emitter import EventFanout
+        from agent_core.observability.events import EventBus
+        from agent_core.observability.trace import InMemoryTracer
+        from agent_core.runtime.thinking import ThinkingStreamHandler
+
+        tracer = InMemoryTracer()
+        fanout = EventFanout(tracer, EventBus())
+        run = Run(task_id="t", agent_id="a")
+        handler = ThinkingStreamHandler(fanout, run)
+        handler.on_llm_new_token("")
+        handler.on_llm_end()
+        assert tracer.get_events(run.id) == []

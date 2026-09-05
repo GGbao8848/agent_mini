@@ -32,6 +32,9 @@ class Settings(BaseSettings):
 
     model: str = "openai:gpt-4o-mini"
     model_provider: str = "openai"
+    # Stream tokens from the chat model (enables real-time 思维链 events in the
+    # console). Turn off if a provider chokes on SSE streaming.
+    model_streaming: bool = True
 
     # Optional persistence (Phase 16): set to "sqlite:///./agent_core.db" to
     # mirror registries/runs/approvals/events into SQLite and restore on boot.
