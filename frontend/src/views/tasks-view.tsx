@@ -1,32 +1,48 @@
 import * as React from "react"
+import { Markdown } from "@/components/chat/markdown"
 import { ApprovalCard } from "@/components/runs/approval-card"
+import {
+  RunActivity,
+  RunArtifacts,
+  RunningIndicator,
+} from "@/components/runs/run-activity"
 import { RunStatsLine } from "@/components/runs/task-stats"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
   useApprovals,
+  useProjects,
   useSendFollowup,
   useSubmitTask,
   useTask,
+  useTaskArtifacts,
+  useTaskEvents,
   useTasks,
   useUploadAttachments,
 } from "@/hooks/use-console"
-import type { Task } from "@/lib/types"
+import { TERMINAL_RUN_STATUSES, type Artifact, type RunEvent, type Task } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import {
   ArrowUpIcon,
+  FolderIcon,
   PaperclipIcon,
   XIcon,
 } from "lucide-react"
 
 function Bubble({ role, text }: { role: "user" | "avatar"; text: string }) {
+  const isUser = role === "user"
   return (
-    <div className={role === "user" ? "flex justify-end" : "flex justify-start"}>
+    <div className={isUser ? "flex justify-end" : "flex justify-start"}>
       <div
         data-role={role}
-        className="max-w-[85%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words bg-muted text-foreground data-[role=user]:bg-primary data-[role=user]:text-primary-foreground"
+        className={cn(
+          "max-w-[85%] rounded-xl px-3 py-2 text-sm break-words bg-muted text-foreground data-[role=user]:bg-primary data-[role=user]:text-primary-foreground",
+          isUser && "whitespace-pre-wrap",
+        )}
       >
-        <div className="mb-0.5 text-[0.7rem] opacity-70">{role === "user" ? "你" : "分身"}</div>
-        {text}
+        <div className="mb-0.5 text-[0.7rem] opacity-70">{isUser ? "你" : "分身"}</div>
+        {isUser ? text : <Markdown text={text} />}
       </div>
     </div>
   )
@@ -215,23 +231,63 @@ function Composer({
 function NewTaskComposer({
   pending,
   onSubmit,
+  initialProjectId,
 }: {
   pending: boolean
-  onSubmit: (text: string, attachmentPaths: string[]) => void
+  onSubmit: (text: string, attachmentPaths: string[], projectId: string | null) => void
+  initialProjectId?: string | null
 }) {
+  const projects = useProjects()
+  const [projectId, setProjectId] = React.useState<string | null>(initialProjectId ?? null)
+  // The sidebar's project-row "+" updates the preset while the composer is
+  // already mounted — follow it (the user can still change the select).
+  React.useEffect(() => {
+    setProjectId(initialProjectId ?? null)
+  }, [initialProjectId])
   return (
     <Composer
       placeholder="给分身派个任务，例如：把画册的冬天板块加两张图…"
       pending={pending}
-      onSubmit={onSubmit}
-    />
+      onSubmit={(text, paths) => onSubmit(text, paths, projectId)}
+    >
+      {(projects.data?.length ?? 0) > 0 && (
+        <div className="flex items-center gap-2 px-1 pt-1">
+          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <Select
+            value={projectId ?? "none"}
+            onValueChange={(value) => setProjectId(value === "none" ? null : value)}
+          >
+            <SelectTrigger className="h-7 w-auto gap-1 border-0 bg-muted px-2 text-xs shadow-none">
+              <SelectValue>
+                {(() => {
+                  const selected = projects.data?.find((p) => p.id === projectId)
+                  return selected ? selected.name : "无项目（产物放任务目录）"
+                })()}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none" className="text-xs">
+                无项目（产物放任务目录）
+              </SelectItem>
+              {projects.data!.map((project) => (
+                <SelectItem key={project.id} value={project.id} className="text-xs">
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+    </Composer>
   )
 }
 
 function EmptyState({
   onSubmitted,
+  presetProjectId,
 }: {
   onSubmitted: (task: Task) => void
+  presetProjectId: string | null
 }) {
   const submit = useSubmitTask()
   return (
@@ -248,8 +304,12 @@ function EmptyState({
       <div className="w-full max-w-2xl">
         <NewTaskComposer
           pending={submit.isPending}
-          onSubmit={(text, attachments) =>
-            submit.mutate({ input: text, attachments }, { onSuccess: onSubmitted })
+          initialProjectId={presetProjectId}
+          onSubmit={(text, attachments, projectId) =>
+            submit.mutate(
+              { input: text, attachments, project_id: projectId },
+              { onSuccess: onSubmitted },
+            )
           }
         />
       </div>
@@ -257,12 +317,41 @@ function EmptyState({
   )
 }
 
-/** One conversation: the active run's header, every turn, and a follow-up box. */
+/** One conversation: every turn (bubble + live activity + artifacts) and a
+ *  follow-up box. The old "运行详情" drawer is gone — the run's event stream,
+ *  collapsible steps and deliverables all live here in the thread. */
 function ChatThread({ task }: { task: Task }) {
   const { data: fresh } = useTask(task.id)
   const current = fresh ?? task
   const approvals = useApprovals()
   const followup = useSendFollowup()
+  const events = useTaskEvents(task.id)
+  const taskArtifacts = useTaskArtifacts(task.id)
+
+  // Group the conversation-wide feeds by the run that produced them, so each
+  // assistant turn shows exactly its own activity and deliverables.
+  const eventsByRun = React.useMemo(() => {
+    const map = new Map<string, RunEvent[]>()
+    for (const event of events) {
+      if (!event.run_id) continue
+      if (!map.has(event.run_id)) map.set(event.run_id, [])
+      map.get(event.run_id)!.push(event)
+    }
+    return map
+  }, [events])
+  const artifactsByRun = React.useMemo(() => {
+    const map = new Map<string, Artifact[]>()
+    for (const artifact of taskArtifacts.data ?? []) {
+      const runId = artifact.run_id ?? ""
+      if (!map.has(runId)) map.set(runId, [])
+      map.get(runId)!.push(artifact)
+    }
+    return map
+  }, [taskArtifacts.data])
+
+  const activeRunId = current.active_run_id ?? null
+  const running =
+    activeRunId != null && !TERMINAL_RUN_STATUSES.has(current.status)
 
   // Run ids referenced by this conversation (approvals may sit on any of them).
   const runIds = React.useMemo(() => {
@@ -271,13 +360,14 @@ function ChatThread({ task }: { task: Task }) {
       const runId = turn.metadata?.run_id
       if (typeof runId === "string") ids.add(runId)
     }
-    if (current.active_run_id) ids.add(current.active_run_id)
+    if (activeRunId) ids.add(activeRunId)
     return ids
-  }, [current])
+  }, [current, activeRunId])
   const pendingHere = (approvals.data ?? []).filter((a) => runIds.has(a.run_id))
 
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const prevTurnsRef = React.useRef(current.turns.length)
+  const prevEventsRef = React.useRef(events.length)
 
   // On conversation switch the thread remounts with scrollTop=0 (top). Pin to
   // the latest message instantly — an animated scrollIntoView here is what
@@ -288,16 +378,18 @@ function ChatThread({ task }: { task: Task }) {
     if (el) el.scrollTop = el.scrollHeight
   }, [])
 
-  // A new turn arriving sticks the view to the bottom so the fresh answer is
-  // visible; while reading history (no new turns) the scroll stays put.
+  // A new turn — or new live events while a run streams — sticks the view to
+  // the bottom; while reading history the scroll stays put.
   React.useEffect(() => {
     const el = scrollRef.current
-    const prev = prevTurnsRef.current
+    const prevTurns = prevTurnsRef.current
+    const prevEvents = prevEventsRef.current
     prevTurnsRef.current = current.turns.length
+    prevEventsRef.current = events.length
     if (!el) return
-    if (current.turns.length <= prev) return
+    if (current.turns.length <= prevTurns && events.length <= prevEvents) return
     el.scrollTop = el.scrollHeight
-  }, [current.turns.length])
+  }, [current.turns.length, events.length])
 
   return (
     <>
@@ -306,21 +398,37 @@ function ChatThread({ task }: { task: Task }) {
           {/* flex-col-reverse renders DOM order bottom-up: the visual top-down
               order is user → avatar, oldest first. Scroll anchoring is manual
               (see above) so replays during switch don't trigger a full scroll. */}
-          {[...current.turns].reverse().map((turn) => (
-            <React.Fragment key={turn.id}>
-              {turn.role === "assistant" && (
-                <div className="flex flex-col gap-0.5">
-                  <Bubble role="avatar" text={turn.content} />
-                  {typeof turn.metadata?.run_id === "string" && (
-                    <RunStatsLine runId={turn.metadata.run_id} />
-                  )}
-                </div>
-              )}
-              {turn.role === "user" && <Bubble role="user" text={turn.content} />}
-            </React.Fragment>
-          ))}
+          {[...current.turns].reverse().map((turn) => {
+            const runId = typeof turn.metadata?.run_id === "string" ? turn.metadata.run_id : null
+            return (
+              <React.Fragment key={turn.id}>
+                {turn.role === "assistant" && (
+                  <div className="flex flex-col gap-1.5">
+                    <Bubble role="avatar" text={turn.content} />
+                    {runId && (
+                      <RunActivity
+                        events={eventsByRun.get(runId) ?? []}
+                        running={running && runId === activeRunId}
+                      />
+                    )}
+                    {runId && (
+                      <RunArtifacts
+                        runId={runId}
+                        artifacts={artifactsByRun.get(runId) ?? []}
+                      />
+                    )}
+                    {runId && <RunStatsLine runId={runId} />}
+                  </div>
+                )}
+                {turn.role === "user" && <Bubble role="user" text={turn.content} />}
+              </React.Fragment>
+            )
+          })}
           {!current.turns.length && (
             <p className="text-center text-sm text-muted-foreground">这条对话还没有内容</p>
+          )}
+          {running && activeRunId && (
+            <RunningIndicator events={eventsByRun.get(activeRunId) ?? []} />
           )}
         </div>
       </div>
@@ -349,9 +457,13 @@ function ChatThread({ task }: { task: Task }) {
 export function TasksView({
   selectedId,
   onSelect,
+  presetProjectId,
+  onConsumePreset,
 }: {
   selectedId: string | null
   onSelect: (taskId: string | null) => void
+  presetProjectId?: string | null
+  onConsumePreset?: () => void
 }) {
   const tasks = useTasks()
   const taskList = tasks.data ?? []
@@ -362,7 +474,13 @@ export function TasksView({
       {listTask ? (
         <ChatThread key={listTask.id} task={listTask} />
       ) : (
-        <EmptyState onSubmitted={(task) => onSelect(task.id)} />
+        <EmptyState
+          presetProjectId={presetProjectId ?? null}
+          onSubmitted={(task) => {
+            onConsumePreset?.()
+            onSelect(task.id)
+          }}
+        />
       )}
     </div>
   )

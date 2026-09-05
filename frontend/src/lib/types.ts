@@ -49,6 +49,7 @@ export interface Task {
   agent_id: string
   title: string
   thread_id: string | null
+  project_id: string | null
   turns: Turn[]
   status: RunStatus | string
   active_run_id: string | null
@@ -186,3 +187,46 @@ export const EVENT_TYPES = [
 export const TERMINAL_RUN_EVENTS = new Set(['run_finished', 'run_failed', 'run_cancelled'])
 
 export const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled'])
+
+export interface Project {
+  id: string
+  name: string
+  path: string
+  created_at: string
+  metadata: Record<string, unknown>
+}
+
+export type ProjectPayload = { name: string; path: string }
+
+export type ConfigSource = 'page' | 'env'
+
+export interface ProviderKey {
+  provider: string
+  env_var: string
+  set: boolean
+  source: ConfigSource | null
+  hint: string | null
+}
+
+export interface ModelConfig {
+  model: string | null
+  model_source: ConfigSource
+  effective_model: string
+  local_base_url: string | null
+  local_base_url_source: ConfigSource | null
+  api_keys: ProviderKey[]
+}
+
+export type ModelConfigUpdate = {
+  model?: string
+  api_keys?: Record<string, string>
+  local_base_url?: string
+}
+
+export interface ModelVerify {
+  ok: boolean
+  model?: string | null
+  latency_ms?: number | null
+  reply?: string | null
+  error?: string | null
+}

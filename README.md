@@ -41,10 +41,10 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 15 | 评估进阶：LLM-as-judge 四维质量评分 + 基线快照与回归对比（时间/token/质量漂移可见化） | ✅ |
 | 16 | 持久化：SQLite 写穿透（注册中心/Run/审批/事件）+ 重启恢复，`AGENT_CORE_DATABASE_URL` 可选启用 | ✅ |
 | 17 | 自治与预算治理：RunBudget 硬上限、循环/无进展检测、NEEDS_INPUT 任务级求助、执行后自检自修回路 | ✅ |
-| 18 | 本地模型接入（`local:` provider，任意 OpenAI 兼容端点）+ 多模态内置工具（generate_image/view_image）+ 模型能力矩阵冒烟 | ✅ |
+| 18 | 本地模型接入（`local:` provider，任意 OpenAI 兼容端点）+ 模型能力矩阵冒烟 | ✅ |
 | 19 | 代理（`AGENT_CORE_PROXY_URL` + NO_PROXY 豁免内网服务）+ Telegram 通知渠道（telegram_notify 工具 + chat_id 引导脚本） | ✅ |
 | 20 | run_code 内置工具 + workspace 真实文件 backend + 双长任务端到端自治验证（30 页 PPT / 网页画册） | ✅ |
-| 21 | Podman Sandbox：run_code 容器内执行（仅挂载 workspace、资源上限、rootless），宿主机密钥不可达 | ✅ |
+| 21 | 代码执行后端：host 模式（默认，agent 专用 venv + ensure_packages 先查后装 + 系统包管理器审批）或 Podman Sandbox 容器内执行（仅挂载 workspace、资源上限、rootless） | ✅ |
 | 22 | Agent Console：局域网 Web 控制台——Run 时间线（持久化历史+实时 SSE）、事件详情、产物预览/下载、审批面板、派任务 | ✅ |
 | 23 | 多轮对话：LangGraph checkpointer + thread_id，**任意 run 可续聊**（AsyncSqliteSaver 持久化，跨重启保留上下文） | ✅ |
 | 24 | Console 工具箱：Skills/MCP 安装与管理 UI（MCP 以 JSON 录入为主 + 表单备选，兼容标准 mcpServers 格式），MCP 连接生命周期修复（owner-task），Agent 工具/技能绑定（PUT /v1/agents/{id} + 工具箱面板） | ✅ |
@@ -223,13 +223,16 @@ Sandbox（执行隔离：代码跑在哪）  → Phase 21，rootless Podman 容�
 ```
 
 ```bash
-AGENT_CORE_SANDBOX=podman                       # 默认 none（宿主机直跑，向后兼容）
-AGENT_CORE_SANDBOX_IMAGE=localhost/agent-core-sandbox:latest
+AGENT_CORE_SANDBOX=host                         # host（默认，宿主机 + 托管包管理）| podman；none 是 host 的旧别名
+AGENT_CORE_SANDBOX_IMAGE=localhost/agent-core-sandbox:latest   # 仅 podman 模式
 AGENT_CORE_SANDBOX_MEMORY_MB=2048  AGENT_CORE_SANDBOX_CPUS=2.0  AGENT_CORE_SANDBOX_PIDS_LIMIT=256
+AGENT_CORE_AGENT_ENV_DIR=~/.agent_core/agent-env               # 仅 host 模式；agent 专用 venv 位置
 bash scripts/sandbox_build.sh                   # 构建镜像（python:3.13-slim + pptx/Pillow/pandas + CJK 字体）
 ```
 
-启用后 `run_code` 的每条命令都在容器内执行：**只有 workspace 挂载进容器**（`/work`）——宿主机的 `.env` 密钥、SSH、git 历史全部不可达；路径穿越（`/work/../..`）只到容器自己的根；内存/CPU/进程数有硬上限；代理环境变量透传（pip 装包走代理）。workspace 成为 agent 与宿主机之间的唯一交换点。已实测验证：边界四项检查全过 + 沙箱模式下真实任务（mini pptx + Telegram 汇报）端到端完成。
+**host 模式（默认）**：没有 Docker/Podman 也能跑，但包管理是托管式的——`run_code` 的 PATH 指向一个 agent 专用 venv（`--system-site-packages`，宿主机已有的库直接复用、绝不装第二份）；缺的库用内置 `ensure_packages` 工具声明，先查后装、只装缺的、永远装进 agent venv 而非系统或项目环境；`uv` 优先、pip 回退，缓存全局共享（`~/.agent_core/cache`）。启动时探测宿主机 CLI 清单（ffmpeg/libreoffice/git/npx...）写进工具描述，agent 开工前就知道有什么。命令触及系统包管理器（`apt/brew/dnf... install`）会经参数级规则动态升级为**人工审批**。
+
+**podman 模式**：`run_code` 的每条命令都在容器内执行：**只有 workspace 挂载进容器**（`/work`）——宿主机的 `.env` 密钥、SSH、git 历史全部不可达；路径穿越（`/work/../..`）只到容器自己的根；内存/CPU/进程数有硬上限；代理环境变量透传（pip 装包走代理）。workspace 成为 agent 与宿主机之间的唯一交换点。已实测验证：边界四项检查全过 + 沙箱模式下真实任务（mini pptx + Telegram 汇报）端到端完成。
 
 ## 工具箱：Skills / MCP 安装与管理（Phase 24）
 
@@ -295,8 +298,11 @@ uv run --env-file .env python scripts/serve_console.py   # 默认 0.0.0.0:8000
 | 交付物要 ssh 上去找路径拷贝 | **产物窗口**：run 收尾自动登记 workspace 新增文件（manifest 写入 run 元数据并持久化），图片缩略图直接预览、其余一键下载（路径严格限制在 workspace 内，穿越/隐藏文件拒绝） |
 | 不知道它之前/现在在干嘛 | **时间线**：历史 run 来自 SQLite（重启不丢），进行中的 run 通过全局 SSE 实时刷新状态徽章；详情页有逐条事件时间线、token 用量、自检结果、最终输出 |
 | 危险操作/求助需要人工 | **审批面板**：工具审批与任务级求助（NEEDS_INPUT）在页面上批准/驳回/填写给分身的答复 |
+| 换模型/配 key 要 ssh 改 .env 重启 | **模型配置页**：默认模型（`provider:model`）、各 provider API 密钥、本地端点在页面上设置，写入 SQLite 持久保存，优先级高于环境变量，对之后的运行立即生效（含连接测试） |
 
-派任务/续聊在页面底部聊天输入框完成（Runs 列表在左侧边栏，点击即续聊该线程）。安全：设置 `AGENT_CORE_CONSOLE_TOKEN` 后所有 `/v1` 与 `/console` 请求需携带 token（页面首次提示输入，存 localStorage）；不设置则局域网内开放。前端技术栈见 Phase 25。
+派任务/续聊在页面底部聊天输入框完成（Runs 列表在左侧边栏，点击即续聊该线程）。
+
+**项目模式**：Console 侧边栏「项目」页把真实文件夹注册为项目（持久化，重启不丢）；新建任务时选择项目，agent 就直接在该目录里读写文件、执行命令——产物留在项目里而不是 `workspace/tasks/<id>/` 下。绑定任务的文件后端、run_code 工作目录、沙箱挂载、产物扫描与下载边界全部切换到项目根；未绑定项目的任务行为不变。项目必须由人注册，agent 无法自选目录。安全：设置 `AGENT_CORE_CONSOLE_TOKEN` 后所有 `/v1` 与 `/console` 请求需携带 token（页面首次提示输入，存 localStorage）；不设置则局域网内开放。前端技术栈见 Phase 25。
 
 ## 本地模型与多模态工具（Phase 18）
 
@@ -316,12 +322,7 @@ AgentSpec(id="avatar", resilience=ResiliencePolicy(
     model_fallbacks=["local:qwen3.8-27b", "openrouter:minimax/minimax-m3:free"]), ...)
 ```
 
-### 内置多模态工具（`agent_core/builtins/`）
-
-| 工具 | 启用条件 | 说明 |
-|---|---|---|
-| `generate_image(prompt, width, height, steps, cfg_scale)` | `AGENT_CORE_IMAGE_API_BASE_URL`（A1111/Forge 兼容 `/sdapi/v1/txt2img`） | 生成 PNG 存入 `AGENT_CORE_WORKSPACE_DIR`（默认 ./workspace），返回绝对路径 |
-| `view_image(path)` | 始终注册 | 返回多模态内容块（text + image_url data URI），视觉模型可直接"看到"图片——包括查看自己刚生成的图 |
+### 内置工具（`agent_core/builtins/`）
 
 工具照常走 Tool Registry → Permission → Action Gate，agent 按 `spec.tools` 白名单选用。
 
@@ -333,13 +334,7 @@ uv run --env-file .env python scripts/smoke_model_matrix.py [--strict]
 
 所有探测走**本项目的 `build_model()` 工厂**（即生产适配路径）：补全 / 工具调用 / 严格 JSON / 用户消息视觉 / **工具结果视觉**（agent 看图链路）五项，输出矩阵表；`--strict` 任一失败退出非零可直接接 CI。实测（qwen3.8-27b 本地）：5/5 全过，含工具结果带图路径。
 
-端到端演示（画图 → 看图自查 → 描述确认）：
-
-```bash
-uv run --env-file .env python scripts/demo_multimodal.py
-```
-
-**附带修复的适配器 bug**：gated 工具路径此前未应用"模型省略的可选参数回退 handler 默认值"规则，`None` 会直接传给 handler（generate_image 收到 `width: null` 即 500）。现已统一在执行链路处理并有回归测试覆盖。
+**附带修复的适配器 bug**：gated 工具路径此前未应用"模型省略的可选参数回退 handler 默认值"规则，`None` 会直接传给 handler。现已统一在执行链路处理并有回归测试覆盖。
 
 ## 自治与预算治理（Phase 17）
 

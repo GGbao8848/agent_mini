@@ -72,10 +72,3 @@ export const STATUS_LABELS: Record<RunStatus | string, string> = {
   created: '已创建',
 }
 
-export function eventColor(kind: string): string {
-  if (kind.startsWith('tool_failed') || kind.includes('rejected')) return 'text-red-500'
-  if (kind.endsWith('_finished') || kind.includes('approved')) return 'text-emerald-600 dark:text-emerald-400'
-  if (kind.startsWith('tool_')) return 'text-violet-600 dark:text-violet-400'
-  if (kind.startsWith('run_')) return 'text-blue-600 dark:text-blue-400'
-  return 'text-zinc-500'
-}

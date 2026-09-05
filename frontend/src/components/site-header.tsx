@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { useCancelTask, useDeleteTask, useRun, useTask, useTaskEvents } from "@/hooks/use-console"
-import { TERMINAL_RUN_STATUSES, type Run, type RunEvent } from "@/lib/types"
+import { useCancelTask, useDeleteTask, useRun, useTask } from "@/hooks/use-console"
+import { TERMINAL_RUN_STATUSES } from "@/lib/types"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,20 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from "@/components/ui/drawer"
-import { Skeleton } from "@/components/ui/skeleton"
-import { ArtifactsPanel } from "@/components/runs/artifacts-panel"
-import { EventsPanel } from "@/components/runs/events-panel"
-import { useTaskArtifacts } from "@/hooks/use-console"
-import { fmtDateTime } from "@/lib/format"
-import { KeyRoundIcon, TriangleAlertIcon, CircleStopIcon, InfoIcon, Trash2Icon, CircleCheckIcon, CircleAlertIcon } from "lucide-react"
+import { KeyRoundIcon, TriangleAlertIcon, CircleStopIcon, Trash2Icon, CircleCheckIcon, CircleAlertIcon } from "lucide-react"
 import type { ConnState } from "@/hooks/use-console"
 
 const CONN_BADGE: Record<ConnState, { label: string; className: string }> = {
@@ -68,61 +55,6 @@ function VerificationBadge({ verification }: { verification: Verification }) {
   )
 }
 
-function RunInfoDrawer({
-  run,
-  events,
-  open,
-  onOpenChange,
-}: {
-  run: Run
-  events: RunEvent[]
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  // Aggregate the whole conversation's artifacts: the active run's own list is
-  // empty when a follow-up message just started a fresh run, which would make
-  // earlier turns' files vanish from the panel.
-  const artifacts = useTaskArtifacts(open ? run.task_id : null)
-  return (
-    <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
-      <DrawerContent
-        style={{ "--drawer-height": "min(80dvh, 40rem)" } as React.CSSProperties}
-      >
-        <DrawerHeader>
-          <DrawerTitle>运行详情 · {run.id}</DrawerTitle>
-          <DrawerDescription>
-            {run.agent_id} · 开始 {fmtDateTime(run.created_at)}
-          </DrawerDescription>
-        </DrawerHeader>
-        <div className="grid gap-4 overflow-y-auto px-4 pb-4 sm:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <p className="text-xs font-medium text-muted-foreground">事件时间线</p>
-            <div className="rounded-lg border">
-              <EventsPanel events={events} />
-            </div>
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <p className="text-xs font-medium text-muted-foreground">产物</p>
-            {artifacts.isLoading ? (
-              <div className="flex flex-col gap-2">
-                <Skeleton className="h-20 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : (
-              <ArtifactsPanel runId={run.id} artifacts={artifacts.data ?? []} />
-            )}
-          </div>
-        </div>
-        <DrawerFooter className="border-t">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-            关闭
-          </Button>
-        </DrawerFooter>
-      </DrawerContent>
-    </Drawer>
-  )
-}
-
 export function SiteHeader({
   title,
   conn,
@@ -137,19 +69,16 @@ export function SiteHeader({
   /** The currently open conversation (from the "新建任务" view); live stats shown when set. */
   taskId?: string | null
 }) {
-  const [infoOpen, setInfoOpen] = React.useState(false)
   const [stopping, setStopping] = React.useState(false)
   const [removing, setRemoving] = React.useState(false)
   const cancel = useCancelTask()
   const deleteTask = useDeleteTask()
 
-  // The open conversation's live state: task → active run → its events. This
-  // makes the header the single top bar for a conversation (status, live
-  // usage, run details, stop/delete), replacing the old per-chat header.
+  // The open conversation's live state: task → active run. The event stream
+  // and activity trail live in the chat thread itself now (no run drawer).
   const { data: task } = useTask(taskId ?? null)
   const activeRunId = task?.active_run_id ?? null
   const { data: run } = useRun(activeRunId)
-  const events = useTaskEvents(taskId ?? null)
   const verification = (run?.metadata as { verification?: Verification } | undefined)?.verification
   const running = !!run && !TERMINAL_RUN_STATUSES.has(run.status)
 
@@ -207,10 +136,6 @@ export function SiteHeader({
                 </AlertDialog>
               </>
             )}
-            <Button variant="ghost" size="sm" onClick={() => setInfoOpen(true)}>
-              <InfoIcon data-icon="inline-start" />
-              运行详情
-            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -245,12 +170,6 @@ export function SiteHeader({
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-            <RunInfoDrawer
-              run={run}
-              events={events}
-              open={infoOpen}
-              onOpenChange={setInfoOpen}
-            />
           </>
         )}
         {pendingApprovals > 0 && (

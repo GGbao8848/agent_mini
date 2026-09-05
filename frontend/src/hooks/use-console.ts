@@ -12,6 +12,11 @@ import {
   type Approval,
   type Artifact,
   type MCPServer,
+  type ModelConfig,
+  type ModelConfigUpdate,
+  type ModelVerify,
+  type Project,
+  type ProjectPayload,
   type Run,
   type RunEvent,
   type Schedule,
@@ -90,6 +95,9 @@ export function useTaskArtifacts(taskId: string | null) {
     queryFn: () => api.get<Artifact[]>(`/v1/tasks/${encodeURIComponent(taskId!)}/artifacts`),
     enabled: !!taskId,
     staleTime: 30_000,
+    // Artifacts are inlined in the chat now — there is no drawer re-open to
+    // refresh them, so poll gently and pick up each finished run's manifest.
+    refetchInterval: 15_000,
   })
 }
 
@@ -172,9 +180,13 @@ function useToastMutation<TData, TVars>(options: UseMutationOptions<TData, Error
 
 export function useSubmitTask() {
   const queryClient = useQueryClient()
-  return useToastMutation<Task, { input: string; attachments?: string[] }>({
-    mutationFn: ({ input, attachments }) =>
-      api.post<Task>("/v1/tasks", { input, ...(attachments?.length ? { attachments } : {}) }),
+  return useToastMutation<Task, { input: string; attachments?: string[]; project_id?: string | null }>({
+    mutationFn: ({ input, attachments, project_id }) =>
+      api.post<Task>("/v1/tasks", {
+        input,
+        ...(attachments?.length ? { attachments } : {}),
+        ...(project_id ? { project_id } : {}),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       queryClient.invalidateQueries({ queryKey: ["agents"] })
@@ -389,4 +401,57 @@ export function useTaskEvents(taskId: string | null): RunEvent[] {
   }, [taskId, queryClient])
 
   return events
+}
+
+/* ------------------------------------------------------ model config */
+
+export function useModelConfig() {
+  return useQuery({
+    queryKey: ["model-config"],
+    queryFn: () => api.get<ModelConfig>("/v1/model-config"),
+  })
+}
+
+export function useUpdateModelConfig() {
+  const queryClient = useQueryClient()
+  return useToastMutation<ModelConfig, ModelConfigUpdate>({
+    mutationFn: (payload) => api.put<ModelConfig>("/v1/model-config", payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["model-config"] })
+    },
+  })
+}
+
+export function useVerifyModel() {
+  return useToastMutation<ModelVerify, { model?: string }>({
+    mutationFn: (payload) => api.post<ModelVerify>("/v1/model-config/verify", payload),
+  })
+}
+
+
+/* ---------------------------------------------------------- projects */
+
+export function useProjects() {
+  return useQuery({
+    queryKey: ["projects"],
+    queryFn: () => api.get<Project[]>("/v1/projects"),
+    staleTime: Infinity,
+  })
+}
+
+export function useProjectManage() {
+  const queryClient = useQueryClient()
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["projects"] })
+    queryClient.invalidateQueries({ queryKey: ["tasks"] })
+  }
+  const create = useToastMutation<Project, ProjectPayload>({
+    mutationFn: (payload) => api.post<Project>("/v1/projects", payload),
+    onSuccess: invalidate,
+  })
+  const remove = useToastMutation<unknown, string>({
+    mutationFn: (projectId) => api.del(`/v1/projects/${projectId}`),
+    onSuccess: invalidate,
+  })
+  return { create, remove }
 }

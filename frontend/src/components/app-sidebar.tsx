@@ -3,6 +3,7 @@
 import * as React from "react"
 
 import { NavMain } from "@/components/nav-main"
+import { Button } from "@/components/ui/button"
 import { StatusDot } from "@/components/runs/status-dot"
 import {
   AlertDialog,
@@ -28,6 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Sidebar,
   SidebarContent,
@@ -41,19 +43,28 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useDeleteTask, useTasks, useUpdateTask } from "@/hooks/use-console"
+import {
+  useDeleteTask,
+  useProjectManage,
+  useProjects,
+  useTasks,
+  useUpdateTask,
+} from "@/hooks/use-console"
 import { fmtTimeShort } from "@/lib/format"
 import { excerpt, isTerminalTask } from "@/lib/tasks"
 import type { Task } from "@/lib/types"
 import {
   CalendarDaysIcon,
   ChevronRightIcon,
+  FolderIcon,
+  PlusIcon,
   CopyIcon,
   PencilIcon,
   PinIcon,
   PlugIcon,
   PlusCircleIcon,
   PuzzleIcon,
+  SettingsIcon,
   Trash2Icon,
   WrenchIcon,
 } from "lucide-react"
@@ -89,6 +100,11 @@ const data = {
       url: "#",
       icon: <WrenchIcon />,
     },
+    {
+      title: "模型配置",
+      url: "#",
+      icon: <SettingsIcon />,
+    },
   ],
 }
 
@@ -122,15 +138,21 @@ function TaskRow({
   )
 }
 
-/** Group tasks by their source schedule; pinned first, then schedule groups,
- *  then the rest — each newest first. */
-function groupTasks(tasks: Task[]): { label: string | null; tasks: Task[] }[] {
+/** Group tasks by their source (bound project first, then schedule); pinned
+ *  first, then named groups, then the rest — each newest first. */
+function groupTasks(
+  tasks: Task[],
+  projectName: (projectId: string | null) => string | null,
+): { label: string | null; tasks: Task[] }[] {
   const byTime = (a: Task, b: Task) => b.created_at.localeCompare(a.created_at)
   const pinned = tasks.filter((t) => t.pinned).sort(byTime)
   const rest = tasks.filter((t) => !t.pinned)
   const groups = new Map<string | null, Task[]>()
   for (const task of rest) {
-    const source = (task.metadata?.source_schedule_name as string | undefined) ?? null
+    const source =
+      projectName(task.project_id) ??
+      (task.metadata?.source_schedule_name as string | undefined) ??
+      null
     const key = source ?? null
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(task)
@@ -153,6 +175,7 @@ function SidebarTasks({
   onSelectTask: (taskId: string) => void
 }) {
   const tasks = useTasks()
+  const projects = useProjects()
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
   const list = tasks.data ?? []
@@ -163,7 +186,17 @@ function SidebarTasks({
   const [renameValue, setRenameValue] = React.useState("")
   const [removing, setRemoving] = React.useState<Task | null>(null)
 
-  const groups = React.useMemo(() => groupTasks(list), [list])
+  const projectName = React.useCallback(
+    (projectId: string | null) =>
+      projectId
+        ? (projects.data?.find((p) => p.id === projectId)?.name ?? null)
+        : null,
+    [projects.data],
+  )
+  const groups = React.useMemo(
+    () => groupTasks(list, projectName),
+    [list, projectName],
+  )
 
   const openMenu = (e: React.MouseEvent, task: Task) => {
     e.preventDefault()
@@ -364,17 +397,142 @@ function SidebarTasks({
   )
 }
 
+/** Sidebar projects section, ZCode-style: a "+" beside the section title adds
+ *  a host folder; each project row spawns a bound task (+) or deletes itself.
+ *  The tasks of a project show up in the task list, grouped under its name. */
+function SidebarProjects({ onNewTaskInProject }: { onNewTaskInProject: (projectId: string) => void }) {
+  const projects = useProjects()
+  const manage = useProjectManage()
+  const [adding, setAdding] = React.useState(false)
+  const [name, setName] = React.useState("")
+  const [path, setPath] = React.useState("")
+
+  const submit = () => {
+    if (!name.trim() || !path.trim()) return
+    manage.create.mutate(
+      { name: name.trim(), path: path.trim() },
+      {
+        onSuccess: () => {
+          setName("")
+          setPath("")
+          setAdding(false)
+        },
+      },
+    )
+  }
+
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>
+        <span className="flex-1">项目</span>
+        <button
+          type="button"
+          title="添加文件夹（项目）"
+          onClick={() => setAdding(true)}
+          className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+        >
+          <PlusIcon className="size-3.5" />
+        </button>
+      </SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {(projects.data ?? []).map((project) => (
+            <SidebarMenuItem key={project.id}>
+              <div className="group/project flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-sidebar-accent">
+                <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate" title={project.path}>
+                  {project.name}
+                </span>
+                <button
+                  type="button"
+                  title={`在「${project.name}」里新建任务`}
+                  onClick={() => onNewTaskInProject(project.id)}
+                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/project:opacity-100"
+                >
+                  <PlusIcon className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  title="移除项目（任务保留，回到任务目录）"
+                  onClick={() => manage.remove.mutate(project.id)}
+                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/project:opacity-100"
+                >
+                  <Trash2Icon className="size-3.5" />
+                </button>
+              </div>
+            </SidebarMenuItem>
+          ))}
+          {(projects.data ?? []).length === 0 && (
+            <SidebarMenuItem>
+              <span className="px-2 py-1 text-xs text-muted-foreground">
+                点右上角 + 添加工作文件夹
+              </span>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+      <Dialog open={adding} onOpenChange={setAdding}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>添加项目文件夹</DialogTitle>
+            <DialogDescription>
+              绑定项目的对话直接在这个文件夹里读写文件、执行命令。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="sidebar-project-name">名称</Label>
+              <Input
+                id="sidebar-project-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="例如：画册小程序"
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="sidebar-project-path">服务器上的文件夹（绝对路径）</Label>
+              <Input
+                id="sidebar-project-path"
+                value={path}
+                onChange={(e) => setPath(e.target.value)}
+                placeholder="/Users/you/mycode/my-app"
+                className="font-mono"
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setAdding(false)}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              disabled={manage.create.isPending || !name.trim() || !path.trim()}
+              onClick={submit}
+            >
+              添加
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </SidebarGroup>
+  )
+}
+
 export function AppSidebar({
   view,
   onViewChange,
   selectedTaskId,
   onSelectTask,
+  onNewTaskInProject,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
   view: string
   onViewChange: (view: string) => void
   selectedTaskId: string | null
   onSelectTask: (taskId: string) => void
+  onNewTaskInProject: (projectId: string) => void
 }) {
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -401,6 +559,7 @@ export function AppSidebar({
             onSelect: () => onViewChange(item.title),
           }))}
         />
+        <SidebarProjects onNewTaskInProject={onNewTaskInProject} />
         <SidebarTasks selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} />
       </SidebarContent>
       <SidebarRail />

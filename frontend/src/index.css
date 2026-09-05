@@ -128,3 +128,39 @@
     @apply font-sans;
     }
 }
+/* ---- chat liveness animations ---- */
+@keyframes fade-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-fade-slide-up {
+  animation: fade-slide-up 0.25s ease-out both;
+}
+
+@keyframes bounce-dot {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+.dot-bounce > span {
+  animation: bounce-dot 1.2s infinite ease-in-out;
+}
+.dot-bounce > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.dot-bounce > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
