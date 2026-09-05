@@ -26,8 +26,14 @@ export function fmtSize(bytes: number): string {
 }
 
 export function fmtDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return `${Math.round(ms / 1000)}s`
+  const total = Math.floor(ms / 1000)
+  if (total < 1) return '<1秒'
+  if (total < 60) return `${total}秒`
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h) return `${h}小时${m}分${s}秒`
+  return `${m}分${s}秒`
 }
 
 export function str(value: unknown): string {

@@ -1,11 +1,7 @@
 import * as React from "react"
 import { Markdown } from "@/components/chat/markdown"
 import { ApprovalCard } from "@/components/runs/approval-card"
-import {
-  RunActivity,
-  RunArtifacts,
-  RunningIndicator,
-} from "@/components/runs/run-activity"
+import { RunActivity, RunArtifacts } from "@/components/runs/run-activity"
 import { RunStatsLine } from "@/components/runs/task-stats"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -13,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   useApprovals,
   useProjects,
+  useRun,
   useSendFollowup,
   useSubmitTask,
   useTask,
@@ -41,7 +38,6 @@ function Bubble({ role, text }: { role: "user" | "avatar"; text: string }) {
           isUser && "whitespace-pre-wrap",
         )}
       >
-        <div className="mb-0.5 text-[0.7rem] opacity-70">{isUser ? "你" : "分身"}</div>
         {isUser ? text : <Markdown text={text} />}
       </div>
     </div>
@@ -352,6 +348,7 @@ function ChatThread({ task }: { task: Task }) {
   const activeRunId = current.active_run_id ?? null
   const running =
     activeRunId != null && !TERMINAL_RUN_STATUSES.has(current.status)
+  const { data: activeRun } = useRun(activeRunId)
 
   // Run ids referenced by this conversation (approvals may sit on any of them).
   const runIds = React.useMemo(() => {
@@ -395,22 +392,34 @@ function ChatThread({ task }: { task: Task }) {
     <>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col-reverse gap-3 p-4">
-          {/* flex-col-reverse renders DOM order bottom-up: the visual top-down
-              order is user → avatar, oldest first. Scroll anchoring is manual
-              (see above) so replays during switch don't trigger a full scroll. */}
+          {/* flex-col-reverse renders DOM order bottom-up: the FIRST DOM child
+              is visually at the BOTTOM, so the in-flight reply bubble leads the
+              DOM and lands right under the conversation, where the answer will
+              appear. Newest turn is also first in DOM (bottom of the history).
+              Scroll anchoring is manual (see above) so replays during switch
+              don't trigger a full scroll. */}
+          {running && activeRunId && (
+            <div className="animate-fade-slide-up">
+              <RunActivity
+                events={eventsByRun.get(activeRunId) ?? []}
+                running
+                startedAt={activeRun?.created_at ?? null}
+              />
+            </div>
+          )}
           {[...current.turns].reverse().map((turn) => {
             const runId = typeof turn.metadata?.run_id === "string" ? turn.metadata.run_id : null
             return (
               <React.Fragment key={turn.id}>
                 {turn.role === "assistant" && (
                   <div className="flex flex-col gap-1.5">
-                    <Bubble role="avatar" text={turn.content} />
                     {runId && (
                       <RunActivity
                         events={eventsByRun.get(runId) ?? []}
                         running={running && runId === activeRunId}
                       />
                     )}
+                    <Bubble role="avatar" text={turn.content} />
                     {runId && (
                       <RunArtifacts
                         runId={runId}
@@ -424,11 +433,8 @@ function ChatThread({ task }: { task: Task }) {
               </React.Fragment>
             )
           })}
-          {!current.turns.length && (
+          {!current.turns.length && !running && (
             <p className="text-center text-sm text-muted-foreground">这条对话还没有内容</p>
-          )}
-          {running && activeRunId && (
-            <RunningIndicator events={eventsByRun.get(activeRunId) ?? []} />
           )}
         </div>
       </div>
