@@ -4,8 +4,8 @@ Artifacts live under per-task directories — ``<workspace>/tasks/<task_id>/`` �
 so a conversation's deliverables are isolated from every other task and from
 the shared root. Two mechanisms feed the console's 产物 panel:
 
-- **Explicit claim** (preferred): tools that produce files (``generate_image``,
-  ``run_code``) record them via :func:`register_artifact` as they are written,
+- **Explicit claim** (preferred): tools that produce files (``run_code``)
+  record them via :func:`register_artifact` as they are written,
   so nothing depends on timing heuristics.
 - **Fallback scan**: :func:`scan_task_artifacts` walks a task's own directory
   for files modified since a timestamp, used for live runs that have no
@@ -81,15 +81,21 @@ def scan_workspace_artifacts(
 
 
 def scan_task_artifacts(
-    workspace: Path, task_id: str, *, since_ts: float, limit: int = MAX_ARTIFACTS
+    workspace: Path,
+    task_id: str,
+    *,
+    since_ts: float,
+    limit: int = MAX_ARTIFACTS,
+    root: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Artifacts of one task only: scan its own directory, skip the shared root.
+    """Artifacts of one task only: scan its working root, skip the shared root.
 
     This is what keeps concurrent tasks from bleeding into each other's panel:
-    the window is bounded by the task's own directory, not the whole workspace.
+    the window is bounded by the task's own directory — or the bound project
+    directory via ``root`` — not the whole workspace.
     """
-    root = workspace / _TASKS_DIR_NAME / task_id
-    return scan_workspace_artifacts(root, since_ts=since_ts, limit=limit)
+    base = root or workspace / _TASKS_DIR_NAME / task_id
+    return scan_workspace_artifacts(base, since_ts=since_ts, limit=limit)
 
 
 def register_artifact(

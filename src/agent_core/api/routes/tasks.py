@@ -39,6 +39,13 @@ def _conversation_out(service: ServiceDep, task_id: str) -> TaskOut:
     return TaskOut.of(task, status=status, active_run_id=active.id if active else None)
 
 
+def _task_root(service: ServiceDep, task_id: str) -> Path:
+    """The conversation's working directory (project dir when bound)."""
+    return service.task_root(task_id) or (
+        Path(get_settings().workspace_dir) / "tasks" / task_id
+    )
+
+
 @router.post("", response_model=TaskOut, status_code=201)
 async def create_task(
     payload: TaskCreateRequest, service: ServiceDep, wait: bool = Query(default=False)
@@ -47,9 +54,13 @@ async def create_task(
         payload.agent_id,
         _with_attachments(payload.input, payload.attachments),
         wait=wait,
+        project_id=payload.project_id,
     )
     mirror_attachments(
-        Path(get_settings().workspace_dir), task.id, payload.attachments
+        Path(get_settings().workspace_dir),
+        task.id,
+        payload.attachments,
+        task_root=_task_root(service, task.id),
     )
     return _conversation_out(service, task.id)
 
@@ -65,7 +76,12 @@ async def send_message(
     await service.send_message(
         task_id, _with_attachments(payload.input, payload.attachments), wait=wait
     )
-    mirror_attachments(Path(get_settings().workspace_dir), task_id, payload.attachments)
+    mirror_attachments(
+        Path(get_settings().workspace_dir),
+        task_id,
+        payload.attachments,
+        task_root=_task_root(service, task_id),
+    )
     return _conversation_out(service, task_id)
 
 
@@ -124,9 +140,12 @@ async def stream_task_events(task_id: str, service: ServiceDep) -> EventSourceRe
 
 @router.patch("/{task_id}", response_model=TaskOut)
 def update_task(task_id: str, payload: TaskUpdateRequest, service: ServiceDep) -> TaskOut:
-    """Rename or pin/unpin a conversation."""
+    """Rename, pin/unpin or rebind a conversation."""
     task = service.runtime.update_task(
-        task_id, title=payload.title, pinned=payload.pinned
+        task_id,
+        title=payload.title,
+        pinned=payload.pinned,
+        project_id=payload.project_id,
     )
     return _conversation_out(service, task.id)
 

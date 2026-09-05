@@ -36,8 +36,8 @@ class PersistingTracer:
 
     def emit(self, event: TraceEvent) -> None:
         self._inner.emit(event)
-        # The persisted mirror drops giant inline payloads (base64 images in
-        # view_image results can be ~1MB each — the run's artifact files hold
+        # The persisted mirror drops giant inline payloads (base64 image data
+        # in tool results can be ~1MB each — the run's artifact files hold
         # the real content). The in-memory buffer keeps the full event.
         trimmed = event.model_copy(
             update={

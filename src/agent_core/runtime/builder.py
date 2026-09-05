@@ -18,16 +18,15 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
-from agent_core.artifacts import task_workspace
 from agent_core.config.settings import Settings, get_settings
 from agent_core.domain.agent import AgentSpec, SubAgentRef
 from agent_core.domain.metrics import RunUsage
 from agent_core.errors.exceptions import ConfigurationError, SkillError
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
-from agent_core.runtime.context import get_current_task_id
 from agent_core.runtime.help_tool import autonomy_prompt_addendum
 from agent_core.runtime.middleware import build_middleware
 from agent_core.runtime.model import ModelFactory, build_model
+from agent_core.runtime.paths import current_task_dir
 from agent_core.runtime.tooling import ToolFactory, make_direct_tool
 
 CompiledGraph = CompiledStateGraph[Any, Any, Any, Any]
@@ -123,8 +122,9 @@ class AgentBuilder:
         """
         settings = self._settings or get_settings()
         workspace = Path(settings.workspace_dir)
-        task_id = get_current_task_id()
-        backend_root = task_workspace(workspace, task_id) if task_id is not None else workspace
+        # Task-bound root: the conversation's project directory when bound,
+        # otherwise the anonymous workspace/tasks/<task_id>/ folder.
+        backend_root = current_task_dir(workspace)
         backend = FilesystemBackend(root_dir=backend_root)
         skill_source = self._stage_skills(backend_root, settings)
         if skill_source is not None:

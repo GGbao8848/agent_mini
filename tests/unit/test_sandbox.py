@@ -11,7 +11,13 @@ from agent_core.registries import ToolRegistry
 
 
 def code_settings(tmp_path: Path, *, sandbox: str = "none") -> Settings:
-    return Settings(_env_file=None, workspace_dir=str(tmp_path / "workspace"), sandbox=sandbox)  # type: ignore[arg-type]
+    return Settings(
+        _env_file=None,
+        workspace_dir=str(tmp_path / "workspace"),
+        sandbox=sandbox,  # type: ignore[arg-type]
+        # Host backend creates the agent venv here, not in ~/.agent_core.
+        agent_env_dir=str(tmp_path / "agent-env"),
+    )
 
 
 class TestHostBackend:

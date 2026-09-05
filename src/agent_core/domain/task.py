@@ -108,6 +108,9 @@ class Task(BaseModel):
     title: str
     input: str = ""
     thread_id: str | None = None
+    project_id: str | None = None
+    """Bound project: when set, the task works inside the project directory
+    instead of the anonymous ``workspace/tasks/<id>/`` folder."""
     turns: list[Turn] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
     pinned: bool = False

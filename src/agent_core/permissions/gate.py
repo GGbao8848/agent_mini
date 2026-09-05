@@ -33,6 +33,7 @@ from agent_core.errors.exceptions import (
 )
 from agent_core.observability.emitter import EventFanout
 from agent_core.permissions.approval import ApprovalManager
+from agent_core.permissions.arg_risk import needs_argument_approval
 from agent_core.permissions.loop_guard import LoopGuard, LoopVerdict
 from agent_core.permissions.policy import ActionPolicy
 from agent_core.registries import AgentRegistry, ToolHandler, ToolRegistry
@@ -86,6 +87,13 @@ class ActionGate:
 
         spec = self._agents.get(run.agent_id)
         decision = self._policy.evaluate(spec, definition)
+        if (
+            decision is PermissionDecision.ALLOW
+            and needs_argument_approval(tool_name, arguments)
+        ):
+            # Argument-level rule (e.g. a host run_code driving a system
+            # package manager) upgrades this invocation to human approval.
+            decision = PermissionDecision.REQUIRE_APPROVAL
         if decision is PermissionDecision.DENY:
             action.status = ActionStatus.REJECTED
             action.reason = f"Permission denied for agent '{run.agent_id}'"

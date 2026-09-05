@@ -161,19 +161,22 @@ def attachment_notes(paths: list[str]) -> str:
     return "\n".join(lines)
 
 
-def mirror_attachments(workspace: Path, task_id: str, paths: list[str]) -> None:
-    """Copy referenced attachment batches into the task's private directory.
+def mirror_attachments(
+    workspace: Path, task_id: str, paths: list[str], *, task_root: Path | None = None
+) -> None:
+    """Copy referenced attachment batches into the task's working directory.
 
     Files are uploaded *before* a task exists (``uploads/<batch_id>/``), but a
-    task's file tools are rooted at ``tasks/<task_id>/``. Mirroring each
-    referenced ``uploads/<batch_id>/`` subtree into the task dir — at the same
-    relative path — keeps the ``uploads/<batch>/...`` paths the message hints
-    at resolvable against the task root. Idempotent: already-mirrored batches
-    are skipped.
+    task's file tools are rooted at its working directory (``tasks/<task_id>/``,
+    or the bound project directory). Mirroring each referenced
+    ``uploads/<batch_id>/`` subtree into the task root — at the same relative
+    path — keeps the ``uploads/<batch>/...`` paths the message hints at
+    resolvable against the task root. Idempotent: already-mirrored batches are
+    skipped.
     """
     if not paths:
         return
-    task_root = workspace / "tasks" / task_id
+    root = task_root or workspace / "tasks" / task_id
     for path in paths:
         parts = Path(path).parts
         if len(parts) < 2 or parts[0] != "uploads":
@@ -182,7 +185,7 @@ def mirror_attachments(workspace: Path, task_id: str, paths: list[str]) -> None:
         source = workspace / "uploads" / batch
         if not source.is_dir():
             continue
-        dest = task_root / "uploads" / batch
+        dest = root / "uploads" / batch
         if dest.exists():
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)

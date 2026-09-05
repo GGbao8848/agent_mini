@@ -42,22 +42,23 @@ class Settings(BaseSettings):
     environment: Environment = Environment.DEVELOPMENT
     log_level: str = "INFO"
 
-    # Built-in multimodal tools (Phase 18). ``image_api_base_url`` points at an
-    # A1111/Forge-compatible txt2img endpoint (e.g. http://host:18542); when set
-    # the ``generate_image`` tool is registered. Generated/read files live under
-    # ``workspace_dir``.
-    image_api_base_url: str | None = None
     workspace_dir: str = "./workspace"
 
-    # Code-execution sandbox (Phase 21). "none" runs run_code directly on the
-    # host (legacy behaviour); "podman" runs every command inside a rootless
+    # Code-execution backend. "host" runs run_code on the host with an
+    # agent-managed venv (system site-packages visible; installs land in the
+    # venv, never the system); "podman" runs every command inside a rootless
     # container with only the workspace mounted — the host's secrets and the
-    # rest of the filesystem stay out of reach.
-    sandbox: Literal["none", "podman"] = "none"
+    # rest of the filesystem stay out of reach. "none" is a deprecated alias
+    # of "host" kept for old configs.
+    sandbox: Literal["none", "host", "podman"] = "host"
     sandbox_image: str = "localhost/agent-core-sandbox:latest"
     sandbox_memory_mb: int = 2048
     sandbox_cpus: float = 2.0
     sandbox_pids_limit: int = 256
+
+    # Agent-managed Python environment for the "host" sandbox backend (venv
+    # with --system-site-packages). Defaults to ~/.agent_core/agent-env.
+    agent_env_dir: str | None = None
 
     # Console (Phase 22): when set, every /v1 and /console request must carry
     # this shared token (X-Console-Token header or ?token=) — a minimal guard
@@ -70,7 +71,7 @@ class Settings(BaseSettings):
     proxy_url: str | None = None
     # Hosts that must bypass the proxy (NO_PROXY), comma-separated. When a
     # proxy is configured, localhost/127.0.0.1 are always exempt by default;
-    # add LAN service hosts (local model, txt2img...) so they stay direct.
+    # add LAN service hosts (local model...) so they stay direct.
     no_proxy: str | None = None
 
 
@@ -97,19 +98,21 @@ def get_settings() -> Settings:
     # Read the .env file so provider SDKs and the notification channel — which
     # read OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, ... directly from os.environ
     # — see the same values as Settings. pydantic-settings maps AGENT_CORE_*
-    # fields itself (from the .env file), so those must NOT leak into
-    # os.environ: that would corrupt hermetic tests that build
-    # Settings(_env_file=None). override=False keeps real environment
-    # variables authoritative over the .env file.
+    # fields itself, so those must NOT leak into os.environ: that would corrupt
+    # hermetic tests that build Settings(_env_file=None). Real environment
+    # variables are authoritative over the .env file — keys that already exist
+    # in os.environ are never overwritten here nor popped below.
+    added: list[str] = []
     env_file = dotenv_values(".env")
     for key, value in env_file.items():
         if value is not None and key not in os.environ:
             os.environ.setdefault(key, value)
-    # AGENT_CORE_* keys from the .env file stay out of os.environ: pydantic
-    # reads them itself, and leaking them breaks hermetic tests that build
-    # Settings(_env_file=None). Keys that were already real environment
-    # variables are left alone.
-    for key in env_file:
+            added.append(key)
+    # AGENT_CORE_* keys this function itself injected from the .env file stay
+    # out of os.environ: pydantic reads them itself, and leaking them breaks
+    # hermetic tests that build Settings(_env_file=None). Real environment
+    # variables are left untouched.
+    for key in added:
         if key.startswith("AGENT_CORE_"):
             os.environ.pop(key, None)
     settings = Settings()

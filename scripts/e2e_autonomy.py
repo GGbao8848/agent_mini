@@ -1,11 +1,11 @@
-"""End-to-end autonomy run: two long multimodal tasks executed by the avatar.
+"""End-to-end autonomy run: two long tasks executed by the avatar.
 
-Task A: a 30-slide Chinese pptx about AI history, with 10+ generated images
-Task B: an illustrated 4-seasons China web album, with 12 generated images
+Task A: a 30-slide Chinese pptx about AI history
+Task B: an illustrated 4-seasons China web album
 
-Both run concurrently through the full stack (local qwen model, txt2img,
-view_image checks, run_code for python-pptx, telegram_notify milestones).
-Every trace event is streamed to a per-task log for post-run analysis.
+Both run concurrently through the full stack (local qwen model, run_code for
+python-pptx, telegram_notify milestones). Every trace event is streamed to a
+per-task log for post-run analysis.
 
 Usage: uv run --env-file .env python scripts/e2e_autonomy.py   (Ctrl-C to abort)
 """
@@ -29,13 +29,11 @@ AVATAR_SYSTEM_PROMPT = """你是用户的个人 AI 分身，独立完成长任�
   所有文件一律写相对路径（如 video/build.py），不要用 `/home/...` 或
   `.../workspace/...` 这类宿主机绝对路径——沙箱里它们不存在，用了会找不到文件；
   run_code 的 bash 也在 `/work` 下执行，`pwd` 就是 `/work`。
-- 生成图片：调用 generate_image 后会返回图片的绝对路径；
-  重要的图用 view_image 亲自查看确认；view_image 传相对路径（如 video/slides/slide_01.png）
-  或文件名即可，它会自动在任务目录里找到。
 - 写代码：用文件工具写脚本，再用 run_code 执行（`python xxx.py`）。
-  沙箱已预装常用库（numpy/pandas/matplotlib/python-pptx/python-docx/openpyxl/
-  requests/beautifulsoup4/jieba/Pillow/plotly/reportlab 等）；遇到没有的库，
-  直接 `pip install xxx && python xxx.py` 拼在一条命令里（有缓存，重装很快）。
+  宿主机已有的库直接 import 就能用；遇到缺的库，先用 ensure_packages
+  工具声明需要的包（它会检查后只装缺的，装进 agent 专用环境），
+  再跑脚本；不要直接 `pip install`。系统级安装（apt/brew 等）需要主人审批，
+  非必要不用。
   命令失败时读错误信息、修好再跑，不要原样重试。
 - 汇报：开始时、完成一半时、结束时各用 telegram_notify 给主人发一条简短进展（中文）。
 - 交付物必须是真实落盘的文件；结束前用 run_code 验证文件存在且尺寸合理。
@@ -48,29 +46,25 @@ TASK_A = """任务：制作一份 30 页的中文 PPT《人工智能简史与未
 
 要求：
 1. 先规划 30 页的结构（封面、目录、4-6 个章节、时间线、总结、致谢）；
-2. 用 generate_image 生成至少 10 张配图（图灵与早期计算机、神经网络、
-   深度学习、大模型对话、机器人、自动驾驶、未来城市等主题，风格统一），
-   每张生成后用 view_image 确认不跑偏，不满意就换 prompt 重新生成；
-3. 用文件工具写一个 Python 脚本（python-pptx），生成 ppt/ai_history.pptx：
+2. 用文件工具写一个 Python 脚本（python-pptx），生成 ppt/ai_history.pptx：
    - 恰好 30 页，含标题页、目录、章节过渡页、内容页、总结页
-   - 每页有标题和 2-4 行正文；10+ 张生成图插入对应页面
-4. 用 run_code 执行脚本生成 pptx；再用 run_code 验证：页数=30、文件大于 1MB；
-5. 全程用 telegram_notify 至少汇报 3 次（开始/中途/完成），
+   - 每页有标题和 2-4 行正文
+3. 用 run_code 执行脚本生成 pptx；再用 run_code 验证：页数=30、文件大于 1MB；
+4. 全程用 telegram_notify 至少汇报 3 次（开始/中途/完成），
    完成消息里写清文件路径和页数。"""
 
 
-TASK_B = """任务：制作一份图文并茂的网页画册《四季·中国》，保存到 workspace/album/。
+TASK_B = """任务：制作一份精美的网页画册《四季·中国》，保存到 workspace/album/。
 
 要求：
-1. 用 generate_image 生成 12 张图：春/夏/秋/冬各 3 张
-   （风景、美食、人文各一，中国意象，风格统一的水彩风）；
-2. 用 view_image 至少抽查 6 张，确认季节和主题对得上，不对就重新生成；
-3. 把图片整理进 album/images/（可用 run_code 复制改名，如 spring-1.png）；
-4. 用文件工具写 album/index.html：图文并茂，四季分四个板块，
-   每张图配一句中文说明，简洁美观的内联 CSS；
-5. 用 run_code 验证：12 张图都在、index.html 引用的每个图片文件都存在
+1. 用文件工具写 album/index.html：四季分四个板块，每季 3 个主题
+   （风景、美食、人文各一，中国意象），
+   每个主题配一段中文介绍，简洁美观的内联 CSS；
+2. 用 run_code 生成四季主题的 SVG 装饰插图并放进 album/images/
+   （可用 python 脚本画简洁的水彩风矢量图，如 spring-1.svg）；
+3. 用 run_code 验证：12 张 SVG 都在、index.html 引用的每个图片文件都存在
    （写个小脚本检查）；
-6. 用 telegram_notify 至少汇报 3 次（开始/中途/完成），
+4. 用 telegram_notify 至少汇报 3 次（开始/中途/完成），
    完成消息里写清路径和你的自评。"""
 
 
@@ -80,8 +74,7 @@ def avatar_spec() -> AgentSpec:
         name="Avatar",
         # Empty tools = every available tool (see AgentBuilder._agent_tool_names):
         # the console no longer binds tools per agent, so the avatar gets
-        # view_image / run_code / telegram_notify / create_schedule automatically,
-        # and unavailable ones (generate_image without an endpoint) are excluded.
+        # run_code / telegram_notify / create_schedule automatically.
         system_prompt=AVATAR_SYSTEM_PROMPT,
         limits=AgentLimits(timeout_seconds=5400),
         resilience=ResiliencePolicy(

@@ -28,18 +28,29 @@ class StubBuilder:
 
 
 class ScriptedGraph:
-    """Graph that calls the UsageCollector contract then replies after a delay."""
+    """Graph that calls the UsageCollector contract then replies after a delay.
+
+    Records in-flight invocation windows so concurrency can be asserted from
+    overlap instead of wall-clock thresholds (which flake under suite load).
+    """
 
     def __init__(self, reply: str = "done", delay: float = 0.0) -> None:
         self.reply = reply
         self.delay = delay
+        self.active = 0
+        self.max_active = 0
 
     async def ainvoke(self, state: Any, config: Any = None) -> dict[str, Any]:
         for callback in (config or {}).get("callbacks") or []:
             if isinstance(callback, UsageCollector):
                 callback.on_chat_model_start()
                 callback.on_tool_end()
-        await asyncio.sleep(self.delay)
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(self.delay)
+        finally:
+            self.active -= 1
         return {"messages": [AIMessage(content=self.reply)]}
 
 
@@ -138,21 +149,21 @@ class TestRunParallel:
         runtime = make_runtime(graph)
         parent = runtime.create_run("researcher", "parent task")
 
-        started = time.monotonic()
         runs = await run_parallel(
             runtime,
             [Job(agent_id="researcher", input="a"), Job(agent_id="writer", input="b")],
             parent=parent,
         )
-        elapsed = time.monotonic() - started
 
         assert [run.status.value for run in runs] == ["completed", "completed"]
         assert all(run.parent_run_id == parent.id for run in runs)
-        assert elapsed < 0.55  # sequential would be ~0.6s
+        # Concurrency proven by overlap of in-flight invocations, immune to load.
+        assert graph.max_active == 2
         assert all(run.usage is not None and run.usage.model_calls == 1 for run in runs)
 
     async def test_concurrency_cap_limits_overlap(self) -> None:
-        runtime = make_runtime(ScriptedGraph(delay=0.2))
+        graph = ScriptedGraph(delay=0.2)
+        runtime = make_runtime(graph)
         jobs = [Job(agent_id="researcher", input=str(i)) for i in range(4)]
 
         started = time.monotonic()
@@ -160,6 +171,7 @@ class TestRunParallel:
         elapsed = time.monotonic() - started
 
         assert elapsed >= 0.4  # 4 jobs / 2 slots * 0.2s
+        assert graph.max_active == 2  # never more than the cap
 
     async def test_child_failure_does_not_raise(self) -> None:
         class BoomGraph(ScriptedGraph):

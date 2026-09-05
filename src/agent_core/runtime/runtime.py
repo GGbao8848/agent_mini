@@ -22,6 +22,7 @@ from agent_core.artifacts import (
     claimed_artifacts,
     clear_claims,
     scan_task_artifacts,
+    scan_workspace_artifacts,
 )
 from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
@@ -45,9 +46,9 @@ from agent_core.permissions.loop_guard import LoopGuard
 from agent_core.permissions.policy import ActionPolicy
 from agent_core.persistence.checkpointer import build_checkpointer
 from agent_core.persistence.store import SqliteStore
-from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
+from agent_core.registries import AgentRegistry, ProjectRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.builder import AgentBuilder
-from agent_core.runtime.context import current_run, current_task_id
+from agent_core.runtime.context import current_run, current_task_id, current_task_root
 from agent_core.runtime.executor import AgentExecutor
 from agent_core.runtime.help_tool import make_help_tool
 from agent_core.runtime.model import ModelFactory
@@ -89,10 +90,14 @@ class AgentRuntime:
         builder: AgentBuilder | None = None,
         store: SqliteStore | None = None,
         checkpointer: BaseCheckpointSaver[Any] | None = None,
+        projects: ProjectRegistry | None = None,
     ) -> None:
         self.agents = agents
         self.tools = tools
         self.skills = skills
+        # `projects or default` would be wrong here: BaseRegistry defines
+        # __len__, so an EMPTY registry is falsy and its store would be lost.
+        self.projects = projects if projects is not None else ProjectRegistry()
         self.tracer = tracer or InMemoryTracer()
         self.bus = bus or EventBus()
         self.fanout = EventFanout(self.tracer, self.bus)
@@ -197,9 +202,19 @@ class AgentRuntime:
         return runs[-1] if runs else None
 
     def update_task(
-        self, task_id: str, *, title: str | None = None, pinned: bool | None = None
+        self,
+        task_id: str,
+        *,
+        title: str | None = None,
+        pinned: bool | None = None,
+        project_id: str | None = None,
     ) -> Task:
-        """Rename or pin/unpin a conversation; returns the updated Task."""
+        """Rename, pin/unpin or rebind a conversation; returns the updated Task.
+
+        ``project_id`` uses sentinel semantics like the model-config API:
+        None keeps the value, "" clears the binding, otherwise it must name a
+        registered project.
+        """
         task = self.get_task(task_id)
         update: dict[str, Any] = {}
         if title is not None:
@@ -211,6 +226,12 @@ class AgentRuntime:
             update["title"] = title
         if pinned is not None:
             update["pinned"] = pinned
+        if project_id is not None:
+            if project_id:
+                self.projects.get(project_id)  # fail fast on unknown projects
+                update["project_id"] = project_id
+            else:
+                update["project_id"] = None
         if update:
             updated = task.model_copy(update=update)
             self._tasks[task_id] = updated
@@ -313,11 +334,18 @@ class AgentRuntime:
     # -------------------------------------------------------------- lifecycle
 
     def create_conversation(
-        self, agent_id: str, text: str, *, metadata: dict[str, Any] | None = None
+        self,
+        agent_id: str,
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        project_id: str | None = None,
     ) -> Task:
         """Start a new conversation: create its Task and the first root run."""
         spec = self.agents.get(agent_id)  # fail fast on unknown agents
-        task = self._new_task(spec.id, text, metadata=metadata)
+        if project_id is not None:
+            self.projects.get(project_id)  # fail fast on unknown projects
+        task = self._new_task(spec.id, text, metadata=metadata, project_id=project_id)
         self.create_run(spec.id, text, task=task)
         return task
 
@@ -368,7 +396,12 @@ class AgentRuntime:
         return run
 
     def _new_task(
-        self, agent_id: str, text: str, *, metadata: dict[str, Any] | None = None
+        self,
+        agent_id: str,
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        project_id: str | None = None,
     ) -> Task:
         """Create and register a fresh conversation owned by ``agent_id``."""
         task = Task(
@@ -376,6 +409,7 @@ class AgentRuntime:
             title=make_title(text),
             input=text,
             thread_id=new_id(),
+            project_id=project_id,
             metadata=dict(metadata or {}),
         )
         self._tasks[task.id] = task
@@ -401,6 +435,7 @@ class AgentRuntime:
         )
         run_token = current_run.set(run)
         task_token = current_task_id.set(run.task_id)
+        root_token = current_task_root.set(self.task_root(run.task_id))
         collector = UsageCollector()
         self._collectors[run.id] = collector
         try:
@@ -436,7 +471,24 @@ class AgentRuntime:
             self.loop_guard.forget_run(run.id)
             current_run.reset(run_token)
             current_task_id.reset(task_token)
+            current_task_root.reset(root_token)
         return run
+
+    def task_root(self, task_id: str) -> Path | None:
+        """The filesystem root a conversation works in, or None for the default.
+
+        Tasks bound to a project work directly inside the project's directory;
+        everything else uses the anonymous ``workspace/tasks/<task_id>/``.
+        A missing project (removed after the task was bound) falls back to the
+        default so old conversations stay runnable.
+        """
+        task = self._tasks.get(task_id)
+        if task is not None and task.project_id is not None:
+            try:
+                return self.projects.get(task.project_id).path
+            except RegistryError:
+                return None
+        return None
 
     def submit_run(self, run: Run) -> asyncio.Task[Run]:
         """Execute ``run`` as a background task so ``cancel_run`` can stop it."""
@@ -478,13 +530,14 @@ class AgentRuntime:
         self._checkpointer_ready = True
 
     def _collect_artifacts(self, run: Run) -> None:
-        """Record the files this run created in the task's private directory.
+        """Record the files this run created in the task's working directory.
 
-        Only top-level runs collect: nested runs (verifier) share the task dir
-        and would double-claim the same files. The scan is bounded to
-        ``workspace/tasks/<task_id>/`` so a concurrent task's files can never
-        leak in; tools that explicitly claimed artifacts (generate_image,
-        run_code) are merged in and take precedence.
+        Only top-level runs collect: nested runs (verifier) share the task
+        root and would double-claim the same files. The scan is bounded to the
+        task's root — ``workspace/tasks/<task_id>/`` or the bound project
+        directory — so a concurrent task's files can never leak in; tools
+        that explicitly claimed artifacts (run_code) are merged in and take
+        precedence.
         """
         if run.parent_run_id is not None:
             return
@@ -493,8 +546,17 @@ class AgentRuntime:
         merged: dict[str, dict[str, Any]] = {
             str(a["path"]): a for a in claimed_artifacts(run.task_id)
         }
-        for a in scan_task_artifacts(workspace, run.task_id, since_ts=since):
-            merged.setdefault(str(a["path"]), a)
+        root = self.task_root(run.task_id)
+        if root is not None:
+            merged.update(
+                {
+                    str(a["path"]): a
+                    for a in scan_workspace_artifacts(root, since_ts=since)
+                }
+            )
+        else:
+            for a in scan_task_artifacts(workspace, run.task_id, since_ts=since):
+                merged.setdefault(str(a["path"]), a)
         clear_claims(run.task_id)
         if merged:
             run.metadata["artifacts"] = list(merged.values())

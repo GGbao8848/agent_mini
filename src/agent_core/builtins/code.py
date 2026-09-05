@@ -6,38 +6,62 @@ run a data job, test code. The command runs with ``bash -lc`` in the
 workspace dir, with a per-call timeout, and returns stdout/stderr so the
 agent can iterate on failures.
 
-Two execution backends (``AGENT_CORE_SANDBOX``):
+Execution backends (``AGENT_CORE_SANDBOX``):
 
-- ``none``   : directly on the host (legacy; the process user's full power).
+- ``host``   : on the host, but with package hygiene — PATH points at the
+               agent-managed venv (system site-packages visible, so host
+               libraries are reused, and agent installs land in the venv,
+               never the system). Commands that drive a system package
+               manager (apt/brew/...) are upgraded to human approval by an
+               argument-level risk rule. ``none`` is a deprecated alias.
 - ``podman`` : inside a rootless container with only the workspace mounted —
                the host's secrets, SSH keys and the rest of the filesystem are
                out of reach, and memory/CPU/pids are capped. The workspace is
                the single exchange point between the agent and the sandbox.
 
 Risk: MEDIUM either way (workspace-confined, below the approval risk floor —
-a personal avatar is expected to run code without a human in the loop).
+a personal avatar is expected to run code without a human in the loop); the
+system-install rule can raise individual host commands to approval.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
-from agent_core.artifacts import task_workspace
+from agent_core.builtins.hostenv import detect_host_tools, ensure_host_env
+from agent_core.builtins.packages import ENSURE_PACKAGES_TOOL, make_ensure_packages
 from agent_core.config.settings import Settings
 from agent_core.domain.action import RiskLevel
 from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError, ToolError
 from agent_core.registries import ToolRegistry
-from agent_core.runtime.context import get_current_task_id
+from agent_core.runtime.paths import current_task_dir
 
 RUN_CODE_TOOL = "run_code"
 _MAX_OUTPUT_CHARS = 8000
 _MAX_TIMEOUT_SECONDS = 900.0
+
+# Host backend: commands that reach the system package manager need a human.
+# Same pattern is used by the argument-level approval rule below. Lookarounds
+# instead of \b so dash flags (-S) match while "--installed" does not; false
+# positives land in the approval queue, which is the safe side.
+_SYSTEM_INSTALL_RE = re.compile(
+    r"\b(?:apt|apt-get|aptitude|dnf|yum|zypper|pacman|apk|brew|port|"
+    r"choco|winget|scoop|emerge|snap|flatpak|nix-env)\s[^;&|]*"
+    r"(?:(?<![\w-])(?:install|add|in|rm|remove|upgrade|full-upgrade)(?![\w-])"
+    r"|(?<![\w-])-[SRKB](?![\w-]))",
+    re.IGNORECASE,
+)
+
+
+def is_system_install(command: str) -> bool:
+    """True when the command drives a system package manager install/change."""
+    return _SYSTEM_INSTALL_RE.search(command) is not None
 
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy")
 
@@ -134,31 +158,43 @@ def _report(returncode: int, stdout: str, stderr: str) -> str:
 
 def make_run_code(settings: Settings) -> tuple[ToolDefinition, Any]:
     workspace = Path(settings.workspace_dir).resolve()
-    venv_bin = Path(sys.executable).parent  # no resolve(): venv python is a symlink
     sandboxed = settings.sandbox == "podman"
+    probe = detect_host_tools() if not sandboxed else None
 
     async def run_code(command: str, timeout_seconds: float = 300.0) -> str:
-        # Run inside the current task's private directory so files it creates
-        # land in the task's own folder (the console's 产物 scope), not the
-        # shared root. Uses this handler's captured workspace (not the global
-        # settings) so a task-context run always targets the right root.
-        task_id = get_current_task_id()
-        cwd = task_workspace(workspace, task_id) if task_id is not None else workspace
+        # Run inside the current task's working directory (project dir when
+        # bound) so files it creates land where the task's 产物 scope reads
+        # them. Uses this handler's captured workspace (not the global
+        # settings) for the default root so a task-context run always targets
+        # the right workspace.
+        cwd = current_task_dir(workspace)
         cwd.mkdir(parents=True, exist_ok=True)
         capped = min(max(timeout_seconds, 1.0), _MAX_TIMEOUT_SECONDS)
         if sandboxed:
             return await asyncio.to_thread(_run_podman, cwd, settings, command, capped)
-        # Host backend: put this project's venv first on PATH so agent scripts
-        # see the installed libraries (no resolve(): venv python is a symlink).
-        full_command = f'export PATH="{venv_bin}:$PATH"; {command}'
+        # Host backend: put the agent-managed venv first on PATH — its python
+        # sees host site-packages (nothing the host already has is installed
+        # twice) while agent installs land in the venv, not the system or the
+        # project env. Created on first use, reused after.
+        env_dir = await ensure_host_env(settings)
+        env_bin = str(env_dir / "bin")
+        full_command = f'export PATH="{env_bin}:$PATH"; {command}'
         return await asyncio.to_thread(_run_host, full_command, cwd, capped)
 
-    backend_note = (
-        "Runs inside a rootless podman sandbox: only this workspace is mounted, "
-        "the project venv python is first on PATH."
-        if sandboxed
-        else "Runs directly on the host; this project's venv python is first on PATH."
-    )
+    if sandboxed:
+        backend_note = (
+            "Runs inside a rootless podman sandbox: only this workspace is "
+            "mounted, with the prebuilt toolbox libraries installed."
+        )
+        metadata_extra: dict[str, Any] = {}
+    else:
+        backend_note = (
+            "Runs on the host with the agent-managed Python environment: host "
+            "site-packages are importable directly, and missing libraries should "
+            f"be requested via {ENSURE_PACKAGES_TOOL} instead of raw pip install. "
+            "System package managers (apt/brew/...) require human approval."
+        )
+        metadata_extra = {"host_tools": probe}
     definition = ToolDefinition(
         name=RUN_CODE_TOOL,
         description=(
@@ -187,17 +223,27 @@ def make_run_code(settings: Settings) -> tuple[ToolDefinition, Any]:
             "workspace": str(workspace),
             # Above the handler's own 900s cap so the handler's timeout wins.
             "timeout_seconds": 920.0,
-            "sandbox": settings.sandbox,
+            "sandbox": "host" if not sandboxed else "podman",
+            **metadata_extra,
         },
     )
     return definition, run_code
 
 
 def register_builtin_tools(registry: ToolRegistry, settings: Settings) -> list[str]:
-    """Register ``run_code``; workspace-backed code execution."""
+    """Register ``run_code`` (and, on the host backend, ``ensure_packages``)."""
     definition, handler = make_run_code(settings)
     try:
         registry.register(definition, handler)
     except RegistryError:
         registry.set_handler(definition.name, handler)
-    return [definition.name]
+    registered = [definition.name]
+
+    if settings.sandbox != "podman":
+        pkg_definition, pkg_handler = make_ensure_packages(settings)
+        try:
+            registry.register(pkg_definition, pkg_handler)
+        except RegistryError:
+            registry.set_handler(pkg_definition.name, pkg_handler)
+        registered.append(pkg_definition.name)
+    return registered

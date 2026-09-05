@@ -146,3 +146,34 @@ class TestAttachmentMirroring:
         assert not (workspace / "tasks" / "task-1").exists() or not list(
             (workspace / "tasks" / "task-1").rglob("*")
         )
+
+
+class TestPreviewEndpoint:
+    async def test_text_image_and_binary_kinds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        task = service.runtime.create_conversation("helper", "hi")
+        root = tmp_path / "workspace" / "tasks" / task.id
+        root.mkdir(parents=True)
+        (root / "notes.md").write_text("# 标题\n正文", encoding="utf-8")
+        (root / "pic.png").write_bytes(b"\x89PNG fake")
+        (root / "data.bin").write_bytes(b"\x00\x01\x02")
+
+        run = service.runtime.create_run("helper", "hi", task=task)
+
+        async with make_client(service) as client:
+            base = f"/v1/artifacts/{run.id}/preview"
+            text = (await client.get(base, params={"path": "notes.md"})).json()
+            assert text["kind"] == "text" and "# 标题" in text["content"]
+
+            image = (await client.get(base, params={"path": "pic.png"})).json()
+            assert image["kind"] == "image"
+
+            binary = (await client.get(base, params={"path": "data.bin"})).json()
+            assert binary["kind"] == "binary" and "content" not in binary
+
+            missing = await client.get(base, params={"path": "../escape.md"})
+            assert missing.status_code == 404

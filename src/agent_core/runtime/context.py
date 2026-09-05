@@ -9,6 +9,7 @@ invocations inherit the context automatically.
 from __future__ import annotations
 
 from contextvars import ContextVar
+from pathlib import Path
 
 from agent_core.domain.task import Run
 
@@ -18,6 +19,14 @@ current_task_id: ContextVar[str | None] = ContextVar("current_task_id", default=
 
 Distinct from ``current_run`` so tool handlers can scope their output to the
 task's private directory without depending on the whole Run object.
+"""
+
+current_task_root: ContextVar[Path | None] = ContextVar("current_task_root", default=None)
+"""The filesystem root the in-flight task works in, or None for the default.
+
+Set by the runtime from the task's bound project: None means the task uses
+the anonymous ``workspace/tasks/<task_id>/`` directory; a path means the task
+works directly inside that (project) directory.
 """
 
 

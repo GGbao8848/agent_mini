@@ -11,12 +11,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agent_core.artifacts import artifact_abs_path, task_workspace
+from agent_core.artifacts import artifact_abs_path
 from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError, ToolError
 from agent_core.notify.telegram import TelegramChannel, telegram_chat_id, telegram_token
 from agent_core.registries import ToolRegistry
 from agent_core.runtime.context import get_current_task_id
+from agent_core.runtime.paths import current_task_dir
 
 TELEGRAM_NOTIFY_TOOL = "telegram_notify"
 TELEGRAM_SEND_ARTIFACT_TOOL = "telegram_send_artifact"
@@ -100,11 +101,12 @@ def make_telegram_send_artifact(
                 details={"tool": TELEGRAM_SEND_ARTIFACT_TOOL},
             )
         task_id = get_current_task_id()
-        # Files live in the task's own directory; fall back to the shared root
-        # for one-shot runs (no task context).
+        # Files live in the task's working directory (project dir when the
+        # conversation is bound to one); fall back to the shared root for
+        # one-shot runs (no task context).
         target = None
         if task_id is not None:
-            target = artifact_abs_path(task_workspace(workspace, task_id), path)
+            target = artifact_abs_path(current_task_dir(workspace), path)
         if target is None:
             target = artifact_abs_path(workspace, path)
         if target is None:

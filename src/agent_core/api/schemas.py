@@ -19,6 +19,7 @@ from agent_core.domain.action import ApprovalRequest
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
 from agent_core.domain.metrics import RunUsage
+from agent_core.domain.project import Project
 from agent_core.domain.schedule import Schedule, ScheduleType
 from agent_core.domain.skill import SkillManifest
 from agent_core.domain.task import Run, Task, Turn
@@ -64,6 +65,13 @@ class TaskCreateRequest(BaseModel):
             "the agent can read them with its file tools."
         ),
     )
+    project_id: str | None = Field(
+        default=None,
+        description=(
+            "Bind the conversation to a registered project: the agent then "
+            "works directly inside the project's directory."
+        ),
+    )
 
 
 class TaskMessageRequest(BaseModel):
@@ -78,10 +86,14 @@ class TaskMessageRequest(BaseModel):
 
 
 class TaskUpdateRequest(BaseModel):
-    """Editable task fields (rename, pin); omitted fields keep values."""
+    """Editable task fields (rename, pin, rebind); omitted fields keep values."""
 
     title: str | None = Field(default=None, min_length=1)
     pinned: bool | None = None
+    project_id: str | None = Field(
+        default=None,
+        description="Rebind to a project ('' clears the binding; None keeps it)",
+    )
 
 
 class TurnOut(BaseModel):
@@ -105,6 +117,7 @@ class TaskOut(BaseModel):
     agent_id: str
     title: str
     thread_id: str | None
+    project_id: str | None = None
     turns: list[TurnOut]
     status: str
     active_run_id: str | None
@@ -119,6 +132,7 @@ class TaskOut(BaseModel):
             agent_id=task.agent_id,
             title=task.title,
             thread_id=task.thread_id,
+            project_id=task.project_id,
             turns=[TurnOut.of(turn) for turn in task.turns],
             status=status,
             active_run_id=active_run_id,
@@ -422,3 +436,92 @@ class EventOut(BaseModel):
     @classmethod
     def of(cls, event: TraceEvent) -> EventOut:
         return cls.model_validate(event)
+
+
+# ------------------------------------------------------------- model config
+
+ConfigSource = Literal["page", "env"]
+
+
+class ProviderKeyOut(BaseModel):
+    """One provider's API key status; the key itself never crosses the wire."""
+
+    provider: str
+    env_var: str
+    set: bool
+    """True when a key is active from either source."""
+    source: ConfigSource | None = None
+    hint: str | None = Field(default=None, description="Masked tail of the active key")
+
+
+class ModelConfigOut(BaseModel):
+    model: str | None = None
+    """Console-set default model spec (None = not overridden from the page)."""
+    model_source: ConfigSource
+    effective_model: str
+    """The model spec actually used when none is given."""
+    local_base_url: str | None = None
+    local_base_url_source: ConfigSource | None = None
+    api_keys: list[ProviderKeyOut]
+
+
+class ModelConfigUpdate(BaseModel):
+    """Partial update; omitted (None) fields are left unchanged, "" clears."""
+
+    model: str | None = Field(
+        default=None,
+        description="Default model spec ('provider:model'); '' clears the override",
+    )
+    api_keys: dict[str, str | None] = Field(
+        default_factory=dict,
+        description="Per-provider keys; '' or null clears the provider's override",
+    )
+    local_base_url: str | None = Field(
+        default=None,
+        description="Local provider endpoint; '' clears the override",
+    )
+
+
+class ModelVerifyRequest(BaseModel):
+    """Build the (overridden) model and round-trip a tiny completion."""
+
+    model: str | None = Field(default=None, description="Defaults to the effective spec")
+
+
+class ModelVerifyOut(BaseModel):
+    ok: bool
+    model: str | None = None
+    latency_ms: float | None = None
+    reply: str | None = None
+    error: str | None = None
+
+
+# ------------------------------------------------------------------ projects
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str = Field(min_length=1, description="Display name of the project")
+    path: str = Field(
+        min_length=1,
+        description="Absolute host directory the agent works in (created if missing)",
+    )
+
+
+class ProjectOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    path: str
+    created_at: Any
+    metadata: dict[str, Any]
+
+    @classmethod
+    def of(cls, project: Project) -> ProjectOut:
+        return cls(
+            id=project.id,
+            name=project.name,
+            path=str(project.path),
+            created_at=project.created_at,
+            metadata=project.metadata,
+        )

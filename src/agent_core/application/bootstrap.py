@@ -19,6 +19,7 @@ from agent_core.application.service import AgentCoreService
 from agent_core.builtins import register_builtin_tools
 from agent_core.builtins.schedules import make_create_schedule
 from agent_core.builtins.skills import make_install_skill
+from agent_core.config.model_config import load_model_config
 from agent_core.config.settings import Settings, apply_proxy, get_settings
 from agent_core.domain.mcp import MCPServerStatus
 from agent_core.mcp.credentials import EnvCredentialResolver
@@ -28,7 +29,13 @@ from agent_core.observability.trace import InMemoryTracer
 from agent_core.permissions.approval import ApprovalManager
 from agent_core.persistence import PersistingTracer, open_store
 from agent_core.persistence.store import SqliteStore
-from agent_core.registries import AgentRegistry, MCPRegistry, SkillRegistry, ToolRegistry
+from agent_core.registries import (
+    AgentRegistry,
+    MCPRegistry,
+    ProjectRegistry,
+    SkillRegistry,
+    ToolRegistry,
+)
 from agent_core.runtime.runtime import AgentRuntime
 
 
@@ -41,20 +48,41 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     resolved = settings or get_settings()
     apply_proxy(resolved)
     store = open_store(resolved.database_url)
+    # Console-set model overrides (default spec, API keys, local endpoint) are
+    # consulted by build_model before env/Settings — load them before anything
+    # can build a model.
+    load_model_config(store)
     agents = AgentRegistry(store)
     tools = ToolRegistry(store)
     skills = SkillRegistry(store)
     register_builtin_tools(tools, resolved)
+    if resolved.sandbox != "podman":
+        # Host backend: run_code driving a system package manager touches the
+        # host itself, so those commands need a human even though run_code is
+        # otherwise below the approval risk floor.
+        from agent_core.builtins.code import RUN_CODE_TOOL, is_system_install
+        from agent_core.permissions.arg_risk import register_argument_risk_rule
+
+        register_argument_risk_rule(
+            RUN_CODE_TOOL, lambda args: is_system_install(str(args.get("command", "")))
+        )
 
     approvals = ApprovalManager(store)
+    projects = ProjectRegistry(store)
     memory_tracer = InMemoryTracer()
     tracer: InMemoryTracer | PersistingTracer = memory_tracer
     if store is not None:
-        _restore(store, agents=agents, tools=tools, skills=skills, approvals=approvals)
+        _restore(
+            store, agents=agents, tools=tools, skills=skills, approvals=approvals,
+            projects=projects,
+        )
         tracer = PersistingTracer(memory_tracer, store)
         tracer.restore()  # re-seed event history so run outputs stay queryable
 
-    runtime = AgentRuntime(agents, tools, skills, tracer=tracer, approvals=approvals, store=store)
+    runtime = AgentRuntime(
+        agents, tools, skills, tracer=tracer, approvals=approvals, store=store,
+        projects=projects,
+    )
     if store is not None:
         runtime.hydrate()
     mcp_registry = MCPRegistry(store)
@@ -101,9 +129,11 @@ def _restore(
     tools: ToolRegistry,
     skills: SkillRegistry,
     approvals: ApprovalManager,
+    projects: ProjectRegistry,
 ) -> None:
     """Replay persisted facts into the in-memory components."""
     agents.hydrate()
     tools.hydrate()  # definitions only — handlers are process-local callables
     skills.hydrate()
     approvals.hydrate()
+    projects.hydrate()

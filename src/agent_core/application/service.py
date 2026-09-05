@@ -8,6 +8,7 @@ frontends (CLI, gRPC, queues) reuse the same seam.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from agent_core.application.scheduler import ScheduleManager
@@ -15,8 +16,9 @@ from agent_core.domain.action import ApprovalRequest, ApprovalStatus
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition
 from agent_core.domain.metrics import RunUsage
+from agent_core.domain.project import Project
 from agent_core.domain.schedule import Schedule
-from agent_core.domain.task import Run, Task
+from agent_core.domain.task import Run, Task, new_id
 from agent_core.domain.trace import EventType, TraceEvent
 from agent_core.errors.exceptions import ApprovalError
 from agent_core.mcp.manager import MCPManager
@@ -74,10 +76,13 @@ class AgentCoreService:
         parent_run_id: str | None = None,
         wait: bool = False,
         metadata: dict[str, Any] | None = None,
+        project_id: str | None = None,
     ) -> Task:
         """Start a new conversation; with ``wait`` return it fully answered."""
         resolved_agent = agent_id or self.default_agent()
-        task = self.runtime.create_conversation(resolved_agent, task_input, metadata=metadata)
+        task = self.runtime.create_conversation(
+            resolved_agent, task_input, metadata=metadata, project_id=project_id
+        )
         run = self.runtime.task_active_run(task.id)
         if run is not None:
             execution = self.runtime.submit_run(run)
@@ -87,6 +92,27 @@ class AgentCoreService:
 
     def get_task(self, task_id: str) -> Task:
         return self.runtime.get_task(task_id)
+
+    def task_root(self, task_id: str) -> Path | None:
+        """The task's working root: project dir when bound, else None (default)."""
+        return self.runtime.task_root(task_id)
+
+    # ---------------------------------------------------------------- projects
+
+    def list_projects(self) -> list[Project]:
+        return self.runtime.projects.list()
+
+    def create_project(self, name: str, path: Path) -> Project:
+        """Register a host directory as a project (created if missing)."""
+        directory = Path(path).expanduser()
+        directory.mkdir(parents=True, exist_ok=True)
+        project = Project(id=new_id(), name=name, path=directory)
+        self.runtime.projects.register(project)
+        return project
+
+    def delete_project(self, project_id: str) -> Project:
+        """Remove the binding; tasks bound to it fall back to their default dir."""
+        return self.runtime.projects.remove(project_id)
 
     def list_tasks(self, agent_id: str | None = None) -> list[Task]:
         tasks = self.runtime.list_tasks()
