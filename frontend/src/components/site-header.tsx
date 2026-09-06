@@ -95,7 +95,11 @@ export function SiteHeader({
           </div>
         )}
         {taskId && run?.error && (
-          <span className="hidden truncate text-xs text-destructive lg:inline">{run.error}</span>
+          // inline-block (not inline) so truncate can actually clip; the raw
+          // error can be a 600-char JSON blob that would blow up the header.
+          <span className="hidden max-w-md truncate text-xs text-destructive lg:inline-block" title={run.error}>
+            {run.error.length > 140 ? `${run.error.slice(0, 140)}…` : run.error}
+          </span>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2 px-3">

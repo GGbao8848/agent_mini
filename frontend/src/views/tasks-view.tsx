@@ -345,6 +345,22 @@ function ChatThread({ task }: { task: Task }) {
     return map
   }, [taskArtifacts.data])
 
+  // Failed/cancelled runs have no assistant turn — surface their error inline
+  // next to the user message that started them, instead of only in the header.
+  const failedRunErrors = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const event of events) {
+      if (
+        (event.event_type === "run_failed" || event.event_type === "run_cancelled") &&
+        event.run_id &&
+        event.error
+      ) {
+        map.set(event.run_id, event.error)
+      }
+    }
+    return map
+  }, [events])
+
   const activeRunId = current.active_run_id ?? null
   const running =
     activeRunId != null && !TERMINAL_RUN_STATUSES.has(current.status)
@@ -409,6 +425,13 @@ function ChatThread({ task }: { task: Task }) {
           )}
           {[...current.turns].reverse().map((turn) => {
             const runId = typeof turn.metadata?.run_id === "string" ? turn.metadata.run_id : null
+            const failedError = runId ? failedRunErrors.get(runId) : undefined
+            const hasAssistantReply = current.turns.some(
+              (t) =>
+                t.role === "assistant" &&
+                typeof t.metadata?.run_id === "string" &&
+                t.metadata.run_id === runId,
+            )
             return (
               <React.Fragment key={turn.id}>
                 {turn.role === "assistant" && (
@@ -429,7 +452,19 @@ function ChatThread({ task }: { task: Task }) {
                     {runId && <RunStatsLine runId={runId} />}
                   </div>
                 )}
-                {turn.role === "user" && <Bubble role="user" text={turn.content} />}
+                {turn.role === "user" && (
+                  <div className="flex flex-col gap-1">
+                    <Bubble role="user" text={turn.content} />
+                    {failedError && !hasAssistantReply && (
+                      <p
+                        className="max-w-[85%] px-1 text-xs text-destructive"
+                        title={failedError}
+                      >
+                        运行失败：{failedError.length > 200 ? `${failedError.slice(0, 200)}…` : failedError}
+                      </p>
+                    )}
+                  </div>
+                )}
               </React.Fragment>
             )
           })}
