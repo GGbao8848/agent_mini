@@ -43,6 +43,15 @@ _PROBED_TOOLS = (
     "libreoffice", "pandoc", "curl", "wget",
 )
 
+# Installed once when the agent env is first created. Without this, every
+# fresh deployment's first document task pays a pip install round-trip (or,
+# worse, wanders into `pip install` from run_code). Best-effort: a failed
+# seed never breaks env creation — the agent can ensure_packages later.
+_SEED_PACKAGES = (
+    "python-pptx", "openpyxl", "matplotlib", "pandas", "requests",
+    "beautifulsoup4", "pillow",
+)
+
 # Probe result cache: the host's CLI inventory doesn't change within a process.
 _probe_cache: dict[str, Any] | None = None
 
@@ -74,6 +83,11 @@ def ensure_agent_env(settings: Settings) -> Path:
             f"Failed to create the agent Python environment at {env_dir}: {exc}",
             details={"env_dir": str(env_dir)},
         ) from exc
+    try:
+        install_packages(env_dir, list(_SEED_PACKAGES), timeout=300.0)
+    except Exception:
+        # Seed is a convenience; the env itself is valid without it.
+        pass
     return env_dir
 
 

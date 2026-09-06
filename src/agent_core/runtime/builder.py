@@ -26,7 +26,7 @@ from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.help_tool import autonomy_prompt_addendum
 from agent_core.runtime.middleware import build_middleware
 from agent_core.runtime.model import ModelFactory, build_model
-from agent_core.runtime.paths import current_task_dir
+from agent_core.runtime.paths import current_task_dir, environment_note
 from agent_core.runtime.tooling import ToolFactory, make_direct_tool
 
 CompiledGraph = CompiledStateGraph[Any, Any, Any, Any]
@@ -77,6 +77,14 @@ class AgentBuilder:
             # keep the agent from spinning or guessing instead of asking.
             tools = tools + ([self._help_tool] if self._help_tool is not None else [])
             system_prompt = (system_prompt or "") + autonomy_prompt_addendum()
+        # Environment note regenerated per build: it reflects the ACTUAL
+        # working root (project dir when bound, sandbox mapping otherwise) so
+        # agents never chase stale hard-coded paths like /work, and it carries
+        # the hygiene rules (no full-disk find, ensure_packages first).
+        settings = self._settings or get_settings()
+        system_prompt = (system_prompt or "") + environment_note(
+            current_task_dir(Path(settings.workspace_dir)), settings
+        )
         return create_deep_agent(
             model=self._model_factory(spec.model),
             tools=tools,

@@ -25,10 +25,7 @@ from agent_core.domain.resilience import ResiliencePolicy, SummarizationPolicy
 LOG_DIR = Path("logs/e2e")
 
 AVATAR_SYSTEM_PROMPT = """你是用户的个人 AI 分身，独立完成长任务。工作约定：
-- 工作目录：你的任务目录在沙箱里就是 `/work`（也是文件工具的根目录）。
-  所有文件一律写相对路径（如 video/build.py），不要用 `/home/...` 或
-  `.../workspace/...` 这类宿主机绝对路径——沙箱里它们不存在，用了会找不到文件；
-  run_code 的 bash 也在 `/work` 下执行，`pwd` 就是 `/work`。
+- 工作目录：以系统提示中的"运行环境"说明为准，所有文件一律写相对路径。
 - 写代码：用文件工具写脚本，再用 run_code 执行（`python xxx.py`）。
   宿主机已有的库直接 import 就能用；遇到缺的库，先用 ensure_packages
   工具声明需要的包（它会检查后只装缺的，装进 agent 专用环境），

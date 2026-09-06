@@ -116,3 +116,25 @@ class TestMetadata:
         registry = ToolRegistry()
         added: Any = register_builtin_tools(registry, code_settings(tmp_path, sandbox="podman"))
         assert "run_code" in added
+
+
+class TestEnvironmentNote:
+    def test_host_note_names_real_root_and_hygiene_rules(self, tmp_path: Path) -> None:
+        from agent_core.runtime.paths import environment_note
+
+        settings = code_settings(tmp_path)
+        root = tmp_path / "proj"
+        note = environment_note(root, settings)
+
+        assert str(root) in note  # the agent is told the REAL working directory
+        assert "find /" in note  # full-disk scans are explicitly banned
+        assert "ensure_packages" in note
+
+    def test_podman_note_keeps_work_mapping(self, tmp_path: Path) -> None:
+        from agent_core.runtime.paths import environment_note
+
+        settings = code_settings(tmp_path, sandbox="podman")
+        note = environment_note(tmp_path, settings)
+
+        assert "/work" in note
+        assert str(tmp_path) not in note

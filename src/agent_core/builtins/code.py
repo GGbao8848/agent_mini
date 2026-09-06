@@ -200,7 +200,9 @@ def make_run_code(settings: Settings) -> tuple[ToolDefinition, Any]:
         description=(
             f"Run a shell command inside the agent workspace ({workspace}) with bash -lc. "
             f"{backend_note} Use it to execute scripts you wrote, build artifacts, inspect "
-            "files. Returns exit code + stdout/stderr; long output is truncated."
+            "files. All your files are in the working directory — use relative paths and "
+            "NEVER run `find /` or other full-disk scans (they take minutes and find "
+            "nothing). Returns exit code + stdout/stderr; long output is truncated."
         ),
         risk_level=RiskLevel.MEDIUM,
         source=ToolSource.PYTHON,
