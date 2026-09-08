@@ -49,6 +49,7 @@ import { excerpt, isTerminalTask } from "@/lib/tasks"
 import { cn } from "@/lib/utils"
 import type { Task } from "@/lib/types"
 import {
+  CalendarClockIcon,
   CalendarDaysIcon,
   ChevronRightIcon,
   CopyIcon,
@@ -164,6 +165,11 @@ function WorkspaceSection({
   // Collapsed projects: null = none collapsed (all open), otherwise the set.
   // Unrecorded ids default to open, so brand-new projects show expanded.
   const [collapsed, setCollapsed] = React.useState<Set<string> | null>(null)
+  // Schedule-run bar at the bottom of the task list: collapsed by default
+  // (automated runs are reference material, not the primary focus), with a
+  // per-schedule second level inside.
+  const [scheduleBarOpen, setScheduleBarOpen] = React.useState(false)
+  const [openScheduleGroups, setOpenScheduleGroups] = React.useState<Set<string> | null>(null)
 
   // Newest first; pinned conversations float to the top. Memoized on the raw
   // query data so the stable sort/map don't rebuild on every render.
@@ -186,6 +192,26 @@ function WorkspaceSection({
     }
     return map
   }, [sortedTasks])
+
+  // Schedule-triggered runs, grouped by their source schedule name.
+  const manualTasks = React.useMemo(
+    () => sortedTasks.filter((t) => !t.metadata?.source_schedule_id),
+    [sortedTasks],
+  )
+  const scheduleGroups = React.useMemo(() => {
+    const map = new Map<string, Task[]>()
+    for (const task of sortedTasks) {
+      const name = task.metadata?.source_schedule_name
+      if (typeof name !== "string" || !task.metadata?.source_schedule_id) continue
+      if (!map.has(name)) map.set(name, [])
+      map.get(name)!.push(task)
+    }
+    return [...map.entries()]
+  }, [sortedTasks])
+  const scheduleRunCount = React.useMemo(
+    () => scheduleGroups.reduce((n, [, list]) => n + list.length, 0),
+    [scheduleGroups],
+  )
 
   const isOpen = (projectId: string) => collapsed === null || !collapsed.has(projectId)
 
@@ -287,7 +313,7 @@ function WorkspaceSection({
                   </p>
                 </SidebarMenuItem>
               )}
-              {sortedTasks.map((task) => (
+              {manualTasks.map((task) => (
                 <TaskRow
                   key={task.id}
                   task={task}
@@ -296,6 +322,110 @@ function WorkspaceSection({
                   onContextMenu={openProjectMenu}
                 />
               ))}
+
+              {/* Schedule-fired runs live under one collapsible bar at the
+                  bottom, grouped per schedule (second collapse level). */}
+              {scheduleRunCount > 0 && (
+                <>
+                  <SidebarMenuItem>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={scheduleBarOpen}
+                      onClick={() => setScheduleBarOpen((v) => !v)}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          setScheduleBarOpen((v) => !v)
+                        }
+                      }}
+                      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2"
+                    >
+                      <ChevronRightIcon
+                        className={cn(
+                          "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                          scheduleBarOpen && "rotate-90",
+                        )}
+                      />
+                      <CalendarClockIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                        日程任务
+                      </span>
+                      <span className="shrink-0 text-[0.65rem] text-muted-foreground/70">
+                        {scheduleRunCount}
+                      </span>
+                    </div>
+                  </SidebarMenuItem>
+                  {scheduleBarOpen &&
+                    scheduleGroups.map(([name, runs]) => {
+                      const groupOpen = openScheduleGroups === null || openScheduleGroups.has(name)
+                      return (
+                        <React.Fragment key={name}>
+                          <SidebarMenuItem>
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              aria-expanded={groupOpen}
+                              onClick={() =>
+                                setOpenScheduleGroups((prev) => {
+                                  const base =
+                                    prev === null
+                                      ? new Set(scheduleGroups.map(([n]) => n))
+                                      : new Set(prev)
+                                  if (base.has(name)) base.delete(name)
+                                  else base.add(name)
+                                  return base
+                                })
+                              }
+                              onKeyDown={(e) => {
+                                if (e.target !== e.currentTarget) return
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault()
+                                  setOpenScheduleGroups((prev) => {
+                                    const base =
+                                      prev === null
+                                        ? new Set(scheduleGroups.map(([n]) => n))
+                                        : new Set(prev)
+                                    if (base.has(name)) base.delete(name)
+                                    else base.add(name)
+                                    return base
+                                  })
+                                }
+                              }}
+                              className="flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pl-6 pr-2 text-left text-xs outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2"
+                              title={name}
+                            >
+                              <ChevronRightIcon
+                                className={cn(
+                                  "size-3 shrink-0 text-muted-foreground transition-transform",
+                                  groupOpen && "rotate-90",
+                                )}
+                              />
+                              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                                {name}
+                              </span>
+                              <span className="shrink-0 text-[0.65rem] text-muted-foreground/70">
+                                {runs.length}
+                              </span>
+                            </div>
+                          </SidebarMenuItem>
+                          {groupOpen &&
+                            runs.map((task) => (
+                              <TaskRow
+                                key={task.id}
+                                task={task}
+                                inset
+                                selectedTaskId={selectedTaskId}
+                                onSelectTask={onSelectTask}
+                                onContextMenu={openProjectMenu}
+                              />
+                            ))}
+                        </React.Fragment>
+                      )
+                    })}
+                </>
+              )}
             </>
           )}
 
