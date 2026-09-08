@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { useCancelTask, useDeleteTask, useRun, useTask } from "@/hooks/use-console"
+import { useDeleteTask, useRun, useTask } from "@/hooks/use-console"
 import { TERMINAL_RUN_STATUSES } from "@/lib/types"
 import {
   AlertDialog,
@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { KeyRoundIcon, TriangleAlertIcon, CircleStopIcon, Trash2Icon, CircleCheckIcon, CircleAlertIcon } from "lucide-react"
+import { KeyRoundIcon, TriangleAlertIcon, Trash2Icon, CircleCheckIcon, CircleAlertIcon } from "lucide-react"
 import type { ConnState } from "@/hooks/use-console"
 
 const CONN_BADGE: Record<ConnState, { label: string; className: string }> = {
@@ -69,9 +69,7 @@ export function SiteHeader({
   /** The currently open conversation (from the "新建任务" view); live stats shown when set. */
   taskId?: string | null
 }) {
-  const [stopping, setStopping] = React.useState(false)
   const [removing, setRemoving] = React.useState(false)
-  const cancel = useCancelTask()
   const deleteTask = useDeleteTask()
 
   // The open conversation's live state: task → active run. The event stream
@@ -106,40 +104,6 @@ export function SiteHeader({
         {taskId && <LiveTaskStats taskId={taskId} />}
         {taskId && run && (
           <>
-            {running && (
-              <>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  disabled={cancel.isPending}
-                  onClick={() => setStopping(true)}
-                >
-                  <CircleStopIcon data-icon="inline-start" />
-                  {cancel.isPending ? "正在停止…" : "停止"}
-                </Button>
-                <AlertDialog open={stopping} onOpenChange={(open) => !open && setStopping(false)}>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>停止任务？</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        将中断当前运行，已生成的产物会保留。停止后可在对话里继续下达指令。
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>取消</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => {
-                          cancel.mutate({ taskId: run.task_id })
-                          setStopping(false)
-                        }}
-                      >
-                        停止
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </>
-            )}
             <Button
               variant="ghost"
               size="sm"

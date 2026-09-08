@@ -4,10 +4,22 @@ import { ApprovalCard } from "@/components/runs/approval-card"
 import { RunActivity, RunArtifacts } from "@/components/runs/run-activity"
 import { RunStatsLine } from "@/components/runs/task-stats"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
   useApprovals,
+  useCancelTask,
+  useMarkTaskRead,
   useProjects,
   useRun,
   useSendFollowup,
@@ -22,6 +34,7 @@ import { TERMINAL_RUN_STATUSES, type Artifact, type RunEvent, type Task } from "
 import { cn } from "@/lib/utils"
 import {
   ArrowUpIcon,
+  CircleStopIcon,
   FolderIcon,
   PaperclipIcon,
   XIcon,
@@ -92,11 +105,16 @@ function Composer({
   placeholder,
   pending,
   onSubmit,
+  running,
+  onStop,
   children,
 }: {
   placeholder: string
   pending: boolean
   onSubmit: (text: string, attachmentPaths: string[]) => void
+  /** The agent is replying: the send slot turns into a stop button. */
+  running?: boolean
+  onStop?: () => void
   children?: React.ReactNode
 }) {
   const [text, setText] = React.useState("")
@@ -214,9 +232,18 @@ function Composer({
               e.target.value = ""
             }}
           />
-          <Button size="icon-sm" disabled={pending || !hasContent} onClick={() => void submit()}>
-            <ArrowUpIcon />
-            <span className="sr-only">发送</span>
+          <Button
+            size="icon-sm"
+            variant={running ? "destructive" : "default"}
+            disabled={!running && (pending || !hasContent)}
+            onClick={() => {
+              if (running) onStop?.()
+              else void submit()
+            }}
+            title={running ? "停止运行" : "发送"}
+          >
+            {running ? <CircleStopIcon /> : <ArrowUpIcon />}
+            <span className="sr-only">{running ? "停止" : "发送"}</span>
           </Button>
         </div>
       </div>
@@ -290,7 +317,12 @@ function EmptyState({
     <div className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
       <div className="flex flex-col items-center gap-2 text-center">
         <div className="flex size-12 items-center justify-center overflow-hidden rounded-xl bg-muted">
-          <img src="./app-icon.png" alt="Agent Console" className="size-full object-cover" />
+          <img
+            src="./app-icon.png"
+            alt="Agent Console"
+            className="size-full object-contain p-0.5"
+            draggable={false}
+          />
         </div>
         <h2 className="text-lg font-medium">给分身派个任务</h2>
         <p className="text-sm text-muted-foreground">
@@ -321,8 +353,10 @@ function ChatThread({ task }: { task: Task }) {
   const current = fresh ?? task
   const approvals = useApprovals()
   const followup = useSendFollowup()
+  const cancel = useCancelTask()
   const events = useTaskEvents(task.id)
   const taskArtifacts = useTaskArtifacts(task.id)
+  const [confirmStop, setConfirmStop] = React.useState(false)
 
   // Group the conversation-wide feeds by the run that produced them, so each
   // assistant turn shows exactly its own activity and deliverables.
@@ -455,6 +489,23 @@ function ChatThread({ task }: { task: Task }) {
                 {turn.role === "user" && (
                   <div className="flex flex-col gap-1">
                     <Bubble role="user" text={turn.content} />
+                    {/* A run that ended without answering (cancelled or failed
+                        mid-flight) has no assistant turn to hang its work on —
+                        keep its activity and any products visible here as a
+                        settled block. The still-running case is already shown
+                        in the header strip above the thread. */}
+                    {runId && !hasAssistantReply && !(running && runId === activeRunId) && (
+                      <div className="max-w-[85%]">
+                        <RunActivity
+                          events={eventsByRun.get(runId) ?? []}
+                          running={false}
+                        />
+                        <RunArtifacts
+                          runId={runId}
+                          artifacts={artifactsByRun.get(runId) ?? []}
+                        />
+                      </div>
+                    )}
                     {failedError && !hasAssistantReply && (
                       <p
                         className="max-w-[85%] px-1 text-xs text-destructive"
@@ -485,12 +536,37 @@ function ChatThread({ task }: { task: Task }) {
           <Composer
             placeholder="继续这条对话…（分身带着全部上下文）"
             pending={followup.isPending}
+            running={running}
+            onStop={() => setConfirmStop(true)}
             onSubmit={(text, attachments) =>
               followup.mutate({ taskId: current.id, input: text, attachments })
             }
           />
         </div>
       </div>
+
+      <AlertDialog open={confirmStop} onOpenChange={(open) => !open && setConfirmStop(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>停止任务？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将中断当前运行，已生成的产物会保留。停止后可在对话里继续下达指令。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={cancel.isPending}
+              onClick={() => {
+                cancel.mutate({ taskId: current.id })
+                setConfirmStop(false)
+              }}
+            >
+              停止
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
@@ -507,8 +583,16 @@ export function TasksView({
   onConsumePreset?: () => void
 }) {
   const tasks = useTasks()
+  const markRead = useMarkTaskRead()
+  const markReadMutate = markRead.mutate
   const taskList = tasks.data ?? []
   const listTask = taskList.find((t) => t.id === selectedId) ?? null
+
+  // Opening a conversation consumes its unread state (green sidebar dot), and
+  // follow-up replies while it stays open are read as they land.
+  React.useEffect(() => {
+    if (listTask?.has_unread) markReadMutate(listTask.id)
+  }, [listTask?.id, listTask?.has_unread, markReadMutate])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
