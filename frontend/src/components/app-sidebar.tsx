@@ -128,7 +128,10 @@ function TaskRow({
       >
         <RowIndicator task={task} />
         <span className="min-w-0 flex-1 truncate text-xs">{excerpt(task, 60)}</span>
-        <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground">
+        <span
+          className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground"
+          title={new Date(task.created_at).toLocaleString()}
+        >
           {fmtTimeShort(task.created_at)}
         </span>
       </SidebarMenuButton>

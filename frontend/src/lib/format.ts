@@ -6,8 +6,30 @@ export function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+/** Relative age for compact list rows: 刚刚 / n分 / n时 / n天 / n月 / n年 —
+ *  the largest unit that fits, relative to now. Day/month/year buckets are
+ *  calendar-accurate, not 30-day approximations. */
 export function fmtTimeShort(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const then = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - then.getTime()
+  if (diffMs < 60_000) return '刚刚'
+  const minutes = Math.floor(diffMs / 60_000)
+  if (minutes < 60) return `${minutes}分`
+  const hours = Math.floor(diffMs / 3_600_000)
+  if (hours < 24) return `${hours}时`
+  const days = calendarDaysBetween(then, now)
+  if (days < 30) return `${days}天`
+  const months = (now.getFullYear() - then.getFullYear()) * 12 + (now.getMonth() - then.getMonth())
+  if (months < 12) return `${months}月`
+  return `${now.getFullYear() - then.getFullYear()}年`
+}
+
+/** Whole days between two instants, comparing local calendar dates. */
+function calendarDaysBetween(from: Date, to: Date): number {
+  const a = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  const b = new Date(to.getFullYear(), to.getMonth(), to.getDate())
+  return Math.round((b.getTime() - a.getTime()) / 86_400_000)
 }
 
 export function fmtDateTime(iso: string): string {

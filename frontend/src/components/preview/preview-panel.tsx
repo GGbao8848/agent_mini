@@ -115,21 +115,62 @@ function DownloadCard({ target, reason }: { target: PreviewTarget; reason?: stri
 
 /* React.lazy needs a default-exported component; the factory loads the viewer
  * packages and resolves to one. pdf.worker is emitted as a static asset by
- * Vite's ?url import and referenced from the pdf plugin. */
+ * Vite's ?url import and referenced from the pdf plugin.
+ *
+ * The plugin list covers every format Open File Viewer ships (the small
+ * plugins — archive/email/drawing/gis/asset/audio… — only match their own
+ * extensions, so enabling them is harmless). Heavy renderers behind them
+ * (three, leaflet, hls.js, xlsx…) are runtime-import()'d by the library, so
+ * opening a preview pulls only the chunks that format needs. */
 const FileViewerLoaded = React.lazy(async () => {
   await import("@open-file-viewer/core/style.css")
-  const [{ FileViewer }, { imagePlugin, textPlugin, pdfPlugin, officePlugin }, worker] =
-    await Promise.all([
-      import("@open-file-viewer/react"),
-      import("@open-file-viewer/core"),
-      import("pdfjs-dist/build/pdf.worker.mjs?url"),
-    ])
-  const pdfWorkerSrc = worker.default
+  const [{ FileViewer }, viewerCore, worker] = await Promise.all([
+    import("@open-file-viewer/react"),
+    import("@open-file-viewer/core"),
+    import("pdfjs-dist/build/pdf.worker.mjs?url"),
+  ])
+  const {
+    imagePlugin,
+    textPlugin,
+    pdfPlugin,
+    officePlugin,
+    videoPlugin,
+    audioPlugin,
+    epubPlugin,
+    xpsPlugin,
+    archivePlugin,
+    emailPlugin,
+    drawingPlugin,
+    xmindPlugin,
+    ofdPlugin,
+    gisPlugin,
+    model3dPlugin,
+    assetPlugin,
+    cadPlugin,
+  } = viewerCore
   const plugins = [
     imagePlugin(),
     textPlugin(),
-    pdfPlugin({ workerSrc: pdfWorkerSrc }),
+    pdfPlugin({ workerSrc: worker.default }),
     officePlugin(),
+    videoPlugin(),
+    audioPlugin(),
+    // Text-first formats that also get specialized viewers: epub/archives/
+    // email/drawings/xmind/ofd/gis/assets/3d/CAD are all safe opt-ins —
+    // missing optional engines (e.g. mpegts.js for flv, LibreDWG for dwg)
+    // degrade to the library's own download/unsupported notice instead of
+    // breaking the pane.
+    epubPlugin(),
+    xpsPlugin(),
+    archivePlugin(),
+    emailPlugin(),
+    drawingPlugin(),
+    xmindPlugin(),
+    ofdPlugin(),
+    gisPlugin(),
+    model3dPlugin(),
+    assetPlugin(),
+    cadPlugin(),
   ]
   return {
     default: function FileViewerLoaded({ url, name, onError }: { url: string; name: string; onError?: () => void }) {
