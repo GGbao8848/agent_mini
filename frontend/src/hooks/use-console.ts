@@ -11,6 +11,7 @@ import {
   type Agent,
   type Approval,
   type Artifact,
+  type DirBrowse,
   type MCPServer,
   type ModelConfig,
   type ModelConfigUpdate,
@@ -454,4 +455,28 @@ export function useProjectManage() {
     onSuccess: invalidate,
   })
   return { create, remove }
+}
+
+/** Browse a host directory's subfolders (folder-picker for adding a project).
+ *  An empty path lists the home directory — always enabled while mounted. */
+export function useBrowseDir(path: string | null) {
+  return useQuery({
+    queryKey: ["dirs", path ?? ""],
+    queryFn: () =>
+      api.get<DirBrowse>(`/v1/dirs/browse?path=${encodeURIComponent(path ?? "")}`),
+    staleTime: 10_000,
+  })
+}
+
+/* --------------------------------------------------------- task actions */
+
+export function useMarkTaskRead() {
+  const queryClient = useQueryClient()
+  return useToastMutation<Task, string>({
+    mutationFn: (taskId) => api.post<Task>(`/v1/tasks/${taskId}/read`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      queryClient.invalidateQueries({ queryKey: ["task"] })
+    },
+  })
 }

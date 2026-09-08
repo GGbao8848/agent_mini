@@ -55,6 +55,7 @@ export interface Task {
   active_run_id: string | null
   created_at: string
   pinned: boolean
+  has_unread?: boolean
   metadata: Record<string, unknown>
 }
 
@@ -229,4 +230,15 @@ export interface ModelVerify {
   latency_ms?: number | null
   reply?: string | null
   error?: string | null
+}
+
+export interface DirEntry {
+  name: string
+  path: string
+}
+
+export interface DirBrowse {
+  path: string
+  parent: string | null
+  entries: DirEntry[]
 }

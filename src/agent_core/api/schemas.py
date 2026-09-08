@@ -123,6 +123,8 @@ class TaskOut(BaseModel):
     active_run_id: str | None
     created_at: Any
     pinned: bool = False
+    has_unread: bool = False
+    """A newer assistant reply exists past the human's read marker (sidebar dot)."""
     metadata: dict[str, Any]
 
     @classmethod
@@ -138,6 +140,7 @@ class TaskOut(BaseModel):
             active_run_id=active_run_id,
             created_at=task.created_at,
             pinned=task.pinned,
+            has_unread=task.has_unread,
             metadata=task.metadata,
         )
 

@@ -4,7 +4,7 @@ import * as React from "react"
 
 import { NavMain } from "@/components/nav-main"
 import { Button } from "@/components/ui/button"
-import { StatusDot } from "@/components/runs/status-dot"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,11 +16,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -29,7 +24,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Sidebar,
   SidebarContent,
@@ -42,8 +36,8 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
+  useBrowseDir,
   useDeleteTask,
   useProjectManage,
   useProjects,
@@ -52,17 +46,20 @@ import {
 } from "@/hooks/use-console"
 import { fmtTimeShort } from "@/lib/format"
 import { excerpt, isTerminalTask } from "@/lib/tasks"
+import { cn } from "@/lib/utils"
 import type { Task } from "@/lib/types"
 import {
   CalendarDaysIcon,
   ChevronRightIcon,
-  FolderIcon,
-  PlusIcon,
   CopyIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  Loader2Icon,
   PencilIcon,
   PinIcon,
   PlugIcon,
-  PlusCircleIcon,
+  PlusIcon,
   PuzzleIcon,
   SettingsIcon,
   Trash2Icon,
@@ -75,37 +72,33 @@ const data = {
     plan: "Agent Core",
   },
   navMain: [
-    {
-      title: "新建任务",
-      url: "#",
-      icon: <PlusCircleIcon />,
-    },
-    {
-      title: "日程",
-      url: "#",
-      icon: <CalendarDaysIcon />,
-    },
-    {
-      title: "技能",
-      url: "#",
-      icon: <PuzzleIcon />,
-    },
-    {
-      title: "MCP",
-      url: "#",
-      icon: <PlugIcon />,
-    },
-    {
-      title: "工具",
-      url: "#",
-      icon: <WrenchIcon />,
-    },
-    {
-      title: "模型配置",
-      url: "#",
-      icon: <SettingsIcon />,
-    },
+    { title: "新建任务", url: "#", icon: <PlusIcon /> },
+    { title: "日程", url: "#", icon: <CalendarDaysIcon /> },
+    { title: "技能", url: "#", icon: <PuzzleIcon /> },
+    { title: "MCP", url: "#", icon: <PlugIcon /> },
+    { title: "工具", url: "#", icon: <WrenchIcon /> },
+    { title: "模型配置", url: "#", icon: <SettingsIcon /> },
   ],
+}
+
+const RUNNING_STATUSES = new Set(["running", "planning", "created"])
+const ATTENTION_STATUSES = new Set(["waiting_approval", "needs_input"])
+
+/** Row status affordance: a live spinner while running, an amber dot when the
+ *  human's input is needed (approval / question), a green unread dot for new
+ *  replies, and nothing when the conversation is fully read. */
+function RowIndicator({ task }: { task: Task }) {
+  const running = RUNNING_STATUSES.has(task.status)
+  if (running) {
+    return <Loader2Icon className="size-3.5 shrink-0 animate-spin text-blue-500" />
+  }
+  if (ATTENTION_STATUSES.has(task.status)) {
+    return <span className="size-2 shrink-0 rounded-full bg-amber-500" />
+  }
+  if (task.has_unread) {
+    return <span className="size-2 shrink-0 rounded-full bg-emerald-500" />
+  }
+  return null
 }
 
 function TaskRow({
@@ -113,14 +106,17 @@ function TaskRow({
   selectedTaskId,
   onSelectTask,
   onContextMenu,
+  inset,
 }: {
   task: Task
   selectedTaskId: string | null
   onSelectTask: (taskId: string) => void
   onContextMenu: (e: React.MouseEvent, task: Task) => void
+  /** Render indented under a project (outline style). */
+  inset?: boolean
 }) {
   return (
-    <SidebarMenuItem>
+    <SidebarMenuItem className={cn(inset && "pl-4")}>
       <SidebarMenuButton
         isActive={task.id === selectedTaskId}
         onClick={() => onSelectTask(task.id)}
@@ -128,8 +124,8 @@ function TaskRow({
         className="gap-2 py-1.5"
         title={excerpt(task, 160)}
       >
-        <StatusDot status={task.status} />
-        <span className="flex-1 truncate text-xs">{excerpt(task, 60)}</span>
+        <RowIndicator task={task} />
+        <span className="min-w-0 flex-1 truncate text-xs">{excerpt(task, 60)}</span>
         <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground">
           {fmtTimeShort(task.created_at)}
         </span>
@@ -138,70 +134,71 @@ function TaskRow({
   )
 }
 
-/** Group tasks by their source (bound project first, then schedule); pinned
- *  first, then named groups, then the rest — each newest first. */
-function groupTasks(
-  tasks: Task[],
-  projectName: (projectId: string | null) => string | null,
-): { label: string | null; tasks: Task[] }[] {
-  const byTime = (a: Task, b: Task) => b.created_at.localeCompare(a.created_at)
-  const pinned = tasks.filter((t) => t.pinned).sort(byTime)
-  const rest = tasks.filter((t) => !t.pinned)
-  const groups = new Map<string | null, Task[]>()
-  for (const task of rest) {
-    const source =
-      projectName(task.project_id) ??
-      (task.metadata?.source_schedule_name as string | undefined) ??
-      null
-    const key = source ?? null
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(task)
-  }
-  const out: { label: string | null; tasks: Task[] }[] = []
-  if (pinned.length) out.push({ label: "置顶", tasks: pinned })
-  for (const [label, list] of groups) {
-    if (label !== null) out.push({ label, tasks: [...list].sort(byTime) })
-  }
-  const plain = groups.get(null) ?? []
-  if (plain.length) out.push({ label: null, tasks: [...plain].sort(byTime) })
-  return out
-}
-
-function SidebarTasks({
+/** The task/workspace section of the sidebar. Two flat modes:
+ *  - "任务": every conversation, newest first (pinned on top).
+ *  - "项目": host-folder projects; each row expands to its conversations,
+ *    indented underneath it (outline style). */
+function WorkspaceSection({
   selectedTaskId,
   onSelectTask,
+  onNewTaskInProject,
 }: {
   selectedTaskId: string | null
   onSelectTask: (taskId: string) => void
+  onNewTaskInProject: (projectId: string) => void
 }) {
   const tasks = useTasks()
   const projects = useProjects()
+  const manage = useProjectManage()
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
-  const list = tasks.data ?? []
+  const projectList = projects.data ?? []
 
-  // Right-click context menu state.
+  const [mode, setMode] = React.useState<"tasks" | "projects">("tasks")
   const [menu, setMenu] = React.useState<{ x: number; y: number; task: Task } | null>(null)
   const [renaming, setRenaming] = React.useState<Task | null>(null)
   const [renameValue, setRenameValue] = React.useState("")
   const [removing, setRemoving] = React.useState<Task | null>(null)
+  const [removingProject, setRemovingProject] = React.useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = React.useState(false)
+  // Collapsed projects: null = none collapsed (all open), otherwise the set.
+  // Unrecorded ids default to open, so brand-new projects show expanded.
+  const [collapsed, setCollapsed] = React.useState<Set<string> | null>(null)
 
-  const projectName = React.useCallback(
-    (projectId: string | null) =>
-      projectId
-        ? (projects.data?.find((p) => p.id === projectId)?.name ?? null)
-        : null,
-    [projects.data],
-  )
-  const groups = React.useMemo(
-    () => groupTasks(list, projectName),
-    [list, projectName],
+  // Newest first; pinned conversations float to the top. Memoized on the raw
+  // query data so the stable sort/map don't rebuild on every render.
+  const sortedTasks = React.useMemo(
+    () =>
+      [...(tasks.data ?? [])].sort(
+        (a, b) =>
+          Number(b.pinned) - Number(a.pinned) ||
+          b.created_at.localeCompare(a.created_at),
+      ),
+    [tasks.data],
   )
 
-  const openMenu = (e: React.MouseEvent, task: Task) => {
-    e.preventDefault()
-    setMenu({ x: e.clientX, y: e.clientY, task })
+  const tasksByProject = React.useMemo(() => {
+    const map = new Map<string | null, Task[]>()
+    for (const task of sortedTasks) {
+      const key = task.project_id ?? null
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(task)
+    }
+    return map
+  }, [sortedTasks])
+
+  const isOpen = (projectId: string) => collapsed === null || !collapsed.has(projectId)
+
+  const toggleProject = (projectId: string) => {
+    setCollapsed((prev) => {
+      const base = prev === null ? new Set<string>() : new Set(prev)
+      if (base.has(projectId)) base.delete(projectId)
+      else base.add(projectId)
+      return base
+    })
   }
+
+  // Right-click context menu: copy id / rename / pin / delete.
   React.useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
@@ -217,65 +214,212 @@ function SidebarTasks({
     try {
       await navigator.clipboard.writeText(task.id)
     } catch {
-      // clipboard may be unavailable; fall back to nothing
+      // clipboard may be unavailable; ignore
     }
     setMenu(null)
   }
 
+  const projectTasks = (projectId: string) => tasksByProject.get(projectId) ?? []
+
+  const openProjectMenu = (e: React.MouseEvent, task: Task) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setMenu({ x: e.clientX, y: e.clientY, task })
+  }
+
   return (
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel>任务</SidebarGroupLabel>
+      {/* Mode switch: 任务 / 项目 */}
+      <SidebarGroupLabel
+        render={
+          <div className="flex items-center gap-1">
+            <div className="flex flex-1 items-center gap-1 rounded-md bg-sidebar-accent/60 p-0.5">
+              {(
+                [
+                  { value: "tasks", label: "任务" },
+                  { value: "projects", label: "项目" },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => setMode(tab.value)}
+                  className={cn(
+                    "flex-1 rounded px-2 py-0.5 text-xs font-medium transition-colors",
+                    mode === tab.value
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-sidebar-accent-foreground",
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            {mode === "projects" && (
+              <button
+                type="button"
+                title="添加工作文件夹"
+                onClick={() => setPickerOpen(true)}
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              >
+                <FolderPlusIcon className="size-3.5" />
+              </button>
+            )}
+          </div>
+        }
+      />
+
       <SidebarGroupContent>
         <SidebarMenu>
-          {tasks.isLoading &&
-            Array.from({ length: 3 }).map((_, i) => (
-              <SidebarMenuItem key={i}>
-                <Skeleton className="h-8 w-full" />
-              </SidebarMenuItem>
-            ))}
-          {!tasks.isLoading && list.length === 0 && (
-            <p className="px-2 py-1 text-xs text-muted-foreground">还没有任务，派一个吧</p>
-          )}
-          {groups.map((group, gi) => (
-            <React.Fragment key={group.label ?? `plain-${gi}`}>
-              {group.label ? (
-                <Collapsible defaultOpen className="group/collapsible">
-                  <SidebarMenuItem>
-                    <CollapsibleTrigger render={<SidebarMenuButton className="gap-2 py-1 text-xs font-medium text-muted-foreground" />}>
-                      <ChevronRightIcon className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-90" />
-                      {group.label}
-                      <span className="ml-auto text-[0.65rem] text-muted-foreground/60">
-                        {group.tasks.length}
-                      </span>
-                    </CollapsibleTrigger>
+          {/* -------- TASK mode: flat list -------- */}
+          {mode === "tasks" && (
+            <>
+              {tasks.isLoading &&
+                Array.from({ length: 3 }).map((_, i) => (
+                  <SidebarMenuItem key={i}>
+                    <Skeleton className="h-7 w-full" />
                   </SidebarMenuItem>
-                  <CollapsibleContent>
-                    {group.tasks.map((task) => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        selectedTaskId={selectedTaskId}
-                        onSelectTask={onSelectTask}
-                        onContextMenu={openMenu}
-                      />
-                    ))}
-                  </CollapsibleContent>
-                </Collapsible>
-              ) : (
-                group.tasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    selectedTaskId={selectedTaskId}
-                    onSelectTask={onSelectTask}
-                    onContextMenu={openMenu}
-                  />
-                ))
+                ))}
+              {!tasks.isLoading && sortedTasks.length === 0 && (
+                <SidebarMenuItem>
+                  <p className="px-2 py-1 text-xs text-muted-foreground">
+                    还没有任务，派一个吧
+                  </p>
+                </SidebarMenuItem>
               )}
-            </React.Fragment>
-          ))}
+              {sortedTasks.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  selectedTaskId={selectedTaskId}
+                  onSelectTask={onSelectTask}
+                  onContextMenu={openProjectMenu}
+                />
+              ))}
+            </>
+          )}
+
+          {/* -------- PROJECT mode: projects with nested tasks -------- */}
+          {mode === "projects" && (
+            <>
+              {projects.isLoading && (
+                <SidebarMenuItem>
+                  <Skeleton className="mx-2 h-16 w-auto" />
+                </SidebarMenuItem>
+              )}
+              {!projects.isLoading && projectList.length === 0 && (
+                <SidebarMenuItem>
+                  <p className="px-2 py-1 text-xs text-muted-foreground">
+                    还没有项目，点上面的文件夹图标添加
+                  </p>
+                </SidebarMenuItem>
+              )}
+              {projectList.map((project) => {
+                const open = isOpen(project.id)
+                const children = projectTasks(project.id)
+                return (
+                  <React.Fragment key={project.id}>
+                    <SidebarMenuItem>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={open}
+                        onClick={() => toggleProject(project.id)}
+                        onKeyDown={(e) => {
+                          // Only the row itself toggles; let child buttons
+                          // (new task / remove) handle their own keys.
+                          if (e.target !== e.currentTarget) return
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            toggleProject(project.id)
+                          }
+                        }}
+                        className="group/project flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2"
+                        title={project.path}
+                      >
+                        <ChevronRightIcon
+                          className={cn(
+                            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                            open && "rotate-90",
+                          )}
+                        />
+                        {open ? (
+                          <FolderOpenIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                          {project.name}
+                        </span>
+                        {children.length > 0 && (
+                          <span className="shrink-0 text-[0.65rem] text-muted-foreground/70">
+                            {children.length}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          title={`在「${project.name}」里新建任务`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onNewTaskInProject(project.id)
+                          }}
+                          className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover/project:opacity-100 focus-visible:opacity-100"
+                        >
+                          <PlusIcon className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          title="移除项目（任务保留，回到任务目录）"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setRemovingProject(project.id)
+                          }}
+                          className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-destructive group-hover/project:opacity-100 focus-visible:opacity-100"
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </button>
+                      </div>
+                    </SidebarMenuItem>
+                    {open &&
+                      (children.length > 0 ? (
+                        children.map((task) => (
+                          <TaskRow
+                            key={task.id}
+                            task={task}
+                            inset
+                            selectedTaskId={selectedTaskId}
+                            onSelectTask={onSelectTask}
+                            onContextMenu={openProjectMenu}
+                          />
+                        ))
+                      ) : (
+                        <SidebarMenuItem>
+                          <p className="py-0.5 pl-9 text-[0.65rem] text-muted-foreground/70">
+                            这个项目还没有对话
+                          </p>
+                        </SidebarMenuItem>
+                      ))}
+                  </React.Fragment>
+                )
+              })}
+            </>
+          )}
         </SidebarMenu>
       </SidebarGroupContent>
+
+      {/* folder picker: add project by choosing a server folder */}
+      {pickerOpen && (
+        <FolderPicker
+          onPick={(path) => {
+            const name = path.split("/").filter(Boolean).pop() || path
+            manage.create.mutate(
+              { name, path },
+              { onSuccess: () => setPickerOpen(false) },
+            )
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
 
       {/* context menu */}
       {menu && (
@@ -286,9 +430,7 @@ function SidebarTasks({
         >
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
-            onClick={() => {
-              copyId(menu.task)
-            }}
+            onClick={() => copyId(menu.task)}
           >
             <CopyIcon className="size-3.5" />
             复制任务ID
@@ -328,10 +470,7 @@ function SidebarTasks({
       )}
 
       {/* rename dialog */}
-      <Dialog
-        open={renaming !== null}
-        onOpenChange={(open) => !open && setRenaming(null)}
-      >
+      <Dialog open={renaming !== null} onOpenChange={(open) => !open && setRenaming(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>重命名任务</DialogTitle>
@@ -349,8 +488,8 @@ function SidebarTasks({
             autoFocus
           />
           <DialogFooter>
-            <button
-              className="rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground"
+            <Button
+              size="sm"
               disabled={!renameValue.trim() || !renaming}
               onClick={() => {
                 if (renaming) {
@@ -360,16 +499,13 @@ function SidebarTasks({
               }}
             >
               保存
-            </button>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* delete confirm */}
-      <AlertDialog
-        open={removing !== null}
-        onOpenChange={(open) => !open && setRemoving(null)}
-      >
+      <AlertDialog open={removing !== null} onOpenChange={(open) => !open && setRemoving(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>删除任务「{removing?.title ?? ""}」？</AlertDialogTitle>
@@ -393,130 +529,116 @@ function SidebarTasks({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* remove-project confirm: tasks survive, they just unbind */}
+      <AlertDialog
+        open={removingProject !== null}
+        onOpenChange={(open) => !open && setRemovingProject(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>移除项目？</AlertDialogTitle>
+            <AlertDialogDescription>
+              只是解除这个文件夹的绑定：项目里的任务不会删除，会回到「任务」列表，之后的对话不再写入该文件夹。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (removingProject) manage.remove.mutate(removingProject)
+                setRemovingProject(null)
+              }}
+            >
+              移除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SidebarGroup>
   )
 }
 
-/** Sidebar projects section, ZCode-style: a "+" beside the section title adds
- *  a host folder; each project row spawns a bound task (+) or deletes itself.
- *  The tasks of a project show up in the task list, grouped under its name. */
-function SidebarProjects({ onNewTaskInProject }: { onNewTaskInProject: (projectId: string) => void }) {
-  const projects = useProjects()
-  const manage = useProjectManage()
-  const [adding, setAdding] = React.useState(false)
-  const [name, setName] = React.useState("")
-  const [path, setPath] = React.useState("")
-
-  const submit = () => {
-    if (!name.trim() || !path.trim()) return
-    manage.create.mutate(
-      { name: name.trim(), path: path.trim() },
-      {
-        onSuccess: () => {
-          setName("")
-          setPath("")
-          setAdding(false)
-        },
-      },
-    )
-  }
+/** Server folder picker: browse subdirectories, then confirm. Projects are
+ *  host folders so the browser cannot open a native picker — this walks the
+ *  server tree instead (read-only). The project name becomes the folder name.
+ *  ``path`` state is the source of truth for navigation and submission; the
+ *  fetched entry list only feeds the tree. */
+function FolderPicker({
+  onPick,
+  onClose,
+}: {
+  onPick: (path: string) => void
+  onClose: () => void
+}) {
+  const [path, setPath] = React.useState("") // "" = home, served by the backend
+  const browse = useBrowseDir(path)
+  const data = browse.data
+  const folderName = path.split("/").filter(Boolean).pop()
 
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel>
-        <span className="flex-1">项目</span>
-        <button
-          type="button"
-          title="添加文件夹（项目）"
-          onClick={() => setAdding(true)}
-          className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-        >
-          <PlusIcon className="size-3.5" />
-        </button>
-      </SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {(projects.data ?? []).map((project) => (
-            <SidebarMenuItem key={project.id}>
-              <div className="group/project flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-sidebar-accent">
-                <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate" title={project.path}>
-                  {project.name}
-                </span>
-                <button
-                  type="button"
-                  title={`在「${project.name}」里新建任务`}
-                  onClick={() => onNewTaskInProject(project.id)}
-                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/project:opacity-100"
-                >
-                  <PlusIcon className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  title="移除项目（任务保留，回到任务目录）"
-                  onClick={() => manage.remove.mutate(project.id)}
-                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/project:opacity-100"
-                >
-                  <Trash2Icon className="size-3.5" />
-                </button>
-              </div>
-            </SidebarMenuItem>
-          ))}
-          {(projects.data ?? []).length === 0 && (
-            <SidebarMenuItem>
-              <span className="px-2 py-1 text-xs text-muted-foreground">
-                点右上角 + 添加工作文件夹
-              </span>
-            </SidebarMenuItem>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="flex max-h-[80vh] flex-col gap-3 sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>选择工作文件夹</DialogTitle>
+          <DialogDescription>
+            项目名使用所选文件夹的名称。绑定后，该项目的对话直接在这个文件夹里读写文件。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-1 rounded-md border bg-muted/40 px-1 py-0.5 font-mono text-xs">
+          <button
+            type="button"
+            onClick={() => data?.parent && setPath(data.parent)}
+            disabled={!data?.parent || browse.isFetching}
+            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+            title="上一级"
+          >
+            <ChevronRightIcon className="size-3.5 -rotate-90" />
+          </button>
+          <span className="min-w-0 flex-1 truncate px-1" title={data?.path ?? path}>
+            {data?.path ?? (path || "…")}
+          </span>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+          {browse.isFetching && <Skeleton className="h-10 w-full" />}
+          {browse.error && (
+            <p className="px-1 py-2 text-xs text-destructive">
+              {browse.error instanceof Error ? browse.error.message : String(browse.error)}
+            </p>
           )}
-        </SidebarMenu>
-      </SidebarGroupContent>
-      <Dialog open={adding} onOpenChange={setAdding}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>添加项目文件夹</DialogTitle>
-            <DialogDescription>
-              绑定项目的对话直接在这个文件夹里读写文件、执行命令。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="sidebar-project-name">名称</Label>
-              <Input
-                id="sidebar-project-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="例如：画册小程序"
-                onKeyDown={(e) => e.key === "Enter" && submit()}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="sidebar-project-path">服务器上的文件夹（绝对路径）</Label>
-              <Input
-                id="sidebar-project-path"
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-                placeholder="/Users/you/mycode/my-app"
-                className="font-mono"
-                onKeyDown={(e) => e.key === "Enter" && submit()}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setAdding(false)}>
-              取消
-            </Button>
-            <Button
-              size="sm"
-              disabled={manage.create.isPending || !name.trim() || !path.trim()}
-              onClick={submit}
+          {!browse.isFetching && data && data.entries.length === 0 && (
+            <p className="px-1 py-2 text-xs text-muted-foreground">这个文件夹里没有子目录</p>
+          )}
+          {(data?.entries ?? []).map((entry) => (
+            <button
+              key={entry.path}
+              type="button"
+              onClick={() => setPath(entry.path)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+              title={entry.path}
             >
-              添加
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </SidebarGroup>
+              <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+            </button>
+          ))}
+        </div>
+        <DialogFooter className="items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            将添加：{folderName || "…"}
+          </span>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            size="sm"
+            disabled={!folderName || browse.isFetching}
+            onClick={() => folderName && onPick(path)}
+          >
+            选择此文件夹
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -540,10 +662,15 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" className="pointer-events-none" tabIndex={-1}>
-              <div className="flex aspect-square size-8 items-center justify-center overflow-hidden rounded-lg bg-sidebar-primary">
-                <img src="./app-icon.png" alt="Agent Console" className="size-full object-cover" />
+              <div className="flex aspect-square size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sidebar-primary">
+                <img
+                  src="./app-icon.png"
+                  alt="Agent Console"
+                  className="size-full object-contain"
+                  draggable={false}
+                />
               </div>
-              <div className="grid flex-1 text-left text-sm leading-tight">
+              <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                 <span className="truncate font-medium">{data.brand.name}</span>
                 <span className="truncate text-xs">{data.brand.plan}</span>
               </div>
@@ -559,8 +686,11 @@ export function AppSidebar({
             onSelect: () => onViewChange(item.title),
           }))}
         />
-        <SidebarProjects onNewTaskInProject={onNewTaskInProject} />
-        <SidebarTasks selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} />
+        <WorkspaceSection
+          selectedTaskId={selectedTaskId}
+          onSelectTask={onSelectTask}
+          onNewTaskInProject={onNewTaskInProject}
+        />
       </SidebarContent>
       <SidebarRail />
     </Sidebar>

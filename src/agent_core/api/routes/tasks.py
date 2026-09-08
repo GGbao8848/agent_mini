@@ -150,6 +150,13 @@ def update_task(task_id: str, payload: TaskUpdateRequest, service: ServiceDep) -
     return _conversation_out(service, task.id)
 
 
+@router.post("/{task_id}/read", response_model=TaskOut)
+def mark_task_read(task_id: str, service: ServiceDep) -> TaskOut:
+    """Advance the conversation's read marker to its latest turn."""
+    task = service.mark_task_read(task_id)
+    return _conversation_out(service, task.id)
+
+
 @router.delete("/{task_id}", status_code=204)
 def delete_task(task_id: str, service: ServiceDep) -> None:
     """Delete a conversation and its runs (409 while the active run is live)."""

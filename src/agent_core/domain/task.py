@@ -18,7 +18,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from agent_core.domain.metrics import RunUsage
 from agent_core.errors.exceptions import StateError
@@ -114,7 +114,42 @@ class Task(BaseModel):
     turns: list[Turn] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
     pinned: bool = False
+    last_read_turn_id: str | None = None
+    """Turn id up to which the human has read this conversation. Tracks "unread"
+    state for the sidebar: turns (or a running status) after this marker make
+    the task show a green dot until the conversation is opened."""
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _default_read_marker(self) -> Task:
+        """Backfill the read marker for conversations that never set one.
+
+        Pre-existing tasks and brand-new conversations (whose last turn is the
+        opening message) come in read up to their current last turn — the agent
+        answering afterwards is what makes them unread again.
+        """
+        if self.last_read_turn_id is None and self.turns:
+            self.last_read_turn_id = self.turns[-1].id
+        return self
+
+    @property
+    def has_unread(self) -> bool:
+        """True when an assistant reply exists past the read marker.
+
+        Only assistant turns count as "new" — the human just sent any newer
+        user turns themselves.
+        """
+        if not self.turns or not any(turn.role == "assistant" for turn in self.turns):
+            return False
+        if self.last_read_turn_id is None:
+            return True
+        for index, turn in enumerate(self.turns):
+            if turn.id == self.last_read_turn_id:
+                return any(
+                    later.role == "assistant" for later in self.turns[index + 1 :]
+                )
+        # Read marker no longer present (history trimmed): treat as read.
+        return False
 
     def add_user_turn(self, content: str, *, run_id: str | None = None) -> Turn:
         turn = Turn(role="user", content=content)

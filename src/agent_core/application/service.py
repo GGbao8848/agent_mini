@@ -93,6 +93,10 @@ class AgentCoreService:
     def get_task(self, task_id: str) -> Task:
         return self.runtime.get_task(task_id)
 
+    def mark_task_read(self, task_id: str) -> Task:
+        """Mark a conversation as read up to its latest turn (sidebar dot off)."""
+        return self.runtime.mark_task_read(task_id)
+
     def task_root(self, task_id: str) -> Path | None:
         """The task's working root: project dir when bound, else None (default)."""
         return self.runtime.task_root(task_id)

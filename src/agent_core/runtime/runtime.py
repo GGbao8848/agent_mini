@@ -239,13 +239,24 @@ class AgentRuntime:
             return updated
         return task
 
+    def mark_task_read(self, task_id: str) -> Task:
+        """Advance the conversation's read marker to its newest turn."""
+        task = self.get_task(task_id)
+        marker = task.turns[-1].id if task.turns else None
+        if marker is not None and task.last_read_turn_id != marker:
+            updated = task.model_copy(update={"last_read_turn_id": marker})
+            self._tasks[task_id] = updated
+            self._save_task(updated)
+            return updated
+        return task
+
     def delete_task(self, task_id: str) -> None:
         """Delete a conversation and every run it produced.
 
         Rejected while the conversation's active run is still non-terminal —
         deleting a running task would strand its execution.
         """
-        task = self.get_task(task_id)
+        self.get_task(task_id)  # 404 on unknown ids
         active = self.task_active_run(task_id)
         if active is not None and not active.status.is_terminal:
             raise StateError(
