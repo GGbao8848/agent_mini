@@ -53,7 +53,6 @@ import { excerpt, isTerminalTask } from "@/lib/tasks"
 import { cn } from "@/lib/utils"
 import type { Schedule, Task } from "@/lib/types"
 import {
-  CalendarClockIcon,
   ChevronRightIcon,
   CopyIcon,
   FolderIcon,
@@ -189,11 +188,8 @@ function WorkspaceSection({
   // Collapsed projects: null = none collapsed (all open), otherwise the set.
   // Unrecorded ids default to open, so brand-new projects show expanded.
   const [collapsed, setCollapsed] = React.useState<Set<string> | null>(null)
-  // Schedule-run bar at the bottom of the task list: collapsed by default
-  // (automated runs are reference material, not the primary focus), with a
-  // per-schedule second level inside.
-  const [scheduleBarOpen, setScheduleBarOpen] = React.useState(false)
-  const [openScheduleGroups, setOpenScheduleGroups] = React.useState<Set<string> | null>(null)
+  // Per-schedule expanded runs in the 日程 tab (schedule id → open).
+  const [openScheduleRuns, setOpenScheduleRuns] = React.useState<Set<string>>(new Set())
   const [scheduleDetail, setScheduleDetail] = React.useState<Schedule | null>(null)
 
   // Newest first; pinned conversations float to the top. Memoized on the raw
@@ -218,25 +214,31 @@ function WorkspaceSection({
     return map
   }, [sortedTasks])
 
-  // Schedule-triggered runs, grouped by their source schedule name.
+  // Schedule-fired runs live under their schedule in the 日程 tab, so the
+  // 对话 list stays purely hand-started conversations.
   const manualTasks = React.useMemo(
     () => sortedTasks.filter((t) => !t.metadata?.source_schedule_id),
     [sortedTasks],
   )
-  const scheduleGroups = React.useMemo(() => {
+  const runsByScheduleId = React.useMemo(() => {
     const map = new Map<string, Task[]>()
     for (const task of sortedTasks) {
-      const name = task.metadata?.source_schedule_name
-      if (typeof name !== "string" || !task.metadata?.source_schedule_id) continue
-      if (!map.has(name)) map.set(name, [])
-      map.get(name)!.push(task)
+      const sid = task.metadata?.source_schedule_id
+      if (typeof sid !== "string") continue
+      if (!map.has(sid)) map.set(sid, [])
+      map.get(sid)!.push(task)
     }
-    return [...map.entries()]
+    return map
   }, [sortedTasks])
-  const scheduleRunCount = React.useMemo(
-    () => scheduleGroups.reduce((n, [, list]) => n + list.length, 0),
-    [scheduleGroups],
-  )
+
+  const toggleScheduleRuns = (scheduleId: string) => {
+    setOpenScheduleRuns((prev) => {
+      const next = new Set(prev)
+      if (next.has(scheduleId)) next.delete(scheduleId)
+      else next.add(scheduleId)
+      return next
+    })
+  }
 
   const isOpen = (projectId: string) => collapsed === null || !collapsed.has(projectId)
 
@@ -359,109 +361,6 @@ function WorkspaceSection({
                 />
               ))}
 
-              {/* Schedule-fired runs live under one collapsible bar at the
-                  bottom, grouped per schedule (second collapse level). */}
-              {scheduleRunCount > 0 && (
-                <>
-                  <SidebarMenuItem>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      aria-expanded={scheduleBarOpen}
-                      onClick={() => setScheduleBarOpen((v) => !v)}
-                      onKeyDown={(e) => {
-                        if (e.target !== e.currentTarget) return
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault()
-                          setScheduleBarOpen((v) => !v)
-                        }
-                      }}
-                      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2"
-                    >
-                      <ChevronRightIcon
-                        className={cn(
-                          "size-3.5 shrink-0 text-muted-foreground transition-transform",
-                          scheduleBarOpen && "rotate-90",
-                        )}
-                      />
-                      <CalendarClockIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                        日程任务
-                      </span>
-                      <span className="shrink-0 text-[0.65rem] text-muted-foreground/70">
-                        {scheduleRunCount}
-                      </span>
-                    </div>
-                  </SidebarMenuItem>
-                  {scheduleBarOpen &&
-                    scheduleGroups.map(([name, runs]) => {
-                      const groupOpen = openScheduleGroups === null || openScheduleGroups.has(name)
-                      return (
-                        <React.Fragment key={name}>
-                          <SidebarMenuItem>
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              aria-expanded={groupOpen}
-                              onClick={() =>
-                                setOpenScheduleGroups((prev) => {
-                                  const base =
-                                    prev === null
-                                      ? new Set(scheduleGroups.map(([n]) => n))
-                                      : new Set(prev)
-                                  if (base.has(name)) base.delete(name)
-                                  else base.add(name)
-                                  return base
-                                })
-                              }
-                              onKeyDown={(e) => {
-                                if (e.target !== e.currentTarget) return
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault()
-                                  setOpenScheduleGroups((prev) => {
-                                    const base =
-                                      prev === null
-                                        ? new Set(scheduleGroups.map(([n]) => n))
-                                        : new Set(prev)
-                                    if (base.has(name)) base.delete(name)
-                                    else base.add(name)
-                                    return base
-                                  })
-                                }
-                              }}
-                              className="flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pl-6 pr-2 text-left text-xs outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2"
-                              title={name}
-                            >
-                              <ChevronRightIcon
-                                className={cn(
-                                  "size-3 shrink-0 text-muted-foreground transition-transform",
-                                  groupOpen && "rotate-90",
-                                )}
-                              />
-                              <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                                {name}
-                              </span>
-                              <span className="shrink-0 text-[0.65rem] text-muted-foreground/70">
-                                {runs.length}
-                              </span>
-                            </div>
-                          </SidebarMenuItem>
-                          {groupOpen &&
-                            runs.map((task) => (
-                              <TaskRow
-                                key={task.id}
-                                task={task}
-                                inset="schedule"
-                                selectedTaskId={selectedTaskId}
-                                onSelectTask={onSelectTask}
-                                onContextMenu={openProjectMenu}
-                              />
-                            ))}
-                        </React.Fragment>
-                      )
-                    })}
-                </>
-              )}
             </>
           )}
 
@@ -480,40 +379,83 @@ function WorkspaceSection({
                   </p>
                 </SidebarMenuItem>
               )}
-              {(schedules.data ?? []).map((schedule) => (
-                <SidebarMenuItem key={schedule.id}>
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setScheduleDetail(schedule)}
-                    onKeyDown={(e) => {
-                      if (e.target !== e.currentTarget) return
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        setScheduleDetail(schedule)
-                      }
-                    }}
-                    className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2"
-                    title={schedule.task_input}
-                  >
-                    <ScheduleToggle
-                      schedule={schedule}
-                      disabled={scheduleManage.update.isPending}
-                      onToggle={toggleScheduleEnabled}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium" title={schedule.name}>
-                        {schedule.name}
-                      </span>
-                      <span className="block truncate text-[0.65rem] text-muted-foreground">
-                        {schedule.enabled && schedule.next_run_at
-                          ? `下次 ${new Date(schedule.next_run_at).toLocaleString()}`
-                          : schedule.trigger_text}
-                      </span>
-                    </span>
-                  </div>
-                </SidebarMenuItem>
-              ))}
+              {(schedules.data ?? []).map((schedule) => {
+                const runs = runsByScheduleId.get(schedule.id) ?? []
+                const runsOpen = openScheduleRuns.has(schedule.id)
+                return (
+                  <React.Fragment key={schedule.id}>
+                    <SidebarMenuItem>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setScheduleDetail(schedule)}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            setScheduleDetail(schedule)
+                          }
+                        }}
+                        className="group/schedule-row flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2"
+                        title={schedule.task_input}
+                      >
+                        <span
+                          role="button"
+                          tabIndex={-1}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (runs.length) toggleScheduleRuns(schedule.id)
+                          }}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          className={cn(
+                            "rounded p-0.5 text-muted-foreground transition-transform hover:text-foreground",
+                            !runs.length && "invisible",
+                            runsOpen && "rotate-90",
+                          )}
+                          title={runs.length ? `展开运行记录（${runs.length}）` : "还没有运行记录"}
+                        >
+                          <ChevronRightIcon className="size-3.5" />
+                        </span>
+                        <ScheduleToggle
+                          schedule={schedule}
+                          disabled={scheduleManage.update.isPending}
+                          onToggle={toggleScheduleEnabled}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium" title={schedule.name}>
+                            {schedule.name}
+                          </span>
+                          <span className="block truncate text-[0.65rem] text-muted-foreground">
+                            {schedule.enabled && schedule.next_run_at
+                              ? `下次 ${new Date(schedule.next_run_at).toLocaleString()}`
+                              : schedule.trigger_text}
+                            {runs.length > 0 ? ` · 已运行 ${runs.length} 次` : ""}
+                          </span>
+                        </span>
+                      </div>
+                    </SidebarMenuItem>
+                    {runsOpen &&
+                      (runs.length > 0 ? (
+                        runs.map((task) => (
+                          <TaskRow
+                            key={task.id}
+                            task={task}
+                            inset="schedule"
+                            selectedTaskId={selectedTaskId}
+                            onSelectTask={onSelectTask}
+                            onContextMenu={openProjectMenu}
+                          />
+                        ))
+                      ) : (
+                        <SidebarMenuItem>
+                          <p className="py-0.5 pl-9 text-[0.65rem] text-muted-foreground/70">
+                            这个日程还没有运行记录
+                          </p>
+                        </SidebarMenuItem>
+                      ))}
+                  </React.Fragment>
+                )
+              })}
             </>
           )}
 
