@@ -209,6 +209,14 @@ export interface ProviderKey {
   hint: string | null
 }
 
+export interface CustomModel {
+  name: string
+  base_url: string
+  api_format: string
+  models: string[]
+  key_hint: string | null
+}
+
 export interface ModelConfig {
   model: string | null
   model_source: ConfigSource
@@ -216,6 +224,7 @@ export interface ModelConfig {
   local_base_url: string | null
   local_base_url_source: ConfigSource | null
   api_keys: ProviderKey[]
+  custom_models: CustomModel[]
 }
 
 export type ModelConfigUpdate = {
@@ -241,4 +250,10 @@ export interface DirBrowse {
   path: string
   parent: string | null
   entries: DirEntry[]
+}
+
+export interface ModelDiscover {
+  ok: boolean
+  models: string[]
+  error?: string | null
 }

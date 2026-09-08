@@ -23,6 +23,21 @@ _KEY = "default"
 _MASK_TAIL = 4
 
 
+class CustomModel(BaseModel):
+    """A user-added provider endpoint registered from the console."""
+
+    name: str = Field(min_length=1)
+    """Display name; doubles as the provider id in ``provider:model`` specs."""
+    base_url: str = Field(min_length=1)
+    """OpenAI-compatible endpoint root, e.g. ``http://host:8000/v1``."""
+    api_format: str = "openai"
+    """Wire format; ``openai`` (compatible) is the only one today."""
+    api_key: str | None = None
+    """Write-only secret; never returned by the API (masked hint only)."""
+    models: list[str] = Field(default_factory=list)
+    """Model ids the user picked from the endpoint's discovered list."""
+
+
 class ModelConfig(BaseModel):
     """Console-provided model configuration; every field optional."""
 
@@ -34,6 +49,9 @@ class ModelConfig(BaseModel):
 
     local_base_url: str | None = None
     """Self-hosted endpoint for the ``local`` provider (OpenAI-compatible)."""
+
+    custom_models: list[CustomModel] = Field(default_factory=list)
+    """User-added endpoints from the 模型配置 page's 添加模型 dialog."""
 
 
 _lock = threading.Lock()

@@ -1,17 +1,27 @@
 import * as React from "react"
 
+import { AddModelDialog } from "@/components/settings/add-model-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import {
+  useCustomModelManage,
   useModelConfig,
   useUpdateModelConfig,
   useVerifyModel,
 } from "@/hooks/use-console"
-import type { ProviderKey } from "@/lib/types"
-import { CircleCheckIcon, CircleXIcon, KeyRoundIcon, Loader2Icon } from "lucide-react"
+import type { CustomModel, ProviderKey } from "@/lib/types"
+import {
+  CircleCheckIcon,
+  CircleXIcon,
+  KeyRoundIcon,
+  Loader2Icon,
+  PlusIcon,
+  Trash2Icon,
+  PencilIcon,
+} from "lucide-react"
 
 function SourceBadge({ source }: { source: "page" | "env" | null }) {
   if (source === "page") return <Badge variant="secondary">页面配置</Badge>
@@ -66,10 +76,13 @@ export function ModelPanel() {
   const config = useModelConfig()
   const update = useUpdateModelConfig()
   const verify = useVerifyModel()
+  const customManage = useCustomModelManage()
 
   const [modelSpec, setModelSpec] = React.useState("")
   const [localBase, setLocalBase] = React.useState("")
   const [keys, setKeys] = React.useState<Record<string, string>>({})
+  const [addOpen, setAddOpen] = React.useState(false)
+  const [editing, setEditing] = React.useState<CustomModel | null>(null)
 
   // Sync the form from the server state whenever a (re)fetch lands.
   React.useEffect(() => {
@@ -119,6 +132,80 @@ export function ModelPanel() {
         <p className="text-sm text-muted-foreground">加载中…</p>
       ) : (
         <>
+          <div className="flex flex-col gap-3 rounded-lg border p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                模型端点
+                <span className="text-xs font-normal text-muted-foreground">
+                  OpenAI 兼容服务注册为 provider，用「名称:模型」调用
+                </span>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEditing(null)
+                  setAddOpen(true)
+                }}
+              >
+                <PlusIcon data-icon="inline-start" />
+                添加模型
+              </Button>
+            </div>
+            {(data.custom_models ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                还没有添加模型端点。点「添加模型」填写 Base URL 后可探测并勾选模型。
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {(data.custom_models ?? []).map((m) => (
+                  <div key={m.name} className="flex items-center gap-2 rounded-lg border p-2.5">
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-mono text-sm font-medium">{m.name}</span>
+                        <Badge variant="outline" className="shrink-0">
+                          {m.api_format}
+                        </Badge>
+                        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                          {m.models.length} 个模型
+                        </span>
+                      </div>
+                      <span className="truncate font-mono text-xs text-muted-foreground" title={m.base_url}>
+                        {m.base_url}
+                      </span>
+                      {m.models.length > 0 && (
+                        <span className="truncate text-xs text-muted-foreground" title={m.models.join(", ")}>
+                          {m.models.slice(0, 4).join(", ")}
+                          {m.models.length > 4 ? ` 等 ${m.models.length} 个` : ""}
+                        </span>
+                      )}
+                    </div>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      title="编辑"
+                      onClick={() => {
+                        setEditing(m)
+                        setAddOpen(true)
+                      }}
+                    >
+                      <PencilIcon />
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="text-destructive"
+                      title="删除该端点"
+                      disabled={customManage.remove.isPending}
+                      onClick={() => customManage.remove.mutate(m.name)}
+                    >
+                      <Trash2Icon />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex flex-col gap-3 rounded-lg border p-4">
             <div className="grid gap-1.5">
               <div className="flex items-center gap-2">
@@ -227,6 +314,12 @@ export function ModelPanel() {
           </p>
         </>
       )}
+
+      <AddModelDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        editing={editing}
+      />
     </div>
   )
 }

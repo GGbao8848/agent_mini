@@ -62,6 +62,18 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
     if provider == "local":
         return _build_local(model, overrides.local_base_url, streaming=resolved.model_streaming)
 
+    # Custom endpoints registered on the model-config page act as providers of
+    # their own: "<name>:<model>" builds against the stored base_url/key.
+    custom = next((m for m in overrides.custom_models if m.name == provider), None)
+    if custom is not None:
+        return ChatOpenAI(
+            model=model,
+            api_key=SecretStr(custom.api_key or "local"),
+            base_url=custom.base_url,
+            temperature=0,
+            streaming=resolved.model_streaming,
+        )
+
     env_var = PROVIDER_ENV_VARS.get(provider)
     if env_var is None:
         raise ConfigurationError(

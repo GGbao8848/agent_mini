@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,6 +26,9 @@ from agent_core.domain.task import Run, Task, Turn
 from agent_core.domain.tool import ToolDefinition
 from agent_core.domain.trace import TraceEvent
 from agent_core.errors.exceptions import SkillError
+
+if TYPE_CHECKING:
+    from agent_core.config.model_config import CustomModel as CustomModelSpec
 
 # Human decisions accepted by POST /approvals/{id}/resolve.
 ApprovalDecision = Literal["approved", "rejected", "edited", "cancelled"]
@@ -466,6 +469,7 @@ class ModelConfigOut(BaseModel):
     local_base_url: str | None = None
     local_base_url_source: ConfigSource | None = None
     api_keys: list[ProviderKeyOut]
+    custom_models: list[CustomModelOut] = Field(default_factory=list)
 
 
 class ModelConfigUpdate(BaseModel):
@@ -497,6 +501,55 @@ class ModelVerifyOut(BaseModel):
     latency_ms: float | None = None
     reply: str | None = None
     error: str | None = None
+
+
+# ------------------------------------------------- custom model endpoints
+
+
+class ModelDiscoverRequest(BaseModel):
+    """Probe an OpenAI-compatible endpoint for its model list."""
+
+    base_url: str = Field(min_length=1, description="Endpoint root, e.g. http://host:8000/v1")
+    api_format: str = Field(default="openai", description="Wire format (openai compatible)")
+    api_key: str | None = Field(default=None, description="Bearer key; omit for open endpoints")
+
+
+class ModelDiscoverOut(BaseModel):
+    ok: bool
+    models: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+class CustomModelOut(BaseModel):
+    """A user-added endpoint; the API key never crosses the wire."""
+
+    name: str
+    base_url: str
+    api_format: str
+    models: list[str]
+    key_hint: str | None = None
+    """Masked tail of the stored key (None when no key)."""
+
+    @classmethod
+    def of(cls, m: CustomModelSpec) -> CustomModelOut:
+        from agent_core.config.model_config import mask_secret
+
+        return cls(
+            name=m.name,
+            base_url=m.base_url,
+            api_format=m.api_format,
+            models=list(m.models),
+            key_hint=mask_secret(m.api_key) if m.api_key else None,
+        )
+
+
+class CustomModelUpsertRequest(BaseModel):
+    """Create or replace one custom endpoint; the name comes from the path."""
+
+    base_url: str = Field(min_length=1)
+    api_format: str = "openai"
+    api_key: str | None = None
+    models: list[str] = Field(default_factory=list)
 
 
 # ------------------------------------------------------------------ projects

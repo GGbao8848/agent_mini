@@ -15,6 +15,7 @@ import {
   type MCPServer,
   type ModelConfig,
   type ModelConfigUpdate,
+  type ModelDiscover,
   type ModelVerify,
   type Project,
   type ProjectPayload,
@@ -427,6 +428,31 @@ export function useVerifyModel() {
   return useToastMutation<ModelVerify, { model?: string }>({
     mutationFn: (payload) => api.post<ModelVerify>("/v1/model-config/verify", payload),
   })
+}
+
+/* ------------------------------------------------- custom model endpoints */
+
+export function useDiscoverModels() {
+  return useToastMutation<ModelDiscover, { base_url: string; api_format: string; api_key?: string }>({
+    mutationFn: (payload) => api.post<ModelDiscover>("/v1/model-config/discover", payload),
+  })
+}
+
+export function useCustomModelManage() {
+  const queryClient = useQueryClient()
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["model-config"] })
+  const upsert = useToastMutation<
+    ModelConfig,
+    { name: string; base_url: string; api_format: string; api_key?: string; models: string[] }
+  >({
+    mutationFn: ({ name, ...payload }) => api.put(`/v1/model-config/custom/${encodeURIComponent(name)}`, payload),
+    onSuccess: invalidate,
+  })
+  const remove = useToastMutation<ModelConfig, string>({
+    mutationFn: (name) => api.del(`/v1/model-config/custom/${encodeURIComponent(name)}`),
+    onSuccess: invalidate,
+  })
+  return { upsert, remove }
 }
 
 
