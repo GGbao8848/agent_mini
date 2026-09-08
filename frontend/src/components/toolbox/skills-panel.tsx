@@ -155,7 +155,7 @@ export function SkillsPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-muted-foreground">Skills 技能（{skillList.length} 个）</h2>
         <Button size="sm" onClick={() => setInstallOpen(true)}>
@@ -169,17 +169,29 @@ export function SkillsPanel() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {skillList.map((skill) => (
-            <div key={skill.id} className="flex flex-col gap-2 rounded-lg border p-4">
+            <div key={skill.id} className="flex h-full flex-col gap-2 rounded-lg border p-4">
               <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium">{skill.name}</span>
-                <Badge variant="secondary" className="shrink-0">v{skill.version}</Badge>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium" title={skill.name}>
+                  {skill.name}
+                </span>
+                <Badge variant="secondary" className="shrink-0">
+                  v{skill.version}
+                </Badge>
               </div>
-              <p className="line-clamp-2 min-h-8 text-xs text-muted-foreground">
+              <p
+                className="line-clamp-2 min-h-8 text-xs text-muted-foreground"
+                title={skill.description || "无描述"}
+              >
                 {skill.description || "无描述"}
               </p>
-              <p className="truncate text-xs text-muted-foreground" title={skill.path ?? ""}>
+              <p className="truncate text-xs text-muted-foreground" title={`id: ${skill.id}`}>
                 id: {skill.id}
               </p>
+              {skill.path && (
+                <p className="truncate text-xs text-muted-foreground" title={skill.path}>
+                  {skill.path}
+                </p>
+              )}
               <Button
                 size="xs"
                 variant="ghost"

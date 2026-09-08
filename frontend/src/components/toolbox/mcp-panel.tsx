@@ -32,7 +32,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useMcpServers, useMcpAction, useTools } from "@/hooks/use-console"
 import { normalizeMcpConfig, validateServerPayload } from "@/lib/mcp-config"
-import { PlugIcon, UnplugIcon, PlusIcon, Trash2Icon, ServerIcon } from "lucide-react"
+import type { MCPServer, Tool } from "@/lib/types"
+import {
+  PlugIcon,
+  UnplugIcon,
+  PlusIcon,
+  Trash2Icon,
+  ServerIcon,
+  ChevronRightIcon,
+  CircleCheckIcon,
+  CircleXIcon,
+} from "lucide-react"
 
 const JSON_TEMPLATE = `{
   "id": "demo",
@@ -41,6 +51,13 @@ const JSON_TEMPLATE = `{
   "endpoint": "http://127.0.0.1:8931/mcp",
   "description": "通过 JSON 粘贴注册的 MCP 服务器"
 }`
+
+const TOOL_RISK_STYLES: Record<string, string> = {
+  low: "border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  medium: "border-amber-500/30 bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  high: "border-orange-500/30 bg-orange-500/15 text-orange-700 dark:text-orange-400",
+  critical: "border-destructive/40 bg-destructive/15 text-destructive",
+}
 
 function AddServerDialog({
   open,
@@ -214,12 +231,124 @@ function AddServerDialog({
   )
 }
 
+function ToolRow({ tool }: { tool: Tool }) {
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-xs font-medium">{tool.name}</span>
+        <Badge variant="outline" className={TOOL_RISK_STYLES[tool.risk_level] ?? ""}>
+          {tool.risk_level}
+        </Badge>
+        <span className="ml-auto flex shrink-0 items-center gap-1 text-xs">
+          {tool.available ? (
+            <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+              <CircleCheckIcon className="size-3.5" />
+              可用
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-destructive">
+              <CircleXIcon className="size-3.5" />
+              不可用
+            </span>
+          )}
+        </span>
+      </div>
+      {tool.description && <p className="mt-1 text-xs text-muted-foreground">{tool.description}</p>}
+      {!tool.available && tool.availability_reason && (
+        <p className="mt-1 text-xs text-destructive">{tool.availability_reason}</p>
+      )}
+    </div>
+  )
+}
+
+/** Server detail dialog: the tool list of one MCP server, scrollable. */
+function ServerToolsDialog({
+  server,
+  onClose,
+}: {
+  server: MCPServer | null
+  onClose: () => void
+}) {
+  const tools = useTools()
+  const mcp = useMcpAction()
+  const serverTools = server
+    ? (tools.data ?? []).filter((t) => t.metadata?.mcp_server === server.id)
+    : []
+  const healthy = server?.status === "healthy"
+
+  return (
+    <Dialog open={server !== null} onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-2xl">
+        {server && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex flex-wrap items-center gap-2">
+                <span className="flex items-center gap-1.5">
+                  <ServerIcon className="size-4" />
+                  {server.name}
+                </span>
+                <Badge
+                  variant="outline"
+                  className={
+                    healthy
+                      ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                      : ""
+                  }
+                >
+                  {healthy ? "已连接" : "未连接"}
+                </Badge>
+              </DialogTitle>
+              <DialogDescription className="flex flex-col gap-0.5">
+                <span className="font-mono text-xs">{server.id} · {server.transport}</span>
+                {server.endpoint && (
+                  <span className="truncate font-mono text-xs" title={server.endpoint}>
+                    {server.endpoint}
+                  </span>
+                )}
+                {server.description && <span className="text-xs">{server.description}</span>}
+              </DialogDescription>
+            </DialogHeader>
+            {!healthy ? (
+              <div className="flex flex-col items-start gap-2 text-sm text-muted-foreground">
+                <p>服务器未连接，连接后这里会列出它提供的工具。</p>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={mcp.action.isPending}
+                  onClick={() => mcp.action.mutate({ serverId: server.id, action: "connect" })}
+                >
+                  <PlugIcon data-icon="inline-start" />
+                  连接
+                </Button>
+              </div>
+            ) : serverTools.length === 0 ? (
+              <p className="text-sm text-muted-foreground">该服务器没有注册任何工具。</p>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col gap-2">
+                <h4 className="text-xs font-medium text-muted-foreground">
+                  工具（{serverTools.length}）
+                </h4>
+                <div className="-mx-1 flex flex-col gap-2 overflow-y-auto px-1 pb-1">
+                  {serverTools.map((tool) => (
+                    <ToolRow key={tool.name} tool={tool} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function McpPanel() {
   const servers = useMcpServers()
   const tools = useTools()
   const mcp = useMcpAction()
   const [addOpen, setAddOpen] = React.useState(false)
   const [removingId, setRemovingId] = React.useState<string | null>(null)
+  const [detailServer, setDetailServer] = React.useState<MCPServer | null>(null)
 
   const serverList = servers.data ?? []
   const toolList = tools.data ?? []
@@ -233,7 +362,9 @@ export function McpPanel() {
             <ServerIcon className="size-6 text-muted-foreground" />
           </div>
           <h2 className="text-lg font-medium">还没有 MCP 服务器</h2>
-          <p className="text-sm text-muted-foreground">添加服务器后，它的工具会自动出现在工具页</p>
+          <p className="text-sm text-muted-foreground">
+            添加服务器后，点击它的卡片即可查看该服务器提供的工具
+          </p>
         </div>
         <Button size="sm" onClick={() => setAddOpen(true)}>
           <PlusIcon data-icon="inline-start" />
@@ -245,7 +376,7 @@ export function McpPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-muted-foreground">MCP 服务器（{serverList.length} 个）</h2>
         <Button size="sm" onClick={() => setAddOpen(true)}>
@@ -262,9 +393,23 @@ export function McpPanel() {
             const toolCount = toolList.filter((t) => t.metadata?.mcp_server === server.id).length
             const healthy = server.status === "healthy"
             return (
-              <div key={server.id} className="flex flex-col gap-1.5 rounded-lg border p-4">
+              <div
+                key={server.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setDetailServer(server)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    setDetailServer(server)
+                  }
+                }}
+                className="group flex h-full cursor-pointer flex-col gap-1.5 rounded-lg border p-4 outline-none transition-colors hover:border-foreground/25 hover:bg-accent/40 focus-visible:ring-2"
+              >
                 <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium">{server.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium" title={server.name}>
+                    {server.name}
+                  </span>
                   <Badge
                     variant="outline"
                     className={
@@ -275,18 +420,29 @@ export function McpPanel() {
                   >
                     {healthy ? "已连接" : "未连接"}
                   </Badge>
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">{server.transport}</span>
+                  <span className="ml-auto flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                    {server.transport}
+                    <ChevronRightIcon className="size-3.5 opacity-40 transition-opacity group-hover:opacity-100" />
+                  </span>
                 </div>
-                <p className="truncate text-xs text-muted-foreground" title={server.endpoint}>
-                  {server.endpoint} · {toolCount} 个工具
+                <p className="truncate text-xs text-muted-foreground" title={server.endpoint || server.id}>
+                  {server.endpoint || server.id} · {toolCount} 个工具
                 </p>
+                {server.description && (
+                  <p className="line-clamp-2 text-xs text-muted-foreground" title={server.description}>
+                    {server.description}
+                  </p>
+                )}
                 <div className="mt-auto flex gap-2 pt-1">
                   {healthy ? (
                     <Button
                       size="xs"
                       variant="outline"
                       disabled={mcp.action.isPending}
-                      onClick={() => mcp.action.mutate({ serverId: server.id, action: "disconnect" })}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        mcp.action.mutate({ serverId: server.id, action: "disconnect" })
+                      }}
                     >
                       <UnplugIcon data-icon="inline-start" />
                       断开
@@ -296,7 +452,10 @@ export function McpPanel() {
                       size="xs"
                       variant="outline"
                       disabled={mcp.action.isPending}
-                      onClick={() => mcp.action.mutate({ serverId: server.id, action: "connect" })}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        mcp.action.mutate({ serverId: server.id, action: "connect" })
+                      }}
                     >
                       <PlugIcon data-icon="inline-start" />
                       连接
@@ -306,7 +465,10 @@ export function McpPanel() {
                     size="xs"
                     variant="ghost"
                     className="ml-auto text-destructive"
-                    onClick={() => setRemovingId(server.id)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setRemovingId(server.id)
+                    }}
                   >
                     <Trash2Icon data-icon="inline-start" />
                     删除
@@ -319,6 +481,7 @@ export function McpPanel() {
       )}
 
       <AddServerDialog open={addOpen} onOpenChange={setAddOpen} />
+      <ServerToolsDialog server={detailServer} onClose={() => setDetailServer(null)} />
 
       <AlertDialog open={removingId !== null} onOpenChange={(isOpen) => !isOpen && setRemovingId(null)}>
         <AlertDialogContent>
