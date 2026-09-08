@@ -375,7 +375,7 @@ function WorkspaceSection({
                           if (e.target !== e.currentTarget) return
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault()
-                            runs.length && toggleScheduleRuns(schedule.id)
+                            if (runs.length) toggleScheduleRuns(schedule.id)
                           }
                         }}
                         className={cn(
