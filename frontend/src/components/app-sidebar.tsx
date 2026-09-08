@@ -300,6 +300,16 @@ function WorkspaceSection({
                 <FolderPlusIcon className="size-3.5" />
               </button>
             )}
+            {mode === "chats" && (
+              <button
+                type="button"
+                title="新建任务"
+                onClick={() => onViewChange("新建任务")}
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              >
+                <PlusIcon className="size-3.5" />
+              </button>
+            )}
             {mode === "schedules" && (
               <button
                 type="button"
