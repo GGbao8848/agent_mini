@@ -318,7 +318,7 @@ function EmptyState({
       <div className="flex flex-col items-center gap-2 text-center">
         <div className="flex size-12 items-center justify-center overflow-hidden rounded-xl bg-muted">
           <img
-            src="./app-icon.png"
+            src="./app-icon.png?v=2"
             alt="Agent Console"
             className="size-full object-contain p-0.5"
             draggable={false}

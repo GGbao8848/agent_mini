@@ -664,7 +664,7 @@ export function AppSidebar({
             <SidebarMenuButton size="lg" className="pointer-events-none" tabIndex={-1}>
               <div className="flex aspect-square size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sidebar-primary">
                 <img
-                  src="./app-icon.png"
+                  src="./app-icon.png?v=2"
                   alt="Agent Console"
                   className="size-full object-contain"
                   draggable={false}
