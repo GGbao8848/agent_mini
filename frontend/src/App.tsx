@@ -62,6 +62,16 @@ export default function App() {
     return () => window.removeEventListener("console:unauthorized", show)
   }, [])
 
+  // Views outside the task list (schedules…) dispatch this to open a task.
+  React.useEffect(() => {
+    const onOpenTaskEvent = (e: Event) => {
+      const taskId = (e as CustomEvent<{ taskId: string }>).detail?.taskId
+      if (taskId) openTask(taskId)
+    }
+    window.addEventListener("console:open-task", onOpenTaskEvent)
+    return () => window.removeEventListener("console:open-task", onOpenTaskEvent)
+  }, [openTask])
+
   const renderView = (() => {
     if (view === "新建任务") {
       return (
