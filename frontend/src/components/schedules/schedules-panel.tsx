@@ -20,10 +20,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { cn } from "@/lib/utils"
 import { useScheduleManage, useSchedules, useSubmitTask } from "@/hooks/use-console"
 import type { Schedule, ScheduleType } from "@/lib/types"
 import { ScheduleDetailDialog } from "@/components/schedules/schedule-detail-dialog"
+import { ScheduleToggle } from "@/components/schedules/schedule-toggle"
 import { getSelectedModel } from "@/components/chat/model-picker"
 import { describeCron } from "@/lib/schedule"
 import { ArrowUpIcon, CalendarClockIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react"
@@ -44,41 +44,6 @@ function describeTrigger(schedule: Schedule): string {
   return friendly ?? `重复执行 · ${schedule.trigger_text}`
 }
 
-
-/** Enable/disable toggle shown on each schedule card. */
-function ScheduleToggle({
-  schedule,
-  disabled,
-  onToggle,
-}: {
-  schedule: Schedule
-  disabled: boolean
-  onToggle: (schedule: Schedule, enabled: boolean) => void
-}) {
-  const enabled = schedule.enabled
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={enabled ? "停用日程" : "启用日程"}
-      disabled={disabled}
-      onClick={() => onToggle(schedule, !enabled)}
-      className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 outline-none disabled:cursor-not-allowed disabled:opacity-50",
-        enabled ? "bg-primary" : "bg-muted-foreground/30",
-      )}
-    >
-      <span
-        className={cn(
-          "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform",
-          enabled ? "translate-x-4" : "translate-x-0.5",
-        )}
-      />
-    </button>
-  )
-}
 
 /** Natural-language schedule creation: the user describes what they want and
  *  sending it starts a fresh conversation — the avatar agent parses the

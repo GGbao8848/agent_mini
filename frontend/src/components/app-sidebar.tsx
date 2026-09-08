@@ -36,21 +36,24 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
+import { ScheduleDetailDialog } from "@/components/schedules/schedule-detail-dialog"
+import { ScheduleToggle } from "@/components/schedules/schedule-toggle"
 import {
   useBrowseDir,
   useDeleteTask,
   useProjectManage,
   useProjects,
+  useScheduleManage,
+  useSchedules,
   useTasks,
   useUpdateTask,
 } from "@/hooks/use-console"
 import { fmtTimeShort } from "@/lib/format"
 import { excerpt, isTerminalTask } from "@/lib/tasks"
 import { cn } from "@/lib/utils"
-import type { Task } from "@/lib/types"
+import type { Schedule, Task } from "@/lib/types"
 import {
   CalendarClockIcon,
-  CalendarDaysIcon,
   ChevronRightIcon,
   CopyIcon,
   FolderIcon,
@@ -74,7 +77,6 @@ const data = {
   },
   navMain: [
     { title: "新建任务", url: "#", icon: <PlusIcon /> },
-    { title: "日程", url: "#", icon: <CalendarDaysIcon /> },
     { title: "技能", url: "#", icon: <PuzzleIcon /> },
     { title: "MCP", url: "#", icon: <PlugIcon /> },
     { title: "工具", url: "#", icon: <WrenchIcon /> },
@@ -85,11 +87,12 @@ const data = {
 const RUNNING_STATUSES = new Set(["running", "planning", "created"])
 const ATTENTION_STATUSES = new Set(["waiting_approval", "needs_input"])
 
-/** Row status affordance: a live spinner while running, an amber dot when the
- *  human's input is needed (approval / question), a green unread dot for new
- *  replies, and nothing when the conversation is fully read. */
+/** Row status affordance: a live spinner while a run is actually attached, an
+ *  amber dot when the human's input is needed (approval / question), a green
+ *  unread dot for new replies, nothing otherwise. A stale "created" status
+ *  without an active run is NOT running — it must not spin forever. */
 function RowIndicator({ task }: { task: Task }) {
-  const running = RUNNING_STATUSES.has(task.status)
+  const running = RUNNING_STATUSES.has(task.status) && !!task.active_run_id
   if (running) {
     return <Loader2Icon className="size-3.5 shrink-0 animate-spin text-blue-500" />
   }
@@ -113,11 +116,12 @@ function TaskRow({
   selectedTaskId: string | null
   onSelectTask: (taskId: string) => void
   onContextMenu: (e: React.MouseEvent, task: Task) => void
-  /** Render indented under a project (outline style). */
-  inset?: boolean
+  /** Nesting level: under a project row, or one level deeper under a
+   *  schedule group inside the 日程任务 bar (must out-dent its header). */
+  inset?: "project" | "schedule"
 }) {
   return (
-    <SidebarMenuItem className={cn(inset && "pl-4")}>
+    <SidebarMenuItem className={cn(inset === "project" && "pl-4", inset === "schedule" && "pl-9")}>
       <SidebarMenuButton
         isActive={task.id === selectedTaskId}
         onClick={() => onSelectTask(task.id)}
@@ -143,19 +147,39 @@ function WorkspaceSection({
   selectedTaskId,
   onSelectTask,
   onNewTaskInProject,
+  onViewChange,
 }: {
   selectedTaskId: string | null
   onSelectTask: (taskId: string) => void
   onNewTaskInProject: (projectId: string) => void
+  onViewChange: (view: string) => void
 }) {
   const tasks = useTasks()
+  const schedules = useSchedules()
   const projects = useProjects()
   const manage = useProjectManage()
+  const scheduleManage = useScheduleManage()
+
+  const toggleScheduleEnabled = (schedule: Schedule, enabled: boolean) => {
+    scheduleManage.update.mutate({
+      scheduleId: schedule.id,
+      payload: {
+        name: schedule.name,
+        task_input: schedule.task_input,
+        schedule_type: schedule.schedule_type,
+        run_at: schedule.run_at,
+        cron_expr: schedule.cron_expr,
+        interval_minutes: schedule.interval_minutes,
+        enabled,
+        model: schedule.model,
+      },
+    })
+  }
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
   const projectList = projects.data ?? []
 
-  const [mode, setMode] = React.useState<"tasks" | "projects">("tasks")
+  const [mode, setMode] = React.useState<"chats" | "schedules" | "projects">("chats")
   const [menu, setMenu] = React.useState<{ x: number; y: number; task: Task } | null>(null)
   const [renaming, setRenaming] = React.useState<Task | null>(null)
   const [renameValue, setRenameValue] = React.useState("")
@@ -170,6 +194,7 @@ function WorkspaceSection({
   // per-schedule second level inside.
   const [scheduleBarOpen, setScheduleBarOpen] = React.useState(false)
   const [openScheduleGroups, setOpenScheduleGroups] = React.useState<Set<string> | null>(null)
+  const [scheduleDetail, setScheduleDetail] = React.useState<Schedule | null>(null)
 
   // Newest first; pinned conversations float to the top. Memoized on the raw
   // query data so the stable sort/map don't rebuild on every render.
@@ -259,10 +284,11 @@ function WorkspaceSection({
       <SidebarGroupLabel
         render={
           <div className="flex items-center gap-1">
-            <div className="flex flex-1 items-center gap-1 rounded-md bg-sidebar-accent/60 p-0.5">
+            <div className="flex flex-1 items-center gap-0.5 rounded-md bg-sidebar-accent/60 p-0.5">
               {(
                 [
-                  { value: "tasks", label: "任务" },
+                  { value: "chats", label: "对话" },
+                  { value: "schedules", label: "日程" },
                   { value: "projects", label: "项目" },
                 ] as const
               ).map((tab) => (
@@ -271,7 +297,7 @@ function WorkspaceSection({
                   type="button"
                   onClick={() => setMode(tab.value)}
                   className={cn(
-                    "flex-1 rounded px-2 py-0.5 text-xs font-medium transition-colors",
+                    "flex-1 rounded px-1 py-0.5 text-xs font-medium transition-colors",
                     mode === tab.value
                       ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
                       : "text-muted-foreground hover:text-sidebar-accent-foreground",
@@ -291,14 +317,24 @@ function WorkspaceSection({
                 <FolderPlusIcon className="size-3.5" />
               </button>
             )}
+            {mode === "schedules" && (
+              <button
+                type="button"
+                title="描述并新建日程"
+                onClick={() => onViewChange("日程")}
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              >
+                <PlusIcon className="size-3.5" />
+              </button>
+            )}
           </div>
         }
       />
 
       <SidebarGroupContent>
         <SidebarMenu>
-          {/* -------- TASK mode: flat list -------- */}
-          {mode === "tasks" && (
+          {/* -------- CHATS mode: flat list -------- */}
+          {mode === "chats" && (
             <>
               {tasks.isLoading &&
                 Array.from({ length: 3 }).map((_, i) => (
@@ -415,7 +451,7 @@ function WorkspaceSection({
                               <TaskRow
                                 key={task.id}
                                 task={task}
-                                inset
+                                inset="schedule"
                                 selectedTaskId={selectedTaskId}
                                 onSelectTask={onSelectTask}
                                 onContextMenu={openProjectMenu}
@@ -426,6 +462,58 @@ function WorkspaceSection({
                     })}
                 </>
               )}
+            </>
+          )}
+
+          {/* -------- SCHEDULES mode: schedule rows with toggle + detail -------- */}
+          {mode === "schedules" && (
+            <>
+              {schedules.isLoading && (
+                <SidebarMenuItem>
+                  <Skeleton className="mx-2 h-16 w-auto" />
+                </SidebarMenuItem>
+              )}
+              {!schedules.isLoading && (schedules.data ?? []).length === 0 && (
+                <SidebarMenuItem>
+                  <p className="px-2 py-1 text-xs text-muted-foreground">
+                    还没有日程，点上面的 + 描述并新建
+                  </p>
+                </SidebarMenuItem>
+              )}
+              {(schedules.data ?? []).map((schedule) => (
+                <SidebarMenuItem key={schedule.id}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setScheduleDetail(schedule)}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        setScheduleDetail(schedule)
+                      }
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2"
+                    title={schedule.task_input}
+                  >
+                    <ScheduleToggle
+                      schedule={schedule}
+                      disabled={scheduleManage.update.isPending}
+                      onToggle={toggleScheduleEnabled}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium" title={schedule.name}>
+                        {schedule.name}
+                      </span>
+                      <span className="block truncate text-[0.65rem] text-muted-foreground">
+                        {schedule.enabled && schedule.next_run_at
+                          ? `下次 ${new Date(schedule.next_run_at).toLocaleString()}`
+                          : schedule.trigger_text}
+                      </span>
+                    </span>
+                  </div>
+                </SidebarMenuItem>
+              ))}
             </>
           )}
 
@@ -516,7 +604,7 @@ function WorkspaceSection({
                           <TaskRow
                             key={task.id}
                             task={task}
-                            inset
+                            inset="project"
                             selectedTaskId={selectedTaskId}
                             onSelectTask={onSelectTask}
                             onContextMenu={openProjectMenu}
@@ -536,6 +624,11 @@ function WorkspaceSection({
           )}
         </SidebarMenu>
       </SidebarGroupContent>
+
+      <ScheduleDetailDialog
+        schedule={scheduleDetail}
+        onClose={() => setScheduleDetail(null)}
+      />
 
       {/* folder picker: add project by choosing a server folder */}
       {pickerOpen && (
@@ -820,6 +913,7 @@ export function AppSidebar({
           selectedTaskId={selectedTaskId}
           onSelectTask={onSelectTask}
           onNewTaskInProject={onNewTaskInProject}
+          onViewChange={onViewChange}
         />
       </SidebarContent>
       <SidebarRail />
