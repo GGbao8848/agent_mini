@@ -143,6 +143,7 @@ export interface Schedule {
   last_task_id: string | null
   run_count: number
   trigger_text: string
+  model: string | null
   metadata: Record<string, unknown>
 }
 
@@ -154,6 +155,7 @@ export type SchedulePayload = {
   cron_expr?: string | null
   interval_minutes?: number | null
   enabled?: boolean
+  model?: string | null
 }
 
 export interface Skill {

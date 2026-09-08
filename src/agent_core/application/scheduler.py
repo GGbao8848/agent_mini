@@ -159,6 +159,7 @@ class ScheduleManager:
             {
                 "source_schedule_id": schedule.id,
                 "source_schedule_name": schedule.name,
+                **({"model": schedule.model} if schedule.model else {}),
             },
         )
         schedule.last_run_at = local_now()

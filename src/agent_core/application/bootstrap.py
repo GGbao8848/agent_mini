@@ -102,7 +102,9 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     # wrapper forwards the schedule's provenance so created tasks can be
     # grouped under their schedule in the sidebar.
     async def _schedule_runner(agent_id: str, text: str, metadata: dict[str, Any] | None) -> Any:
-        return await service.submit_run(agent_id, text, metadata=metadata)
+        data = dict(metadata or {})
+        model = data.pop("model", None)
+        return await service.submit_run(agent_id, text, metadata=data or None, model=model)
 
     schedules = ScheduleManager(runner=_schedule_runner, store=store)
     if store is not None:

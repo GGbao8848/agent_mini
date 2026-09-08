@@ -23,6 +23,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useScheduleManage, useSchedules, useSubmitTask } from "@/hooks/use-console"
 import type { Schedule, ScheduleType } from "@/lib/types"
+import { ScheduleDetailDialog } from "@/components/schedules/schedule-detail-dialog"
+import { getSelectedModel } from "@/components/chat/model-picker"
 import { describeCron } from "@/lib/schedule"
 import { ArrowUpIcon, CalendarClockIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
@@ -103,7 +105,7 @@ function ScheduleRequestDialog({
     const text = input.trim()
     if (!text || submit.isPending) return
     submit.mutate(
-      { input: text },
+      { input: text, model: getSelectedModel() },
       {
         onSuccess: (task) => {
           setInput("")
@@ -166,6 +168,7 @@ export function SchedulesPanel({
   const schedules = useSchedules()
   const manage = useScheduleManage()
   const [requestOpen, setRequestOpen] = React.useState(false)
+  const [detail, setDetail] = React.useState<Schedule | null>(null)
   const [removingId, setRemovingId] = React.useState<string | null>(null)
   const [runningId, setRunningId] = React.useState<string | null>(null)
   const [togglingId, setTogglingId] = React.useState<string | null>(null)
@@ -241,7 +244,20 @@ export function SchedulesPanel({
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {list.map((schedule) => (
-            <div key={schedule.id} className="flex h-full flex-col gap-1.5 rounded-lg border p-4">
+            <div
+              key={schedule.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setDetail(schedule)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  setDetail(schedule)
+                }
+              }}
+              className="group/schedule flex h-full cursor-pointer flex-col gap-1.5 rounded-lg border p-4 outline-none transition-colors hover:border-foreground/25 hover:bg-accent/40 focus-visible:ring-2"
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-sm font-medium" title={schedule.name}>
                   {schedule.name}
@@ -277,7 +293,8 @@ export function SchedulesPanel({
                   size="xs"
                   variant="ghost"
                   disabled={runningId === schedule.id}
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation()
                     setRunningId(schedule.id)
                     manage.runNow.mutate(schedule.id, {
                       onSuccess: (data) => {
@@ -296,7 +313,10 @@ export function SchedulesPanel({
                   size="xs"
                   variant="ghost"
                   className="ml-auto text-destructive"
-                  onClick={() => setRemovingId(schedule.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setRemovingId(schedule.id)
+                  }}
                 >
                   <Trash2Icon data-icon="inline-start" />
                   删除
@@ -312,6 +332,8 @@ export function SchedulesPanel({
         onOpenChange={setRequestOpen}
         onCreated={jumpToTask}
       />
+
+      <ScheduleDetailDialog schedule={detail} onClose={() => setDetail(null)} />
 
       <AlertDialog
         open={removingId !== null}

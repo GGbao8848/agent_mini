@@ -16,7 +16,6 @@ Time fields are timezone-aware; the server's local timezone is the authority
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -60,6 +59,9 @@ class Schedule(BaseModel):
     cron_expr: str | None = None
     interval_minutes: int | None = Field(default=None, ge=1)
     enabled: bool = True
+    model: str | None = None
+    """Model spec (``provider:model``) this schedule's runs use; None = the
+    agent's default."""
     created_at: datetime = Field(default_factory=local_now)
     last_run_at: datetime | None = None
     next_run_at: datetime | None = None

@@ -164,6 +164,7 @@ class ScheduleBase(BaseModel):
     cron_expr: str | None = None
     interval_minutes: int | None = Field(default=None, ge=1)
     enabled: bool = True
+    model: str | None = None
 
 
 class ScheduleCreateRequest(ScheduleBase):
@@ -190,6 +191,7 @@ class ScheduleOut(BaseModel):
     last_task_id: str | None = None
     run_count: int
     trigger_text: str
+    model: str | None = None
     metadata: dict[str, Any]
 
     @classmethod
@@ -210,6 +212,7 @@ class ScheduleOut(BaseModel):
             last_task_id=schedule.last_task_id,
             run_count=schedule.run_count,
             trigger_text=schedule.describe_trigger(),
+            model=schedule.model,
             metadata=schedule.metadata,
         )
 
