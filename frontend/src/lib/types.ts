@@ -215,6 +215,7 @@ export interface CustomModel {
   api_format: string
   models: string[]
   key_hint: string | null
+  builtin?: boolean
 }
 
 export interface ModelConfig {

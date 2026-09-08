@@ -1,4 +1,5 @@
 import * as React from "react"
+import { getSelectedModel, ModelPicker } from "@/components/chat/model-picker"
 import { Markdown } from "@/components/chat/markdown"
 import { ApprovalCard } from "@/components/runs/approval-card"
 import { RunActivity, RunArtifacts } from "@/components/runs/run-activity"
@@ -111,7 +112,7 @@ function Composer({
 }: {
   placeholder: string
   pending: boolean
-  onSubmit: (text: string, attachmentPaths: string[]) => void
+  onSubmit: (text: string, attachmentPaths: string[], model: string | null) => void
   /** The agent is replying: the send slot turns into a stop button. */
   running?: boolean
   onStop?: () => void
@@ -159,7 +160,7 @@ function Composer({
     // Clean up file state after a successful upload (or a text-only message).
     files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview))
     setFiles([])
-    onSubmit(trimmed || "（附件）", paths)
+    onSubmit(trimmed || "（附件）", paths, getSelectedModel())
   }
 
   const hasContent = text.trim().length > 0 || files.length > 0
@@ -205,8 +206,9 @@ function Composer({
       />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground">
-            Enter 发送 · Shift+Enter 换行 · 拖拽/粘贴上传文件
+          <ModelPicker />
+          <span className="hidden text-xs text-muted-foreground sm:inline">
+            Enter 发送 · Shift+Enter 换行 · 拖拽/粘贴上传
           </span>
           {upload.isPending && <span className="text-xs text-muted-foreground">上传中…</span>}
         </div>
@@ -257,7 +259,12 @@ function NewTaskComposer({
   initialProjectId,
 }: {
   pending: boolean
-  onSubmit: (text: string, attachmentPaths: string[], projectId: string | null) => void
+  onSubmit: (
+    text: string,
+    attachmentPaths: string[],
+    projectId: string | null,
+    model: string | null,
+  ) => void
   initialProjectId?: string | null
 }) {
   const projects = useProjects()
@@ -271,7 +278,7 @@ function NewTaskComposer({
     <Composer
       placeholder="给分身派个任务，例如：把画册的冬天板块加两张图…"
       pending={pending}
-      onSubmit={(text, paths) => onSubmit(text, paths, projectId)}
+      onSubmit={(text, paths, model) => onSubmit(text, paths, projectId, model)}
     >
       {(projects.data?.length ?? 0) > 0 && (
         <div className="flex items-center gap-2 px-1 pt-1">
@@ -333,9 +340,9 @@ function EmptyState({
         <NewTaskComposer
           pending={submit.isPending}
           initialProjectId={presetProjectId}
-          onSubmit={(text, attachments, projectId) =>
+          onSubmit={(text, attachments, projectId, model) =>
             submit.mutate(
-              { input: text, attachments, project_id: projectId },
+              { input: text, attachments, project_id: projectId, model },
               { onSuccess: onSubmitted },
             )
           }
@@ -538,8 +545,8 @@ function ChatThread({ task }: { task: Task }) {
             pending={followup.isPending}
             running={running}
             onStop={() => setConfirmStop(true)}
-            onSubmit={(text, attachments) =>
-              followup.mutate({ taskId: current.id, input: text, attachments })
+            onSubmit={(text, attachments, model) =>
+              followup.mutate({ taskId: current.id, input: text, attachments, model })
             }
           />
         </div>

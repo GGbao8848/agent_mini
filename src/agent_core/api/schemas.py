@@ -61,6 +61,10 @@ class TaskCreateRequest(BaseModel):
         description="Agent to run; defaults to the default (first registered) agent",
     )
     input: str = Field(min_length=1, description="Task input, e.g. the user's question")
+    model: str | None = Field(
+        default=None,
+        description="Model spec ('provider:model') for this conversation's turns",
+    )
     attachments: list[str] = Field(
         default_factory=list,
         description=(
@@ -79,6 +83,10 @@ class TaskCreateRequest(BaseModel):
 
 class TaskMessageRequest(BaseModel):
     input: str = Field(min_length=1)
+    model: str | None = Field(
+        default=None,
+        description="Model spec ('provider:model') for this turn",
+    )
     attachments: list[str] = Field(
         default_factory=list,
         description=(
@@ -529,6 +537,9 @@ class CustomModelOut(BaseModel):
     models: list[str]
     key_hint: str | None = None
     """Masked tail of the stored key (None when no key)."""
+    builtin: bool = False
+    """True for the built-in providers (openai/openrouter/local) — the card
+    can be overridden/edited but not removed from the list."""
 
     @classmethod
     def of(cls, m: CustomModelSpec) -> CustomModelOut:

@@ -182,12 +182,16 @@ function useToastMutation<TData, TVars>(options: UseMutationOptions<TData, Error
 
 export function useSubmitTask() {
   const queryClient = useQueryClient()
-  return useToastMutation<Task, { input: string; attachments?: string[]; project_id?: string | null }>({
-    mutationFn: ({ input, attachments, project_id }) =>
+  return useToastMutation<
+    Task,
+    { input: string; attachments?: string[]; project_id?: string | null; model?: string | null }
+  >({
+    mutationFn: ({ input, attachments, project_id, model }) =>
       api.post<Task>("/v1/tasks", {
         input,
         ...(attachments?.length ? { attachments } : {}),
         ...(project_id ? { project_id } : {}),
+        ...(model ? { model } : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
@@ -198,11 +202,15 @@ export function useSubmitTask() {
 
 export function useSendFollowup() {
   const queryClient = useQueryClient()
-  return useToastMutation<Task, { taskId: string; input: string; attachments?: string[] }>({
-    mutationFn: ({ taskId, input, attachments }) =>
+  return useToastMutation<
+    Task,
+    { taskId: string; input: string; attachments?: string[]; model?: string | null }
+  >({
+    mutationFn: ({ taskId, input, attachments, model }) =>
       api.post<Task>(`/v1/tasks/${taskId}/messages`, {
         input,
         ...(attachments?.length ? { attachments } : {}),
+        ...(model ? { model } : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })

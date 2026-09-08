@@ -134,6 +134,8 @@ export function AddModelDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder="例如 my-vllm"
               className="font-mono"
+              disabled={!!editing?.builtin}
+              title={editing?.builtin ? "内置 provider 名称不可改" : undefined}
             />
           </div>
           <div className="grid gap-1.5">

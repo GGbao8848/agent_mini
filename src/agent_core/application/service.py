@@ -77,6 +77,7 @@ class AgentCoreService:
         wait: bool = False,
         metadata: dict[str, Any] | None = None,
         project_id: str | None = None,
+        model: str | None = None,
     ) -> Task:
         """Start a new conversation; with ``wait`` return it fully answered."""
         resolved_agent = agent_id or self.default_agent()
@@ -85,6 +86,9 @@ class AgentCoreService:
         )
         run = self.runtime.task_active_run(task.id)
         if run is not None:
+            if model:
+                run.metadata["model"] = model
+                self.runtime._save_run(run)
             execution = self.runtime.submit_run(run)
             if wait:
                 await execution
@@ -144,7 +148,9 @@ class AgentCoreService:
             self.runtime.cancel_run(run.id)
         return self.runtime.get_task(task_id)
 
-    async def send_message(self, task_id: str, text: str, *, wait: bool = False) -> Task:
+    async def send_message(
+        self, task_id: str, text: str, *, wait: bool = False, model: str | None = None
+    ) -> Task:
         """Continue the conversation of ``task_id`` with a new user turn.
 
         The follow-up run reuses the conversation's thread, so the agent
@@ -154,6 +160,9 @@ class AgentCoreService:
         run = self.runtime.create_run(
             conversation.agent_id, text, task=conversation
         )
+        if model:
+            run.metadata["model"] = model
+            self.runtime._save_run(run)
         execution = self.runtime.submit_run(run)
         if wait:
             await execution

@@ -59,20 +59,27 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
     overrides = get_model_config()
     provider, model = parse_model_spec(spec or overrides.model or resolved.model)
 
-    if provider == "local":
-        return _build_local(model, overrides.local_base_url, streaming=resolved.model_streaming)
-
-    # Custom endpoints registered on the model-config page act as providers of
-    # their own: "<name>:<model>" builds against the stored base_url/key.
+    # Endpoints registered (or overridden) on the model-config page win over
+    # the built-in provider wiring: "<name>:<model>" builds against the stored
+    # base_url, with the key falling back to the built-in env var.
     custom = next((m for m in overrides.custom_models if m.name == provider), None)
     if custom is not None:
+        env_var = PROVIDER_ENV_VARS.get(provider)
+        api_key = (
+            custom.api_key
+            or (os.environ.get(env_var) if env_var else None)
+            or "local"
+        )
         return ChatOpenAI(
             model=model,
-            api_key=SecretStr(custom.api_key or "local"),
+            api_key=SecretStr(api_key),
             base_url=custom.base_url,
             temperature=0,
             streaming=resolved.model_streaming,
         )
+
+    if provider == "local":
+        return _build_local(model, overrides.local_base_url, streaming=resolved.model_streaming)
 
     env_var = PROVIDER_ENV_VARS.get(provider)
     if env_var is None:

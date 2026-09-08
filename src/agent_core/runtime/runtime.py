@@ -48,7 +48,12 @@ from agent_core.persistence.checkpointer import build_checkpointer
 from agent_core.persistence.store import SqliteStore
 from agent_core.registries import AgentRegistry, ProjectRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.builder import AgentBuilder
-from agent_core.runtime.context import current_run, current_task_id, current_task_root
+from agent_core.runtime.context import (
+    current_model_override,
+    current_run,
+    current_task_id,
+    current_task_root,
+)
 from agent_core.runtime.executor import AgentExecutor
 from agent_core.runtime.help_tool import make_help_tool
 from agent_core.runtime.model import ModelFactory
@@ -447,6 +452,10 @@ class AgentRuntime:
         run_token = current_run.set(run)
         task_token = current_task_id.set(run.task_id)
         root_token = current_task_root.set(self.task_root(run.task_id))
+        override = run.metadata.get("model")
+        model_token = (
+            current_model_override.set(str(override)) if override else None
+        )
         collector = UsageCollector()
         self._collectors[run.id] = collector
         try:
@@ -483,6 +492,8 @@ class AgentRuntime:
             current_run.reset(run_token)
             current_task_id.reset(task_token)
             current_task_root.reset(root_token)
+            if model_token is not None:
+                current_model_override.reset(model_token)
         return run
 
     def task_root(self, task_id: str) -> Path | None:

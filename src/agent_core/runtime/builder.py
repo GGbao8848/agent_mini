@@ -60,7 +60,13 @@ class AgentBuilder:
         self._checkpointer_provider = checkpointer_provider
 
     def _default_model_factory(self, model_spec: str | None) -> BaseChatModel:
-        return build_model(model_spec, settings=self._settings or get_settings())
+        from agent_core.runtime.context import get_current_model_override
+
+        # A per-run override (composer model picker) wins over the agent spec.
+        override = get_current_model_override()
+        return build_model(
+            override or model_spec, settings=self._settings or get_settings()
+        )
 
     def build(self, spec: AgentSpec) -> CompiledGraph:
         """Resolve ``spec`` and return the compiled DeepAgents graph."""

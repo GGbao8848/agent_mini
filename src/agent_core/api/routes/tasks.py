@@ -55,6 +55,7 @@ async def create_task(
         _with_attachments(payload.input, payload.attachments),
         wait=wait,
         project_id=payload.project_id,
+        model=payload.model,
     )
     mirror_attachments(
         Path(get_settings().workspace_dir),
@@ -74,7 +75,10 @@ async def send_message(
 ) -> TaskOut:
     """Continue a conversation; the agent sees the full prior history."""
     await service.send_message(
-        task_id, _with_attachments(payload.input, payload.attachments), wait=wait
+        task_id,
+        _with_attachments(payload.input, payload.attachments),
+        wait=wait,
+        model=payload.model,
     )
     mirror_attachments(
         Path(get_settings().workspace_dir),

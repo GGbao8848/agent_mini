@@ -58,20 +58,71 @@ def _key_status(provider: str, overrides: ModelConfig) -> ProviderKeyOut:
     return ProviderKeyOut(provider=provider, env_var=env_var, set=False)
 
 
+_BUILTIN_BASE_URLS: dict[str, str] = {
+    "openai": "https://api.openai.com/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+}
+"""Conventional endpoints for the built-in providers shown as cards."""
+
+
+def _endpoint_cards(overrides: ModelConfig) -> list[CustomModelOut]:
+    """Unified endpoint view: stored overrides plus synthesized built-ins.
+
+    Every provider — built-in or user-added — shows up as the same card shape
+    so the page stays uniform. A stored entry replaces its built-in card.
+    """
+    cards: list[CustomModelOut] = []
+    seen: set[str] = set()
+    for stored in overrides.custom_models:
+        env_var = PROVIDER_ENV_VARS.get(stored.name)
+        key = stored.api_key or (os.environ.get(env_var) if env_var else None)
+        cards.append(
+            CustomModelOut(
+                name=stored.name,
+                base_url=stored.base_url,
+                api_format=stored.api_format,
+                models=list(stored.models),
+                key_hint=mask_secret(key) if key else None,
+                builtin=stored.name in PROVIDER_ENV_VARS,
+            )
+        )
+        seen.add(stored.name)
+    for provider in PROVIDER_ENV_VARS:
+        if provider in seen:
+            continue
+        env_var = PROVIDER_ENV_VARS[provider]
+        key = os.environ.get(env_var) or overrides.api_keys.get(provider)
+        if provider == "local":
+            base = overrides.local_base_url or os.environ.get("LOCAL_LLM_BASE_URL") or ""
+        else:
+            base = _BUILTIN_BASE_URLS.get(provider, "")
+        cards.append(
+            CustomModelOut(
+                name=provider,
+                base_url=base,
+                api_format="openai",
+                models=[],
+                key_hint=mask_secret(key) if key else None,
+                builtin=True,
+            )
+        )
+    return cards
+
+
 def _config_out(overrides: ModelConfig) -> ModelConfigOut:
     settings = get_settings()
     effective = overrides.model or settings.model
-    local_url_env = os.environ.get("LOCAL_LLM_BASE_URL")
     return ModelConfigOut(
         model=overrides.model,
         model_source="page" if overrides.model else "env",
         effective_model=effective,
-        local_base_url=overrides.local_base_url or local_url_env,
-        local_base_url_source=("page" if overrides.local_base_url else "env")
-        if (overrides.local_base_url or local_url_env)
-        else None,
+        local_base_url=next(
+            (c.base_url or None for c in _endpoint_cards(overrides) if c.name == "local"),
+            None,
+        ),
+        local_base_url_source="page" if overrides.local_base_url else "env",
         api_keys=[_key_status(provider, overrides) for provider in PROVIDER_ENV_VARS],
-        custom_models=[CustomModelOut.of(m) for m in overrides.custom_models],
+        custom_models=_endpoint_cards(overrides),
     )
 
 
@@ -165,11 +216,14 @@ def upsert_custom_model(name: str, payload: CustomModelUpsertRequest) -> ModelCo
             status_code=422, detail=f"unsupported api_format '{payload.api_format}'"
         )
     current = get_model_config()
+    existing = next((m for m in current.custom_models if m.name == name), None)
+    # Blank key = "keep what's stored" so editing a card without retyping the
+    # secret never wipes it (the dialog shows the masked hint in that case).
     entry = CustomModel(
         name=name,
         base_url=payload.base_url,
         api_format=payload.api_format,
-        api_key=payload.api_key or None,
+        api_key=payload.api_key or (existing.api_key if existing else None),
         models=payload.models,
     )
     others = [m for m in current.custom_models if m.name != name]

@@ -30,6 +30,22 @@ works directly inside that (project) directory.
 """
 
 
+current_model_override: ContextVar[str | None] = ContextVar(
+    "current_model_override", default=None
+)
+"""Per-run model spec (``provider:model``) requested by the caller, or None.
+
+Set by the runtime from the run's metadata; the model factory reads it so a
+conversation can pin a specific endpoint model without touching the agent
+spec. Sub-agent invocations inherit it like the other context vars.
+"""
+
+
+def get_current_model_override() -> str | None:
+    """The caller-pinned model spec for the in-flight run, if any."""
+    return current_model_override.get()
+
+
 def get_current_task_id() -> str | None:
     """The task id of the in-flight run, or None when not inside a run.
 
