@@ -36,14 +36,11 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import { ScheduleDetailDialog } from "@/components/schedules/schedule-detail-dialog"
-import { ScheduleToggle } from "@/components/schedules/schedule-toggle"
 import {
   useBrowseDir,
   useDeleteTask,
   useProjectManage,
   useProjects,
-  useScheduleManage,
   useSchedules,
   useTasks,
   useUpdateTask,
@@ -51,8 +48,9 @@ import {
 import { fmtTimeShort } from "@/lib/format"
 import { excerpt, isTerminalTask } from "@/lib/tasks"
 import { cn } from "@/lib/utils"
-import type { Schedule, Task } from "@/lib/types"
+import type { Task } from "@/lib/types"
 import {
+  CalendarClockIcon,
   ChevronRightIcon,
   CopyIcon,
   FolderIcon,
@@ -157,23 +155,7 @@ function WorkspaceSection({
   const schedules = useSchedules()
   const projects = useProjects()
   const manage = useProjectManage()
-  const scheduleManage = useScheduleManage()
 
-  const toggleScheduleEnabled = (schedule: Schedule, enabled: boolean) => {
-    scheduleManage.update.mutate({
-      scheduleId: schedule.id,
-      payload: {
-        name: schedule.name,
-        task_input: schedule.task_input,
-        schedule_type: schedule.schedule_type,
-        run_at: schedule.run_at,
-        cron_expr: schedule.cron_expr,
-        interval_minutes: schedule.interval_minutes,
-        enabled,
-        model: schedule.model,
-      },
-    })
-  }
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
   const projectList = projects.data ?? []
@@ -190,7 +172,6 @@ function WorkspaceSection({
   const [collapsed, setCollapsed] = React.useState<Set<string> | null>(null)
   // Per-schedule expanded runs in the 日程 tab (schedule id → open).
   const [openScheduleRuns, setOpenScheduleRuns] = React.useState<Set<string>>(new Set())
-  const [scheduleDetail, setScheduleDetail] = React.useState<Schedule | null>(null)
 
   // Newest first; pinned conversations float to the top. Memoized on the raw
   // query data so the stable sort/map don't rebuild on every render.
@@ -388,39 +369,31 @@ function WorkspaceSection({
                       <div
                         role="button"
                         tabIndex={0}
-                        onClick={() => setScheduleDetail(schedule)}
+                        aria-expanded={runsOpen}
+                        onClick={() => runs.length && toggleScheduleRuns(schedule.id)}
                         onKeyDown={(e) => {
                           if (e.target !== e.currentTarget) return
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault()
-                            setScheduleDetail(schedule)
+                            runs.length && toggleScheduleRuns(schedule.id)
                           }
                         }}
-                        className="group/schedule-row flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2"
+                        className={cn(
+                          "group/schedule-row flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2",
+                          runs.length
+                            ? "cursor-pointer hover:bg-sidebar-accent"
+                            : "opacity-70",
+                        )}
                         title={schedule.task_input}
                       >
-                        <span
-                          role="button"
-                          tabIndex={-1}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            if (runs.length) toggleScheduleRuns(schedule.id)
-                          }}
-                          onKeyDown={(e) => e.stopPropagation()}
+                        <ChevronRightIcon
                           className={cn(
-                            "rounded p-0.5 text-muted-foreground transition-transform hover:text-foreground",
-                            !runs.length && "invisible",
+                            "size-3.5 shrink-0 text-muted-foreground transition-transform",
                             runsOpen && "rotate-90",
+                            !runs.length && "invisible",
                           )}
-                          title={runs.length ? `展开运行记录（${runs.length}）` : "还没有运行记录"}
-                        >
-                          <ChevronRightIcon className="size-3.5" />
-                        </span>
-                        <ScheduleToggle
-                          schedule={schedule}
-                          disabled={scheduleManage.update.isPending}
-                          onToggle={toggleScheduleEnabled}
                         />
+                        <CalendarClockIcon className="size-3.5 shrink-0 text-muted-foreground" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-xs font-medium" title={schedule.name}>
                             {schedule.name}
@@ -429,9 +402,13 @@ function WorkspaceSection({
                             {schedule.enabled && schedule.next_run_at
                               ? `下次 ${new Date(schedule.next_run_at).toLocaleString()}`
                               : schedule.trigger_text}
-                            {runs.length > 0 ? ` · 已运行 ${runs.length} 次` : ""}
                           </span>
                         </span>
+                        {runs.length > 0 && (
+                          <span className="shrink-0 text-[0.65rem] text-muted-foreground/70">
+                            {runs.length}
+                          </span>
+                        )}
                       </div>
                     </SidebarMenuItem>
                     {runsOpen &&
@@ -566,11 +543,6 @@ function WorkspaceSection({
           )}
         </SidebarMenu>
       </SidebarGroupContent>
-
-      <ScheduleDetailDialog
-        schedule={scheduleDetail}
-        onClose={() => setScheduleDetail(null)}
-      />
 
       {/* folder picker: add project by choosing a server folder */}
       {pickerOpen && (
