@@ -4,7 +4,7 @@ Task A: a 30-slide Chinese pptx about AI history
 Task B: an illustrated 4-seasons China web album
 
 Both run concurrently through the full stack (local qwen model, run_code for
-python-pptx, telegram_notify milestones). Every trace event is streamed to a
+python-pptx milestones). Every trace event is streamed to a
 per-task log for post-run analysis.
 
 Usage: uv run --env-file .env python scripts/e2e_autonomy.py   (Ctrl-C to abort)
@@ -32,7 +32,6 @@ AVATAR_SYSTEM_PROMPT = """你是用户的个人 AI 分身，独立完成长任�
   再跑脚本；不要直接 `pip install`。系统级安装（apt/brew 等）需要主人审批，
   非必要不用。
   命令失败时读错误信息、修好再跑，不要原样重试。
-- 汇报：开始时、完成一半时、结束时各用 telegram_notify 给主人发一条简短进展（中文）。
 - 交付物必须是真实落盘的文件；结束前用 run_code 验证文件存在且尺寸合理。
 - 写技能：当用户让你"写一个 skill / 技能"时，在 workspace 下建目录、写好 SKILL.md
   （含 YAML frontmatter：name + description，写清适用时机），然后用 install_skill 工具
@@ -47,8 +46,7 @@ TASK_A = """任务：制作一份 30 页的中文 PPT《人工智能简史与未
    - 恰好 30 页，含标题页、目录、章节过渡页、内容页、总结页
    - 每页有标题和 2-4 行正文
 3. 用 run_code 执行脚本生成 pptx；再用 run_code 验证：页数=30、文件大于 1MB；
-4. 全程用 telegram_notify 至少汇报 3 次（开始/中途/完成），
-   完成消息里写清文件路径和页数。"""
+4. 完成后在最终回复里写清文件路径和页数。"""
 
 
 TASK_B = """任务：制作一份精美的网页画册《四季·中国》，保存到 workspace/album/。
@@ -61,8 +59,7 @@ TASK_B = """任务：制作一份精美的网页画册《四季·中国》，保
    （可用 python 脚本画简洁的水彩风矢量图，如 spring-1.svg）；
 3. 用 run_code 验证：12 张 SVG 都在、index.html 引用的每个图片文件都存在
    （写个小脚本检查）；
-4. 用 telegram_notify 至少汇报 3 次（开始/中途/完成），
-   完成消息里写清路径和你的自评。"""
+4. 完成后在最终回复里写清路径和你的自评。"""
 
 
 def avatar_spec() -> AgentSpec:
@@ -71,7 +68,7 @@ def avatar_spec() -> AgentSpec:
         name="Avatar",
         # Empty tools = every available tool (see AgentBuilder._agent_tool_names):
         # the console no longer binds tools per agent, so the avatar gets
-        # run_code / telegram_notify / create_schedule automatically.
+        # run_code / create_schedule automatically.
         system_prompt=AVATAR_SYSTEM_PROMPT,
         limits=AgentLimits(timeout_seconds=5400),
         resilience=ResiliencePolicy(

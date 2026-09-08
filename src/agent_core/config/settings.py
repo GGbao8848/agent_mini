@@ -98,13 +98,12 @@ def apply_proxy(settings: Settings) -> None:
 @lru_cache
 def get_settings() -> Settings:
     """Return the process-wide settings (cached)."""
-    # Read the .env file so provider SDKs and the notification channel — which
-    # read OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, ... directly from os.environ
-    # — see the same values as Settings. pydantic-settings maps AGENT_CORE_*
-    # fields itself, so those must NOT leak into os.environ: that would corrupt
-    # hermetic tests that build Settings(_env_file=None). Real environment
-    # variables are authoritative over the .env file — keys that already exist
-    # in os.environ are never overwritten here nor popped below.
+    # Read the .env file so provider SDKs — which read OPENROUTER_API_KEY, ...
+    # directly from os.environ — see the same values as Settings. pydantic-settings
+    # maps AGENT_CORE_* fields itself, so those must NOT leak into os.environ:
+    # that would corrupt hermetic tests that build Settings(_env_file=None).
+    # Real environment variables are authoritative over the .env file — keys
+    # that already exist in os.environ are never overwritten here nor popped below.
     added: list[str] = []
     env_file = dotenv_values(".env")
     for key, value in env_file.items():

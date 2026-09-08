@@ -25,8 +25,6 @@ const TOOL_LABELS: Record<string, string> = {
   glob: "搜索文件",
   grep: "搜索内容",
   install_skill: "安装技能",
-  telegram_notify: "发送通知",
-  telegram_send_artifact: "发送产物",
   ensure_packages: "安装依赖",
   create_schedule: "创建日程",
 }

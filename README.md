@@ -42,7 +42,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 16 | 持久化：SQLite 写穿透（注册中心/Run/审批/事件）+ 重启恢复，`AGENT_CORE_DATABASE_URL` 可选启用 | ✅ |
 | 17 | 自治与预算治理：RunBudget 硬上限、循环/无进展检测、NEEDS_INPUT 任务级求助、执行后自检自修回路 | ✅ |
 | 18 | 本地模型接入（`local:` provider，任意 OpenAI 兼容端点）+ 模型能力矩阵冒烟 | ✅ |
-| 19 | 代理（`AGENT_CORE_PROXY_URL` + NO_PROXY 豁免内网服务）+ Telegram 通知渠道（telegram_notify 工具 + chat_id 引导脚本） | ✅ |
+| 19 | 代理（`AGENT_CORE_PROXY_URL` + NO_PROXY 豁免内网服务） | ✅ |
 | 20 | run_code 内置工具 + workspace 真实文件 backend + 双长任务端到端自治验证（30 页 PPT / 网页画册） | ✅ |
 | 21 | 代码执行后端：host 模式（默认，agent 专用 venv + ensure_packages 先查后装 + 系统包管理器审批）或 Podman Sandbox 容器内执行（仅挂载 workspace、资源上限、rootless） | ✅ |
 | 22 | Agent Console：局域网 Web 控制台——Run 时间线（持久化历史+实时 SSE）、事件详情、产物预览/下载、审批面板、派任务 | ✅ |
@@ -192,7 +192,7 @@ uv run --env-file .env python scripts/eval_real.py --suite fx --judge --compare 
 
 设计要点：内存 dict 始终是读侧唯一来源（读性能不变、契约不变），库只是镜像；不设置该变量时行为与纯内存 v1 完全一致。**不解决执行恢复**——WAITING_APPROVAL 的 run 其图状态与进程内唤醒句柄不可序列化，跨重启恢复执行需接入 LangGraph checkpointer（远期）。
 
-## 代理与 Telegram 通知（Phase 19）
+## 出站代理（Phase 19）
 
 ### 进程级代理
 
@@ -201,16 +201,7 @@ AGENT_CORE_PROXY_URL=http://10.10.10.214:7890   # → HTTP_PROXY / HTTPS_PROXY
 AGENT_CORE_NO_PROXY=10.10.10.146,10.10.10.169   # 内网服务（本地模型/文生图）直连豁免
 ```
 
-`apply_proxy` 在设置代理时总是把 `localhost,127.0.0.1,::1` 加入 `NO_PROXY`，并追加 `AGENT_CORE_NO_PROXY` 主机——代理只覆盖 Telegram 等外网流量，本地方向不受影响。
-
-### Telegram 出站渠道
-
-| 项 | 说明 |
-|---|---|
-| 配置 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`（标准环境变量，凭据不入库） |
-| 首次绑定 | `uv run --env-file .env python scripts/smoke_telegram.py`：getMe 验证 token → 轮询 getUpdates 发现你的 chat_id（自动写入 .env）→ 发送测试消息 |
-| Agent 工具 | 内置 `telegram_notify(message)`：配置齐全后自动注册，agent 在 `spec.tools` 里声明即可给主人发消息，照常走 Action Gate |
-| 实现 | `agent_core/notify/telegram.py`：httpx `trust_env` 自动走进程代理；网络错误为 retryable `ToolError` |
+`apply_proxy` 在设置代理时总是把 `localhost,127.0.0.1,::1` 加入 `NO_PROXY`，并追加 `AGENT_CORE_NO_PROXY` 主机——代理只覆盖外网流量，内网/本地方向不受影响。
 
 ## Podman Sandbox（Phase 21）
 
@@ -232,7 +223,7 @@ bash scripts/sandbox_build.sh                   # 构建镜像（python:3.13-sli
 
 **host 模式（默认）**：没有 Docker/Podman 也能跑，但包管理是托管式的——`run_code` 的 PATH 指向一个 agent 专用 venv（`--system-site-packages`，宿主机已有的库直接复用、绝不装第二份）；缺的库用内置 `ensure_packages` 工具声明，先查后装、只装缺的、永远装进 agent venv 而非系统或项目环境；`uv` 优先、pip 回退，缓存全局共享（`~/.agent_core/cache`）。启动时探测宿主机 CLI 清单（ffmpeg/libreoffice/git/npx...）写进工具描述，agent 开工前就知道有什么。命令触及系统包管理器（`apt/brew/dnf... install`）会经参数级规则动态升级为**人工审批**。
 
-**podman 模式**：`run_code` 的每条命令都在容器内执行：**只有 workspace 挂载进容器**（`/work`）——宿主机的 `.env` 密钥、SSH、git 历史全部不可达；路径穿越（`/work/../..`）只到容器自己的根；内存/CPU/进程数有硬上限；代理环境变量透传（pip 装包走代理）。workspace 成为 agent 与宿主机之间的唯一交换点。已实测验证：边界四项检查全过 + 沙箱模式下真实任务（mini pptx + Telegram 汇报）端到端完成。
+**podman 模式**：`run_code` 的每条命令都在容器内执行：**只有 workspace 挂载进容器**（`/work`）——宿主机的 `.env` 密钥、SSH、git 历史全部不可达；路径穿越（`/work/../..`）只到容器自己的根；内存/CPU/进程数有硬上限；代理环境变量透传（pip 装包走代理）。workspace 成为 agent 与宿主机之间的唯一交换点。已实测验证：边界四项检查全过 + 沙箱模式下真实任务（mini pptx）端到端完成。
 
 ## 工具箱：Skills / MCP 安装与管理（Phase 24）
 
