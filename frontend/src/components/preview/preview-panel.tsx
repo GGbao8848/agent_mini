@@ -124,8 +124,10 @@ function Panel({ target, onClose }: { target: PreviewTarget; onClose: () => void
   )
 }
 
-/** Three-column layout support: sits to the right of the main content; hidden
- *  until an artifact is clicked (ZCode-style preview pane). */
+/** Right-hand preview pane. The pane must sit in the same horizontal flex
+ *  row as the app (sidebar + main content): wrapping children in a flex
+ *  container keeps the pane out of the document flow, so opening a preview
+ *  never pushes the page below the fold. */
 export function PreviewProvider({ children }: { children: React.ReactNode }) {
   const [target, setTarget] = React.useState<PreviewTarget | null>(null)
   const value = React.useMemo(
@@ -140,8 +142,10 @@ export function PreviewProvider({ children }: { children: React.ReactNode }) {
   )
   return (
     <PreviewContext.Provider value={value}>
-      {children}
-      {target && <Panel target={target} onClose={value.close} />}
+      <div className="flex h-svh overflow-hidden">
+        {children}
+        {target && <Panel target={target} onClose={value.close} />}
+      </div>
     </PreviewContext.Provider>
   )
 }
