@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { KeyRoundIcon, TriangleAlertIcon, Trash2Icon, CircleCheckIcon, CircleAlertIcon } from "lucide-react"
+import { TriangleAlertIcon, Trash2Icon, CircleCheckIcon, CircleAlertIcon } from "lucide-react"
 import type { ConnState } from "@/hooks/use-console"
 
 const CONN_BADGE: Record<ConnState, { label: string; className: string }> = {
@@ -59,13 +59,11 @@ export function SiteHeader({
   title,
   conn,
   pendingApprovals,
-  onOpenTokenDialog,
   taskId,
 }: {
   title: string
   conn: ConnState
   pendingApprovals: number
-  onOpenTokenDialog: () => void
   /** The currently open conversation (from the "新建任务" view); live stats shown when set. */
   taskId?: string | null
 }) {
@@ -149,9 +147,6 @@ export function SiteHeader({
         <Badge variant="outline" className={CONN_BADGE[conn].className}>
           {CONN_BADGE[conn].label}
         </Badge>
-        <Button variant="ghost" size="icon" title="控制台令牌" onClick={onOpenTokenDialog}>
-          <KeyRoundIcon />
-        </Button>
       </div>
     </header>
   )

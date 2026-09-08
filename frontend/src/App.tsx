@@ -3,7 +3,6 @@ import * as React from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PreviewProvider } from "@/components/preview/preview-panel"
 import { SiteHeader } from "@/components/site-header"
-import { TokenDialog } from "@/components/token-dialog"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { useApprovals, useGlobalEvents } from "@/hooks/use-console"
@@ -31,7 +30,6 @@ export default function App() {
   // The project a brand-new conversation should bind to (set by the sidebar's
   // project-row "+"); cleared once consumed by a submitted task.
   const [presetProjectId, setPresetProjectId] = React.useState<string | null>(null)
-  const [tokenOpen, setTokenOpen] = React.useState(false)
   const conn = useGlobalEvents()
   const approvals = useApprovals()
 
@@ -53,13 +51,6 @@ export default function App() {
     setSelectedTaskId(null)
     setPresetProjectId(projectId)
     setView("新建任务")
-  }, [])
-
-  // The API layer dispatches this on any 401 — pop the token dialog.
-  React.useEffect(() => {
-    const show = () => setTokenOpen(true)
-    window.addEventListener("console:unauthorized", show)
-    return () => window.removeEventListener("console:unauthorized", show)
   }, [])
 
   // Views outside the task list (schedules…) dispatch this to open a task.
@@ -102,12 +93,10 @@ export default function App() {
             title={view}
             conn={conn}
             pendingApprovals={approvals.data?.length ?? 0}
-            onOpenTokenDialog={() => setTokenOpen(true)}
             taskId={view === "新建任务" ? selectedTaskId : null}
           />
           <div className="flex min-h-0 flex-1">{renderView}</div>
         </SidebarInset>
-        <TokenDialog open={tokenOpen} onOpenChange={setTokenOpen} />
         <Toaster richColors position="bottom-right" />
       </SidebarProvider>
     </PreviewProvider>
