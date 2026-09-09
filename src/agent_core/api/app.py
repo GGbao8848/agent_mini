@@ -44,6 +44,10 @@ def create_app(service: AgentCoreService | None = None) -> FastAPI:
         # from the console; the API must come up regardless.
         with contextlib.suppress(Exception):
             await core.mcp.auto_connect_all()
+        # Reclaim LangGraph threads stranded by tasks deleted before the
+        # delete-fix; best-effort, the API must come up regardless.
+        with contextlib.suppress(Exception):
+            await core.runtime.cleanup_orphan_checkpoints()
         try:
             yield
         finally:

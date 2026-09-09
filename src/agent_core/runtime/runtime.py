@@ -255,6 +255,41 @@ class AgentRuntime:
             return updated
         return task
 
+    async def cleanup_orphan_checkpoints(self) -> int:
+        """Delete LangGraph threads whose task no longer exists (boot-time GC).
+
+        Every conversation turn appends full-state snapshots to the
+        checkpoints database; deleting a task used to strand its thread there
+        forever, so long-lived deployments accumulated hundreds of MB of dead
+        history. Runs after the delete-fix stop creating orphans; this pass
+        reclaims the ones created before it. Best-effort: any failure is
+        logged and swallowed — startup must not depend on GC.
+        """
+        import logging
+
+        import aiosqlite
+
+        from agent_core.persistence.checkpointer import _sibling_checkpoints_file
+
+        if self._store is None or get_settings().database_url is None:
+            return 0
+        await self._ensure_checkpointer_ready()
+        delete_thread = getattr(self.checkpointer, "adelete_thread", None)
+        if delete_thread is None:
+            return 0
+        alive = {task.thread_id for task in self._tasks.values() if task.thread_id}
+        path = _sibling_checkpoints_file(str(get_settings().database_url).removeprefix("sqlite:///"))
+        async with aiosqlite.connect(str(path)) as con:
+            rows = await con.execute_fetchall("SELECT DISTINCT thread_id FROM checkpoints")
+        orphans = [tid for (tid,) in rows if tid not in alive]
+        for tid in orphans:
+            await delete_thread(tid)
+        if orphans:
+            logging.getLogger(__name__).info(
+                "checkpoint GC: removed %d orphaned thread(s)", len(orphans)
+            )
+        return len(orphans)
+
     async def delete_task(self, task_id: str) -> None:
         """Delete a conversation, every run it produced, and its checkpoints.
 

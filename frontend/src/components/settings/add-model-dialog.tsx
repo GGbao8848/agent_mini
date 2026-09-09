@@ -49,6 +49,7 @@ export function AddModelDialog({
   const [apiKey, setApiKey] = React.useState("")
   const [models, setModels] = React.useState<string[]>([])
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
+  const [contextWindow, setContextWindow] = React.useState<string>("")
 
   // Prefill when editing; reset when opening for a fresh entry.
   React.useEffect(() => {
@@ -60,6 +61,7 @@ export function AddModelDialog({
       setApiKey("")
       setModels(editing.models)
       setSelected(new Set(editing.models))
+      setContextWindow(editing.context_window ? String(editing.context_window) : "")
     } else {
       setName("")
       setBaseUrl("")
@@ -67,6 +69,7 @@ export function AddModelDialog({
       setApiKey("")
       setModels([])
       setSelected(new Set())
+      setContextWindow("")
     }
     discover.reset()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -102,6 +105,7 @@ export function AddModelDialog({
         api_format: apiFormat,
         api_key: apiKey.trim() || undefined,
         models: [...selected],
+        context_window: contextWindow.trim() ? Number(contextWindow.trim()) : null,
       },
       {
         onSuccess: () => {
@@ -173,6 +177,21 @@ export function AddModelDialog({
               onChange={(e) => setApiKey(e.target.value)}
               placeholder={editing?.key_hint ? `已配置（${editing.key_hint}），留空保持不变` : "sk-…"}
             />
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="am-ctx">上下文窗口（tokens，可空）</Label>
+            <Input
+              id="am-ctx"
+              type="number"
+              min={1024}
+              value={contextWindow}
+              onChange={(e) => setContextWindow(e.target.value)}
+              placeholder="例如 262144；用于上下文容量显示与自动摘要触发阈值"
+            />
+            <p className="text-xs text-muted-foreground">
+              vLLM 等 /v1/models 的 max_model_len；OpenRouter 模型窗口各异需查文档。
+            </p>
           </div>
 
           <div className="flex items-center gap-2">

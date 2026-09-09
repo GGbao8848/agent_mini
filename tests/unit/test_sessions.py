@@ -240,3 +240,47 @@ class TestTaskDeletion:
         runtime = make_runtime(tmp_path, monkeypatch)
         with _pytest.raises(RegistryError):
             await runtime.delete_task("no-such-task")
+
+
+class TestCheckpointGC:
+    async def test_cleanup_orphan_checkpoints(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Boot-time GC reclaims threads of tasks that no longer exist while
+        leaving live conversations untouched."""
+        from agent_core.persistence.store import SqliteStore
+
+        db = tmp_path / "agent_core.db"
+        monkeypatch.setenv("AGENT_CORE_DATABASE_URL", f"sqlite:///{db}")
+        monkeypatch.chdir(tmp_path)
+        get_settings.cache_clear()
+        agents = AgentRegistry()
+        agents.register(AgentSpec(id="helper", name="Helper"))
+        runtime = AgentRuntime(
+            agents, ToolRegistry(), SkillRegistry(), store=SqliteStore(f"sqlite:///{db}")
+        )
+        runtime.builder = EchoBuilder(runtime.checkpointer)
+
+        kept = runtime.create_conversation("helper", "keep")
+        orphan = runtime.create_conversation("helper", "orphan")
+        for conversation in (kept, orphan):
+            run = runtime.task_active_run(conversation.id)
+            assert run is not None
+            await runtime.execute_run(run)
+        assert kept.thread_id is not None and orphan.thread_id is not None
+
+        # Simulate the pre-fix delete: business rows gone, thread stranded.
+        runtime._tasks.pop(orphan.id, None)
+        assert await runtime.checkpointer.aget_tuple(
+            {"configurable": {"thread_id": orphan.thread_id}}
+        ) is not None
+
+        removed = await runtime.cleanup_orphan_checkpoints()
+
+        assert removed == 1
+        assert await runtime.checkpointer.aget_tuple(
+            {"configurable": {"thread_id": orphan.thread_id}}
+        ) is None
+        assert await runtime.checkpointer.aget_tuple(
+            {"configurable": {"thread_id": kept.thread_id}}
+        ) is not None

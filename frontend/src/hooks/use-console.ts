@@ -451,7 +451,14 @@ export function useCustomModelManage() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["model-config"] })
   const upsert = useToastMutation<
     ModelConfig,
-    { name: string; base_url: string; api_format: string; api_key?: string; models: string[] }
+    {
+      name: string
+      base_url: string
+      api_format: string
+      api_key?: string
+      models: string[]
+      context_window?: number | null
+    }
   >({
     mutationFn: ({ name, ...payload }) => api.put(`/v1/model-config/custom/${encodeURIComponent(name)}`, payload),
     onSuccess: invalidate,
