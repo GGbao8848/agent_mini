@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from agent_core.domain.tool import ToolDefinition
+from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError
 from agent_core.persistence.store import SqliteStore
 from agent_core.registries.base import BaseRegistry
@@ -81,3 +81,22 @@ class ToolRegistry(BaseRegistry[ToolDefinition]):
         typically while their server is disconnected.
         """
         return tool_name in self._items and tool_name in self._handlers
+
+    def hydrate(self) -> None:
+        """Restore MCP tool definitions persisted by a previous process.
+
+        Code-owned tools (python/internal) re-register from code on every
+        boot; restoring their persisted rows would resurrect tools from
+        removed features, so stale non-MCP rows are purged from the store
+        instead of loaded.
+        """
+        if self._store is None:
+            return
+        for key, data in self._store.load_items(self.kind):
+            if key in self._items:
+                continue
+            item = self.deserialize(data)
+            if item.source is ToolSource.MCP:
+                self._items[key] = item
+            else:
+                self._store.delete_item(self.kind, key)

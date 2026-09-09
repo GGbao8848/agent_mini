@@ -1,5 +1,7 @@
 """Unit tests for the four registries (register/get/list/remove/duplicate/version)."""
 
+from typing import Any
+
 import pytest
 
 from agent_core.domain.agent import AgentSpec
@@ -7,6 +9,7 @@ from agent_core.domain.mcp import MCPServerDefinition, MCPServerStatus, MCPTrans
 from agent_core.domain.skill import SkillManifest
 from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError
+from agent_core.persistence.store import SqliteStore
 from agent_core.registries import AgentRegistry, MCPRegistry, SkillRegistry, ToolRegistry
 
 
@@ -107,6 +110,30 @@ class TestToolRegistry:
 
         with pytest.raises(RegistryError):
             registry.register(make_tool())
+
+    def test_hydrate_restores_mcp_and_purges_stale_code_tools(self, tmp_path: Any) -> None:
+        """MCP definitions survive restarts; code-owned ones must not — a
+        stale row (e.g. a builtin left by a removed feature) is purged from
+        the store instead of being resurrected as a zombie tool."""
+        store = SqliteStore(f"sqlite:///{tmp_path / 'tools.db'}")
+        mcp_tool = ToolDefinition(name="demo_echo", source=ToolSource.MCP)
+        stale_builtin = ToolDefinition(name="save_memory", source=ToolSource.INTERNAL)
+        first = ToolRegistry(store)
+        first.register(mcp_tool)
+        first.register(stale_builtin)
+
+        second = ToolRegistry(store)
+        second.hydrate()
+
+        assert second.get("demo_echo").source is ToolSource.MCP
+        with pytest.raises(RegistryError):
+            second.get("save_memory")
+        # Purged from the store itself, not just skipped in memory.
+        third = ToolRegistry(store)
+        third.hydrate()
+        with pytest.raises(RegistryError):
+            third.get("save_memory")
+        store.close()
 
 
 class TestSkillRegistry:

@@ -211,8 +211,14 @@ class TestRegistryPersistence:
         assert len(restored) == 0
 
     def test_tool_definitions_restore_without_handlers(self, tmp_path: Path) -> None:
+        """Only MCP definitions survive a restart (handlers stay process-local);
+        code-owned tools re-register from code, so their persisted rows are
+        not restored."""
         store = SqliteStore(f"sqlite:///{tmp_path}/agent.db")
         registry = ToolRegistry(store)
+        registry.register(
+            ToolDefinition(name="demo_echo", source=ToolSource.MCP),
+        )
         registry.register(
             ToolDefinition(
                 name="get_weather", description="Weather lookup", source=ToolSource.PYTHON
@@ -223,10 +229,12 @@ class TestRegistryPersistence:
         restored = ToolRegistry(store)
         restored.hydrate()
 
-        assert restored.get("get_weather").name == "get_weather"
+        assert restored.get("demo_echo").source is ToolSource.MCP
         with pytest.raises(RegistryError) as excinfo:
-            restored.handler_for("get_weather")
+            restored.handler_for("demo_echo")
         assert "no executable handler registered" in excinfo.value.message
+        with pytest.raises(RegistryError):
+            restored.get("get_weather")
 
     def test_skill_versions_roundtrip_with_latest_order(self, tmp_path: Path) -> None:
         store = SqliteStore(f"sqlite:///{tmp_path}/agent.db")
