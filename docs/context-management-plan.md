@@ -17,8 +17,8 @@ follow-up 只发新消息 + thread_id，由 checkpointer **全量重放**历史�
 | 1 | **token usage 恒为 0**：预算控制失效、UI 恒 0、增长不可观测 | langchain-openai 只对官方 OpenAI base URL 默认开 `stream_usage`，自定义端点（vLLM）流式响应不带 usage | `build_model` 对 custom/local/openrouter 强制 `stream_usage=True` | ✅ | `4755550` runtime/model.py |
 | 2 | **API 白名单剥离新字段**：领域模型加字段后 API 静默丢弃（gauge 恒空环） | `RunUsageOut` 是字段白名单，新字段未同步 | 同步 wire schema + 回归测试（领域模型过一遍 RunOut 序列化断言字段存在） | ✅ | `16b2c73` api/schemas.py + test_usage.py |
 | 3 | **结构化工具结果不限长**：dict/list 绕过 cap_text，一次 verbose 工具污染后续所有 prefill | gate 只对 str 截断 | `cap_result`：dict/list 序列化后限额，超限替换为截断字符串（限额内保持原结构）；顺带修 `cap_text` 的 `value[-0:]` 反向膨胀 | ✅ | `4755550` runtime/text.py + gate.py + test_text.py |
-| 4 | **checkpoint 永久孤儿**：删任务不删 LangGraph 线程（生产 309MB/1.4 万行） | delete_task 只清业务表 | delete_task 连带 `adelete_thread`；启动时孤儿 GC（见遗留 #2 计划） | ✅（删除清理）/⏳（GC） | `4755550` runtime.py + routes/tasks.py + test_sessions.py |
-| 5 | **摘要阈值与真实窗口错配**：无 model profile 时 deepagents 用扁平 170k 触发 | 自定义端点无 profile | `CustomModel.context_window` → 注入 `profile={"max_input_tokens": …}` → 摘要按真实窗口 fraction 0.85 触发 | ✅（机制）/⏳（UI 录入） | `4755550` model_config.py + model.py |
+| 4 | **checkpoint 永久孤儿**：删任务不删 LangGraph 线程（生产 309MB/1.4 万行） | delete_task 只清业务表 | delete_task 连带 `adelete_thread` + 启动时孤儿 GC（lifespan 调 `cleanup_orphan_checkpoints`，生产首次启动回收 33 个孤儿线程；WAL 下文件不物理收缩，空间复用，可手动 VACUUM） | ✅ | `4755550` + `ff15198` runtime.py + app.py + test_sessions.py |
+| 5 | **摘要阈值与真实窗口错配**：无 model profile 时 deepagents 用扁平 170k 触发 | 自定义端点无 profile | `CustomModel.context_window` → 注入 `profile={"max_input_tokens": …}` → 摘要按真实窗口 fraction 0.85 触发 | ✅ | `4755550` + `ff15198`（配置页 UI 录入）model_config.py + model.py + add-model-dialog.tsx |
 | 6 | **上下文增长不可见**：用户看不到对话占了多少窗口、花在哪 | 无 per-call 快照指标 | `RunUsage.last_input_tokens`（最近一次调用 input ≈ 当前上下文）+ `estimated_system/messages_tokens`（on_chat_model_start 按 CJK 启发式拆 system/历史）+ `run.metadata.context_breakdown`（构建时静态估算工具 schema/技能清单） | ✅ | `2481005`/`6d19a9f` metrics/usage/builder/context_breakdown.py |
 | 7 | **控制台无容量指示**：用户不知道何时该开新对话 | — | Composer 上下文圆环（灰黑单色）+ 悬停白底明细面板（消息/系统提示词/系统工具/MCP工具/技能/其他 各行占比） | ✅ | `2481005`/`6d19a9f`/`c48ecd4` chat/context-gauge.tsx |
 | 8 | **发消息瞬间归零闪断**：新 run 无 usage，gauge 切过去读了个空 | gauge 只读 active run | 回退遍历最近 run 取最近一个带快照的，标注"（上一轮）"，新值到达后无缝切换 | ✅ | `c48ecd4` context-gauge.tsx |
@@ -50,10 +50,8 @@ follow-up 只发新消息 + thread_id，由 checkpointer **全量重放**历史�
 
 ## 下一步（Backlog，按价值排序）
 
-1. **模型配置页 context_window 输入框**（前端 add-model-dialog/model-panel + 类型）——
-   补完 #5 闭环，让圆环显示真实窗口而非 256k 估算。
-2. **启动时孤儿 checkpoint GC**：扫描 checkpoints 线程，删除 tasks 表已不存在的
-   thread（生产 309MB 直接受益；删除清理只覆盖今后）。
+1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
+2. ~~启动时孤儿 checkpoint GC~~ ✅ `ff15198`（生产首次启动回收 33 线程）
 3. **摘要触发实测**：创建带 `SummarizationPolicy(trigger_tokens=小值)` 的测试 agent
    跑长对话，观察摘要后 keep_messages 保留行为、远轮记忆损失、checkpoint 收缩。
 4. **提示词引导**：environment_note 里加"优先 grep/分段读取，避免全文 cat 大文件"。
