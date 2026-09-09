@@ -9,6 +9,7 @@ step is emitted as a trace event.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from datetime import UTC, datetime
 from functools import partial
@@ -578,6 +579,9 @@ class AgentRuntime:
             )
             if run.parent_run_id is None:
                 self._record_assistant_turn(run, output)
+                if get_settings().auto_memory:
+                    with contextlib.suppress(Exception):
+                        await self._extract_memory(run, spec, output)
         except asyncio.CancelledError:
             # Deliberate cancellation is a normal outcome, not an error.
             self._transition(run, RunStatus.CANCELLED)
@@ -801,6 +805,37 @@ class AgentRuntime:
         return await self.executor.execute(
             graph, run=run, input_text=task_input, spec=spec, collector=collector
         )
+
+    async def _extract_memory(self, run: Run, spec: AgentSpec, output: str) -> None:
+        """One cheap post-turn call: keep a durable fact if the turn produced
+        one, stay silent otherwise. Never raises — memory is a side quest."""
+        from agent_core.runtime.model import build_model
+
+        user_text = run.metadata.get("input") or self.task_input(run)
+        if not user_text.strip():
+            return
+        existing = "\n".join(f"- {m.content}" for m in self.list_memories()) or "（空）"
+        prompt = (
+            "判断下面这轮对话是否产生了值得长期记住的稳定事实"
+            "（用户偏好、项目约定、对反复错误的纠正、关键决定）。\n"
+            "已有记忆列表（语义重复也算重复）：\n"
+            f"{existing}\n\n"
+            "有且不与已有记忆重复 → 只输出一句自包含的中文事实，不要任何前缀；\n"
+            "没有，或与已有记忆重复 → 只输出 NONE。\n\n"
+            f"【用户】{user_text[:2000]}\n"
+            f"【助手】{(output or '')[:2000]}"
+        )
+        model = build_model(spec.model)
+        result = await model.ainvoke(prompt)
+        from agent_core.runtime.text import extract_text
+
+        fact = extract_text(result.content).strip()
+        if not fact or fact.upper().startswith("NONE") or len(fact) > 500:
+            return
+        existing = {m.content for m in self.list_memories()}
+        if fact in existing:
+            return
+        self.add_memory(fact, source="agent", task_id=run.task_id)
 
     def _record_assistant_turn(self, run: Run, output: str) -> None:
         """Append the agent's answer to the conversation (root runs only)."""

@@ -97,3 +97,51 @@ class TestBuilderInjection:
         prompt = memories_prompt(runtime.list_memories())
         assert "测试记忆条目" in prompt
         assert "# Long-term memories" in prompt
+
+
+class TestAutoExtraction:
+    """After each completed turn a cheap call decides whether the turn
+    produced a durable fact; silence (NONE / empty) means nothing stored."""
+
+    def _runtime_with_stub_model(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: str) -> AgentRuntime:
+        from agent_core.config.settings import get_settings
+
+        runtime = make_runtime(tmp_path, monkeypatch)
+
+        class StubModel:
+            async def ainvoke(self, prompt: str):
+                from langchain_core.messages import AIMessage
+
+                return AIMessage(content=reply)
+
+        import agent_core.runtime.model as model_module
+
+        monkeypatch.setattr(model_module, "build_model", lambda spec=None: StubModel())
+        get_settings.cache_clear()
+        return runtime
+
+    async def test_turn_with_a_fact_is_extracted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        runtime = self._runtime_with_stub_model(tmp_path, monkeypatch, "用户偏好 pnpm 作为包管理器")
+        run = runtime.create_run("h", "以后项目都用 pnpm")
+        await runtime.execute_run(run)
+        assert [m.content for m in runtime.list_memories()] == ["用户偏好 pnpm 作为包管理器"]
+        assert runtime.list_memories()[0].source == "agent"
+
+    async def test_silent_turn_stores_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        runtime = self._runtime_with_stub_model(tmp_path, monkeypatch, "NONE")
+        run = runtime.create_run("h", "今天天气怎么样")
+        await runtime.execute_run(run)
+        assert runtime.list_memories() == []
+
+    async def test_duplicate_facts_deduplicate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        runtime = self._runtime_with_stub_model(tmp_path, monkeypatch, "用户偏好 pnpm 作为包管理器")
+        for _ in range(2):
+            run = runtime.create_run("h", "记得：项目统一用 pnpm")
+            await runtime.execute_run(run)
+        assert len(runtime.list_memories()) == 1
