@@ -566,36 +566,6 @@ class CustomModelOut(BaseModel):
         )
 
 
-class MemoryOut(BaseModel):
-    """One long-term memory entry."""
-
-    id: str
-    content: str
-    source: str
-    task_id: str | None
-    created_at: Any
-    updated_at: Any
-
-    @classmethod
-    def of(cls, m: Any) -> "MemoryOut":
-        return cls(
-            id=m.id,
-            content=m.content,
-            source=m.source,
-            task_id=m.task_id,
-            created_at=m.created_at,
-            updated_at=m.updated_at,
-        )
-
-
-class MemoryCreateRequest(BaseModel):
-    content: str = Field(min_length=1, max_length=2000)
-
-
-class MemoryUpdateRequest(BaseModel):
-    content: str = Field(min_length=1, max_length=2000)
-
-
 class CustomModelUpsertRequest(BaseModel):
     """Create or replace one custom endpoint; the name comes from the path."""
 

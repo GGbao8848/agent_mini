@@ -52,7 +52,6 @@ import type { Task } from "@/lib/types"
 import {
   CalendarClockIcon,
   ChevronRightIcon,
-  BrainIcon,
   CopyIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -78,7 +77,6 @@ const data = {
     { title: "技能", url: "#", icon: <PuzzleIcon /> },
     { title: "MCP", url: "#", icon: <PlugIcon /> },
     { title: "工具", url: "#", icon: <WrenchIcon /> },
-    { title: "记忆", url: "#", icon: <BrainIcon /> },
     { title: "模型配置", url: "#", icon: <SettingsIcon /> },
   ],
 }
