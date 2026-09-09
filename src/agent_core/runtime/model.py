@@ -64,30 +64,30 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
     # base_url, with the key falling back to the built-in env var.
     custom = next((m for m in overrides.custom_models if m.name == provider), None)
     if custom is not None:
-        env_var = PROVIDER_ENV_VARS.get(provider)
-        api_key = (
+        fallback_var = PROVIDER_ENV_VARS.get(provider)
+        custom_key = (
             custom.api_key
-            or (os.environ.get(env_var) if env_var else None)
+            or (os.environ.get(fallback_var) if fallback_var else None)
             or "local"
         )
-        return ChatOpenAI(
-            model=model,
-            api_key=SecretStr(api_key),
+        return _chat_model(
+            model,
+            custom_key,
             base_url=custom.base_url,
-            temperature=0,
             streaming=resolved.model_streaming,
+            context_window=custom.context_window,
         )
 
     if provider == "local":
         return _build_local(model, overrides.local_base_url, streaming=resolved.model_streaming)
 
-    env_var = PROVIDER_ENV_VARS.get(provider)
+    env_var: str | None = PROVIDER_ENV_VARS.get(provider)
     if env_var is None:
         raise ConfigurationError(
             f"Unsupported model provider '{provider}'",
             details={"provider": provider, "supported": sorted(PROVIDER_ENV_VARS)},
         )
-    api_key = overrides.api_keys.get(provider) or os.environ.get(env_var)
+    api_key: str | None = overrides.api_keys.get(provider) or os.environ.get(env_var)
     if not api_key:
         raise ConfigurationError(
             f"Missing API key for model provider '{provider}'; set {env_var} "
@@ -96,19 +96,55 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
         )
 
     if provider == "openrouter":
-        return ChatOpenAI(
-            model=model,
-            api_key=SecretStr(api_key),
+        return _chat_model(
+            model,
+            api_key,
             base_url=OPENROUTER_BASE_URL,
-            temperature=0,
             streaming=resolved.model_streaming,
         )
+    # The official OpenAI endpoint: langchain-openai already enables streaming
+    # usage accounting there, so the default constructor is correct.
     return ChatOpenAI(
         model=model,
         api_key=SecretStr(api_key),
         temperature=0,
         streaming=resolved.model_streaming,
     )
+
+
+def _chat_model(
+    model: str,
+    api_key: str,
+    *,
+    base_url: str | None = None,
+    streaming: bool = True,
+    context_window: int | None = None,
+) -> ChatOpenAI:
+    """Chat model for self-hosted / OpenAI-compatible endpoints.
+
+    ``stream_usage`` must be explicit here: langchain-openai only turns usage
+    streaming on for the official OpenAI base URL, so against vLLM & friends
+    the default is off — and without it every streamed response carries no
+    token counts, which silently zeroes the run's usage, the budget
+    middleware's verdicts and the console's token display.
+
+    ``context_window`` (when configured) is injected as the model profile's
+    ``max_input_tokens``: deepagents' summarization middleware keys its
+    trigger off that field, so a self-hosted model gets its real-window
+    fraction instead of the 170k flat default that assumes giant frontier
+    models.
+    """
+    instance = ChatOpenAI(
+        model=model,
+        api_key=SecretStr(api_key),
+        base_url=base_url,
+        temperature=0,
+        streaming=streaming,
+        stream_usage=True,
+    )
+    if context_window is not None:
+        instance.profile = {"max_input_tokens": context_window}
+    return instance
 
 
 def _build_local(
@@ -129,10 +165,4 @@ def _build_local(
         )
     overrides = get_model_config()
     api_key = overrides.api_keys.get("local") or os.environ.get("LOCAL_LLM_API_KEY") or "local"
-    return ChatOpenAI(
-        model=model,
-        api_key=SecretStr(api_key),
-        base_url=base_url,
-        temperature=0,
-        streaming=streaming,
-    )
+    return _chat_model(model, api_key, base_url=base_url, streaming=streaming)
