@@ -182,7 +182,6 @@ export interface MCPServer {
   auth_ref: string | null
   status: string
   metadata: Record<string, unknown>
-  enabled: boolean
   exposed_tools?: string[] | null
 }
 

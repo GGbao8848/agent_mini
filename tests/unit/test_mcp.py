@@ -264,31 +264,6 @@ class TestMCPManager:
 
         assert captured["credential"] == "sekrit"
 
-    async def test_auto_connect_all_skips_disabled_servers(self) -> None:
-        """The console toggle is the master switch: off means never
-        auto-connected (now and on every future boot)."""
-        registry = MCPRegistry()
-        registry.register(
-            MCPServerDefinition(
-                id="demo",
-                name="Demo",
-                transport=MCPTransport.STDIO,
-                endpoint="python demo.py",
-                enabled=False,
-            )
-        )
-        manager, tools, _ = make_manager(
-            opener=fake_opener(FakeSession([echo_tool()], {"echo": "echoed"})),
-            registry=registry,
-        )
-
-        results = await manager.auto_connect_all()
-
-        assert results == {"demo": None}
-        assert not manager.is_connected("demo")
-        with pytest.raises(RegistryError):
-            tools.get("demo_echo")
-
 
 class TestExposedToolsAllowlist:
     async def test_allowlist_filters_discovered_tools(self) -> None:

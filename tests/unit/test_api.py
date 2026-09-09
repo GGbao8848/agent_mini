@@ -235,37 +235,6 @@ class TestMCPRoutes:
         response = await client.post("/v1/mcp/servers/ghost/connect")
         assert response.status_code == 404
 
-    async def test_patch_enabled_toggles_connection(self, client: Any) -> None:
-        """The enable switch is the master switch: off disconnects (tools
-        unregistered), on connects again."""
-        await client.post("/v1/mcp/servers", json=SERVER_PAYLOAD)
-        await client.post("/v1/mcp/servers/demo/connect")
-
-        response = await client.patch("/v1/mcp/servers/demo", json={"enabled": False})
-
-        body = response.json()
-        assert body["enabled"] is False
-        assert body["status"] == "unknown"
-        names = [tool["name"] for tool in (await client.get("/v1/tools")).json()]
-        assert "demo_echo" not in names
-
-        response = await client.patch("/v1/mcp/servers/demo", json={"enabled": True})
-
-        body = response.json()
-        assert body["enabled"] is True
-        assert body["status"] == "healthy"
-        names = [tool["name"] for tool in (await client.get("/v1/tools")).json()]
-        assert "demo_echo" in names
-
-    async def test_patch_enabled_on_disconnected_server_connects(self, client: Any) -> None:
-        await client.post("/v1/mcp/servers", json=SERVER_PAYLOAD)
-
-        response = await client.patch("/v1/mcp/servers/demo", json={"enabled": True})
-
-        assert response.json()["status"] == "healthy"
-        names = [tool["name"] for tool in (await client.get("/v1/tools")).json()]
-        assert "demo_echo" in names
-
     async def test_unreachable_server_maps_to_503_retryable(self) -> None:
         app = create_app(make_service(broken_mcp=True))
         async with httpx.AsyncClient(

@@ -36,6 +36,7 @@ import { normalizeMcpConfig, validateServerPayload } from "@/lib/mcp-config"
 import type { MCPServer, Tool } from "@/lib/types"
 import {
   PlugIcon,
+  UnplugIcon,
   PlusIcon,
   Trash2Icon,
   ServerIcon,
@@ -318,12 +319,12 @@ function ServerToolsDialog({
             </DialogHeader>
             {!healthy ? (
               <div className="flex flex-col items-start gap-2 text-sm text-muted-foreground">
-                <p>服务器未连接，打开启用开关连接后，这里会列出它提供的工具。</p>
+                <p>服务器未连接，连接后这里会列出它提供的工具。</p>
                 <Button
                   size="xs"
                   variant="outline"
-                  disabled={mcp.update.isPending}
-                  onClick={() => mcp.update.mutate({ serverId: server.id, patch: { enabled: true } })}
+                  disabled={mcp.action.isPending}
+                  onClick={() => mcp.action.mutate({ serverId: server.id, action: "connect" })}
                 >
                   <PlugIcon data-icon="inline-start" />
                   连接
@@ -463,21 +464,33 @@ export function McpPanel() {
                   </p>
                 )}
                 <div className="mt-auto flex items-center gap-2 pt-1">
-                  <span
-                    className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
-                    title={server.enabled ? "已启用：已连接，工具对分身可用" : "已停用：断开连接，工具对分身不可用"}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Switch
-                      size="sm"
-                      checked={server.enabled}
-                      disabled={mcp.action.isPending || mcp.update.isPending}
-                      onCheckedChange={(checked) =>
-                        mcp.update.mutate({ serverId: server.id, patch: { enabled: checked === true } })
-                      }
-                    />
-                    启用
-                  </span>
+                  {healthy ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={mcp.action.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        mcp.action.mutate({ serverId: server.id, action: "disconnect" })
+                      }}
+                    >
+                      <UnplugIcon data-icon="inline-start" />
+                      断开
+                    </Button>
+                  ) : (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={mcp.action.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        mcp.action.mutate({ serverId: server.id, action: "connect" })
+                      }}
+                    >
+                      <PlugIcon data-icon="inline-start" />
+                      连接
+                    </Button>
+                  )}
                   <Button
                     size="xs"
                     variant="ghost"

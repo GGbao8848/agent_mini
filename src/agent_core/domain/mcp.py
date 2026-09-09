@@ -45,13 +45,6 @@ class MCPServerDefinition(BaseModel):
     )
     status: MCPServerStatus = MCPServerStatus.UNKNOWN
     metadata: dict[str, Any] = Field(default_factory=dict)
-    enabled: bool = Field(
-        default=True,
-        description=(
-            "Master switch. Disabled servers are disconnected immediately and "
-            "skipped by auto-connect on boot — the console toggle is this field."
-        ),
-    )
     exposed_tools: list[str] | None = Field(
         default=None,
         description=(
