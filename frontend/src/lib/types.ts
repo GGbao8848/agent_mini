@@ -9,6 +9,9 @@ export interface RunUsage {
   duration_ms: number | null
   /** Input tokens of the most recent model call ≈ current context size. */
   last_input_tokens?: number
+  /** Heuristic estimates from the last call (context breakdown display). */
+  estimated_system_tokens?: number
+  estimated_messages_tokens?: number
 }
 
 export type RunStatus =

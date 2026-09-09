@@ -471,6 +471,13 @@ class AgentRuntime:
         try:
             await self._ensure_checkpointer_ready()
             graph = self.builder.build(spec)
+            # Static context parts (tool schemas, skill manifests) for the
+            # console's context breakdown; message tokens come from the
+            # collector's per-call estimates. Stub builders (tests) may not
+            # implement it.
+            context_breakdown = getattr(self.builder, "context_breakdown", None)
+            if context_breakdown is not None:
+                run.metadata["context_breakdown"] = context_breakdown(spec)
             output = await self.executor.execute(
                 graph,
                 run=run,

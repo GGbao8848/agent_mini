@@ -29,6 +29,14 @@ class RunUsage(BaseModel):
     approximation of "how full is the context window right now".
     """
 
+    estimated_system_tokens: int = 0
+    """Estimated tokens of the (latest) system message. Heuristic, overwrite
+    per call — feeds the context breakdown display, not billing."""
+
+    estimated_messages_tokens: int = 0
+    """Estimated tokens of the latest call's non-system messages (history).
+    Heuristic, overwrite per call — feeds the context breakdown display."""
+
     def add(self, other: RunUsage) -> None:
         """Accumulate ``other`` into this instance (in place)."""
         self.input_tokens += other.input_tokens
@@ -40,3 +48,7 @@ class RunUsage(BaseModel):
             # Later calls see later context: the merged run reports the
             # newest snapshot (summing per-call prompts is meaningless).
             self.last_input_tokens = other.last_input_tokens
+        if other.estimated_system_tokens:
+            self.estimated_system_tokens = other.estimated_system_tokens
+        if other.estimated_messages_tokens:
+            self.estimated_messages_tokens = other.estimated_messages_tokens

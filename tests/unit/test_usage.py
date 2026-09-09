@@ -86,6 +86,8 @@ class TestUsageCollector:
             "tool_calls": 4,
             "duration_ms": None,
             "last_input_tokens": 30,
+            "estimated_system_tokens": 0,
+            "estimated_messages_tokens": 0,
         }
 
     def test_add_keeps_newest_context_snapshot(self) -> None:
@@ -199,3 +201,54 @@ class TestExecutorWiring:
         agents.register(AgentSpec(id="helper", name="Helper"))
         runtime = AgentRuntime(agents, ToolRegistry(), SkillRegistry())
         assert runtime.live_usage("nope") is None
+
+
+class TestContextBreakdown:
+    def test_estimate_tokens_cjk_vs_ascii(self) -> None:
+        from agent_core.runtime.context_breakdown import estimate_tokens
+
+        assert estimate_tokens("") == 0
+        # CJK ≈ 1 token per char; ASCII ≈ 1 per 4 chars.
+        assert estimate_tokens("上下文管理") == 5
+        assert estimate_tokens("abcdefgh") == 2
+
+    def test_collector_splits_system_from_history(self) -> None:
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+        collector = UsageCollector()
+        collector.on_chat_model_start(
+            None,
+            [
+                SystemMessage(content="系统提示词" * 10),
+                HumanMessage(content="hello world"),  # 11 chars ASCII → ~2
+                AIMessage(content="回复内容"),  # 4 CJK → 4
+            ],
+        )
+        usage = collector.usage
+        assert usage.estimated_system_tokens == 50  # 5 CJK chars × 10
+        assert usage.estimated_messages_tokens >= 2
+
+    def test_static_breakdown_splits_mcp_from_builtin(self) -> None:
+        from agent_core.domain.skill import SkillManifest
+        from agent_core.domain.tool import ToolDefinition, ToolSource
+        from agent_core.runtime.context_breakdown import static_breakdown
+
+        tools = [
+            ToolDefinition(
+                name="run_code",
+                description="Run python code " * 5,
+                input_schema={"type": "object", "properties": {"code": {"type": "string"}}},
+                source=ToolSource.PYTHON,
+            ),
+            ToolDefinition(
+                name="tinyfish_search",
+                description="Search the web " * 8,
+                input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+                source=ToolSource.MCP,
+            ),
+        ]
+        skills = [SkillManifest(id="s", name="Demo Skill", description="Does demo things")]
+        breakdown = static_breakdown(tools, skills)
+        assert breakdown["builtin_tools"] > 0
+        assert breakdown["mcp_tools"] > 0
+        assert breakdown["skills"] > 0

@@ -104,6 +104,16 @@ class AgentBuilder:
             **self._backend_kwargs(spec),
         )
 
+    def context_breakdown(self, spec: AgentSpec) -> dict[str, int]:
+        """Estimate the static prompt parts for ``spec``: tool schemas and
+        skill manifests (see :mod:`agent_core.runtime.context_breakdown`).
+        Message-history tokens are dynamic and counted per model call."""
+        from agent_core.runtime.context_breakdown import static_breakdown
+
+        names = self._agent_tool_names(spec)
+        definitions = [self._tools.get(name) for name in names]
+        return static_breakdown(definitions, self._skills.list())
+
     def _agent_tool_names(self, spec: AgentSpec) -> list[str]:
         """The tool names an agent is bound to.
 

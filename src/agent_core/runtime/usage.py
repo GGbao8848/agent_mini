@@ -13,9 +13,12 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 
 from agent_core.domain.metrics import RunUsage
+from agent_core.runtime.context_breakdown import estimate_tokens
+from agent_core.runtime.text import extract_text
 
 
 class UsageCollector(BaseCallbackHandler):
@@ -33,8 +36,28 @@ class UsageCollector(BaseCallbackHandler):
         """Charge externally produced usage (e.g. a verification sub-run)."""
         self._usage.add(extra)
 
-    def on_chat_model_start(self, *args: Any, **kwargs: Any) -> None:
+    def on_chat_model_start(
+        self, serialized: Any = None, messages: Any = None, **kwargs: Any
+    ) -> None:
         self._usage.model_calls += 1
+        # Split the actual prompt into system vs conversation history so the
+        # context gauge can show a per-part breakdown (heuristic estimates,
+        # overwritten on every call — the latest prompt is the live context).
+        system = 0
+        conversation = 0
+        flat = messages[0] if messages and isinstance(messages[0], list) else (messages or [])
+        for message in flat:
+            if not isinstance(message, BaseMessage):
+                continue
+            cost = estimate_tokens(extract_text(message.content))
+            if getattr(message, "type", None) == "system":
+                system += cost
+            else:
+                conversation += cost
+        if system:
+            self._usage.estimated_system_tokens = system
+        if conversation:
+            self._usage.estimated_messages_tokens = conversation
 
     def on_tool_end(self, *args: Any, **kwargs: Any) -> None:
         self._usage.tool_calls += 1
