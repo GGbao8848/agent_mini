@@ -197,3 +197,46 @@ class TestConversationApi:
         run = service.runtime.task_active_run(conversation.id)
         assert run is not None and run.status.value == "cancelled"
         assert cancelled.id == conversation.id
+
+
+class TestTaskDeletion:
+    async def test_delete_task_removes_checkpoint_thread(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Deleting a conversation also drops its LangGraph thread.
+
+        The thread holds the full replayed message state; leaving it in the
+        checkpoints database after the task is gone made that database grow
+        forever (production had ~14k orphaned rows).
+        """
+        runtime = make_runtime(tmp_path, monkeypatch)
+        conversation = runtime.create_conversation("helper", "hello")
+        run = runtime.task_active_run(conversation.id)
+        assert run is not None
+        await runtime.execute_run(run)
+        assert conversation.thread_id is not None
+
+        config = {"configurable": {"thread_id": conversation.thread_id}}
+        before = await runtime.checkpointer.aget_tuple(config)
+        assert before is not None  # the conversation state is really stored
+
+        await runtime.delete_task(conversation.id)
+
+        assert await runtime.checkpointer.aget_tuple(config) is None
+        import pytest as _pytest
+
+        from agent_core.errors.exceptions import RegistryError
+
+        with _pytest.raises(RegistryError):
+            runtime.get_task(conversation.id)
+
+    async def test_delete_unknown_task_still_404s(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import pytest as _pytest
+
+        from agent_core.errors.exceptions import RegistryError
+
+        runtime = make_runtime(tmp_path, monkeypatch)
+        with _pytest.raises(RegistryError):
+            await runtime.delete_task("no-such-task")

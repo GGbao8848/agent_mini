@@ -36,6 +36,15 @@ class CustomModel(BaseModel):
     """Write-only secret; never returned by the API (masked hint only)."""
     models: list[str] = Field(default_factory=list)
     """Model ids the user picked from the endpoint's discovered list."""
+    context_window: int | None = None
+    """Max input tokens the endpoint's models accept (optional).
+
+    Injected as the model profile's ``max_input_tokens`` so the summarization
+    middleware triggers at a real-window fraction instead of the 170k flat
+    default. Self-hosted servers expose this as ``max_model_len`` on
+    ``/v1/models``; openrouter model ids vary wildly, so an explicit value is
+    the only reliable source for either.
+    """
 
 
 class ModelConfig(BaseModel):

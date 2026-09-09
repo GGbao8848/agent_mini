@@ -162,9 +162,9 @@ def mark_task_read(task_id: str, service: ServiceDep) -> TaskOut:
 
 
 @router.delete("/{task_id}", status_code=204)
-def delete_task(task_id: str, service: ServiceDep) -> None:
-    """Delete a conversation and its runs (409 while the active run is live)."""
-    service.runtime.delete_task(task_id)
+async def delete_task(task_id: str, service: ServiceDep) -> None:
+    """Delete a conversation, its runs and its checkpoints (409 while live)."""
+    await service.runtime.delete_task(task_id)
 
 
 @router.post("/{task_id}/cancel", response_model=TaskOut)

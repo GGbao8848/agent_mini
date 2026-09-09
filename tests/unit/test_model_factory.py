@@ -5,6 +5,12 @@ import os
 import pytest
 from langchain_openai import ChatOpenAI
 
+from agent_core.config.model_config import (
+    CustomModel,
+    ModelConfig,
+    load_model_config,
+    save_model_config,
+)
 from agent_core.config.settings import Settings
 from agent_core.errors.exceptions import ConfigurationError
 from agent_core.runtime.model import build_model, parse_model_spec
@@ -125,3 +131,79 @@ class TestStreaming:
         model = build_model("openai:gpt-4o-mini", settings=settings)
         assert isinstance(model, ChatOpenAI)
         assert model.streaming is False
+
+
+class TestOpenAICompatibleEndpoints:
+    """stream_usage + profile injection for non-official endpoints.
+
+    R1 experiment: against a custom (vLLM) endpoint the streamed responses
+    carried no usage at all — langchain-openai only turns usage streaming on
+    for the official OpenAI base URL — which silently zeroed run usage,
+    budget verdicts and the console's token display.
+    """
+
+    def test_custom_endpoint_streams_usage(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        save_model_config(
+            ModelConfig(
+                custom_models=[
+                    CustomModel(
+                        name="selfhosted",
+                        base_url="http://10.0.0.9:8000/v1",
+                        models=["qwen-test"],
+                    )
+                ]
+            )
+        )
+        try:
+            model = build_model("selfhosted:qwen-test", settings=Settings(_env_file=None))
+        finally:
+            load_model_config(None)
+        assert isinstance(model, ChatOpenAI)
+        assert model.stream_usage is True
+
+    def test_context_window_injects_profile(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        save_model_config(
+            ModelConfig(
+                custom_models=[
+                    CustomModel(
+                        name="selfhosted",
+                        base_url="http://10.0.0.9:8000/v1",
+                        models=["qwen-test"],
+                        context_window=32768,
+                    )
+                ]
+            )
+        )
+        try:
+            model = build_model("selfhosted:qwen-test", settings=Settings(_env_file=None))
+        finally:
+            load_model_config(None)
+        assert isinstance(model, ChatOpenAI)
+        # deepagents' summarization middleware keys its trigger off this
+        # profile field; without it the flat 170k default applies.
+        assert model.profile == {"max_input_tokens": 32768}
+
+    def test_without_context_window_profile_stays_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        save_model_config(
+            ModelConfig(
+                custom_models=[
+                    CustomModel(
+                        name="selfhosted",
+                        base_url="http://10.0.0.9:8000/v1",
+                        models=["qwen-test"],
+                    )
+                ]
+            )
+        )
+        try:
+            model = build_model("selfhosted:qwen-test", settings=Settings(_env_file=None))
+        finally:
+            load_model_config(None)
+        assert isinstance(model, ChatOpenAI)
+        assert model.profile is None

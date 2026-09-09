@@ -255,11 +255,14 @@ class AgentRuntime:
             return updated
         return task
 
-    def delete_task(self, task_id: str) -> None:
-        """Delete a conversation and every run it produced.
+    async def delete_task(self, task_id: str) -> None:
+        """Delete a conversation, every run it produced, and its checkpoints.
 
         Rejected while the conversation's active run is still non-terminal —
-        deleting a running task would strand its execution.
+        deleting a running task would strand its execution. The LangGraph
+        thread holds the full replayed message state (hundreds of KB per
+        conversation, growing every step); leaving it behind after the task
+        is gone made the checkpoints database grow forever.
         """
         self.get_task(task_id)  # 404 on unknown ids
         active = self.task_active_run(task_id)
@@ -268,6 +271,8 @@ class AgentRuntime:
                 f"Task '{task_id}' has an active run in status '{active.status.value}'",
                 details={"task_id": task_id, "run_id": active.id},
             )
+        task = self._tasks.get(task_id)
+        thread_id = task.thread_id if task is not None else None
         for run in self.task_root_runs(task_id):
             self._runs.pop(run.id, None)
             self._running.pop(run.id, None)
@@ -277,6 +282,11 @@ class AgentRuntime:
         self._tasks.pop(task_id, None)
         if self._store is not None:
             self._store.delete_task(task_id)
+        if thread_id is not None:
+            await self._ensure_checkpointer_ready()
+            delete_thread = getattr(self.checkpointer, "adelete_thread", None)
+            if delete_thread is not None:
+                await delete_thread(thread_id)
 
     def task_input(self, run: Run) -> str:
         """The task text a run was created for (empty for restored strangers)."""
