@@ -94,6 +94,22 @@ offload 到任务目录 markdown（17 轮生产会话实测：26 条消息 → 7
 offload 197 行，压缩后 follow-up 正常且能复述会话主题）。拒绝运行中任务。
 控制台对话头部新增「压缩」按钮（确认框 + 前后条数 toast）。
 
+## 修复：MCP 启用开关是"假开关" + save_memory 僵尸工具
+
+- **开关语义拍板**：连接与启用不分离，一个开关=连接总开关——开→立即连接，
+  关→立即断开且开机不再自动连；工具随连接注册/注销，agent 运行时自然不可见。
+  曾做过"关了仍保持连接、仅运行时屏蔽"的方案，用户否决（过度设计），回退为简单语义。
+- **假开关根因**：`MCPServerUpdateRequest` 没有 `enabled` 字段，前端 PATCH
+  `{enabled:false}` 被 pydantic 静默丢弃 → 空 patch 落进 `was_live` 分支 → 表现为
+  "一关就莫名断开重连"。另 `auto_connect_all` 缺 `continue`，disabled 服务器开机
+  照样连接。修复 `be9dc3f`。
+- **save_memory 僵尸**：记忆系统回退后其内置工具仍在线——注册表 write-through
+  持久化 + `hydrate()` 全量回灌复活了 store 里的旧行。`ToolRegistry.hydrate` 改为
+  只回灌 `source=mcp`（handler 由 connect 重挂），代码自有工具以代码为准、过期行
+  从 store 清除。生产 18→17 个工具。修复 `e56ddf0`。
+- 教训（wire schema 白名单陷阱第二次咬人）：请求/响应模型没有的字段，pydantic
+  默认静默丢弃不报错——领域模型加字段必须同步 API 模型，并用 curl 打真实端点验证。
+
 ## 下一步（Backlog，按价值排序）
 
 1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
