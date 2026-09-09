@@ -25,6 +25,7 @@ follow-up 只发新消息 + thread_id，由 checkpointer **全量重放**历史�
 | 9 | 上下文过长（全量重放、prefill 逐轮变大） | 无窗口化；摘要 170k 才触发 | 已可观测（#6/#7）；阈值已可配（#5）。实测 turn5 单跳 8.5k tokens（5 轮），生产 7 轮 14k→62k | 🟡 可观测/可控，未做主动压缩 | — |
 | 10 | 信息太多抓不住重点 / 历史污染 | 长历史无筛选 | 未处理。方向：spec 级 SummarizationPolicy（已有机制，`keep_messages` 可配）实测 + 提示词引导 | ⏳ | — |
 | 11 | checkpoint 每超步全量快照存储放大 | LangGraph 固有 | 靠 #4 清理；长对话摘要重写状态会自然收缩 | 🟡 接受 | — |
+| 12 | **长期记忆缺失**：跨会话知识（用户偏好/项目约定）不带过来 | 无记忆模块 | 自建最小记忆系统：扁平 Memory 列表 + 记忆面板（人策划）+ `save_memory` 工具（agent 提议，上限 100 条/条 2000 字）+ 全量注入每轮 system prompt（无检索机制，列表大了再上检索）| ✅ | `c7ece65` domain/memory.py + builtins/memory.py + api/routes/memories.py + views/memory-view.tsx |
 
 ## 实测数据（隔离环境 R1/R3 + 生产验证）
 
@@ -55,4 +56,5 @@ follow-up 只发新消息 + thread_id，由 checkpointer **全量重放**历史�
 3. **摘要触发实测**：创建带 `SummarizationPolicy(trigger_tokens=小值)` 的测试 agent
    跑长对话，观察摘要后 keep_messages 保留行为、远轮记忆损失、checkpoint 收缩。
 4. **提示词引导**：environment_note 里加"优先 grep/分段读取，避免全文 cat 大文件"。
-5. 远期：历史筛选/压缩策略（#10）、长期记忆分层（9 类混淆）。
+5. ~~长期记忆分层~~：✅ 第一方最小记忆系统已落地 `c7ece65`（自建，aimemory MCP 已下线）。
+6. 远期：历史筛选/压缩策略（#10）；记忆列表超过 ~50 条时考虑检索化。
