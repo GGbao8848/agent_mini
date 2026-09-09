@@ -51,33 +51,50 @@ function Part({ label, tokens, total }: { label: string; tokens: number; total: 
   )
 }
 
-/** Context-capacity ring in the composer. Idle state: a single muted ring —
- *  no color coding, no percentage text. Hovering opens a panel with the
- *  capacity line (n / n, percent, bar) and a per-part breakdown (messages,
- *  system prompt, built-in tools, MCP tools, skills, other). Message /
- *  system parts are heuristic estimates from the last model call; the
- *  "other" bucket absorbs the difference to the provider-reported total. */
+/** Context-capacity ring in the composer. Idle state: a single muted ring.
+ *  Hovering opens a white panel with the capacity line and a per-part
+ *  breakdown (messages, system prompt, built-in tools, MCP tools, skills).
+ *
+ *  While a follow-up run is starting it has no usage yet — reading only the
+ *  active run made the gauge flash to empty on every send. The gauge walks
+ *  back through the latest runs (newest first) and shows the most recent one
+ *  that actually carries a context snapshot, labelling it 上一轮. */
 export function ContextGauge({ taskId }: { taskId?: string | null }) {
   const { data: task } = useTask(taskId ?? null)
-  const activeRunId = task?.active_run_id ?? null
-  // Prefer the live run while it exists; once settled, the last run carries
-  // the final context snapshot.
-  const lastTurnRunId = React.useMemo(() => {
-    if (!task) return null
+
+  // Deduped run ids from the conversation, newest first.
+  const historyRunIds = React.useMemo(() => {
+    if (!task) return [] as string[]
+    const ids: string[] = []
     for (let i = task.turns.length - 1; i >= 0; i--) {
       const rid = task.turns[i]?.metadata?.run_id
-      if (typeof rid === "string") return rid
+      if (typeof rid === "string" && !ids.includes(rid)) ids.push(rid)
+      if (ids.length >= 3) break
     }
-    return null
+    return ids
   }, [task])
-  const { data: run } = useRun(activeRunId ?? lastTurnRunId)
+
+  const activeRunId = task?.active_run_id ?? null
+  const candidates = React.useMemo(() => {
+    const rest = historyRunIds.filter((id) => id !== activeRunId)
+    return (activeRunId ? [activeRunId, ...rest] : rest).slice(0, 3)
+  }, [activeRunId, historyRunIds])
+
+  // Fixed hook count (rules of hooks); candidates shift through the slots.
+  const r0 = useRun(candidates[0] ?? null)
+  const r1 = useRun(candidates[1] ?? null)
+  const r2 = useRun(candidates[2] ?? null)
+  const runs = [r0.data, r1.data, r2.data]
+
+  const usageOf = (r: Run | undefined) => r?.usage?.last_input_tokens ?? 0
+  const chosenIdx = runs.findIndex((r) => usageOf(r) > 0)
+  const run = (chosenIdx >= 0 ? runs[chosenIdx] : runs[0]) ?? undefined
+  const stale = chosenIdx > 0 // the shown snapshot is from an earlier run
+
   const config = useModelConfig()
+  if (!taskId) return null
 
   const usage = run?.usage ?? null
-  // Always render the ring in an existing conversation (an empty one with a
-  // hint when it has no token data yet) — a missing gauge reads as "feature
-  // not deployed". The brand-new-task composer passes no taskId and gets none.
-  if (!taskId) return null
   const tokens = usage?.last_input_tokens ?? 0
   const hasData = tokens > 0
 
@@ -120,11 +137,13 @@ export function ContextGauge({ taskId }: { taskId?: string | null }) {
             </span>
           }
         />
-        <TooltipContent className="w-64 p-3">
+        <TooltipContent className="w-64 flex-col gap-2 bg-white p-3 text-foreground border shadow-lg [&_svg]:fill-white [&_svg]:bg-white">
           {hasData ? (
             <div className="flex flex-col gap-2">
               <div className="flex items-baseline justify-between text-xs">
-                <span className="font-medium">上下文容量</span>
+                <span className="font-medium">
+                  上下文容量{stale && <span className="ml-1 font-normal text-muted-foreground">（上一轮）</span>}
+                </span>
                 <span className="font-mono text-muted-foreground">
                   {fmtTokens(tokens)} / {estimated ? "≈" : ""}
                   {fmtTokens(window_)} · {pctLabel}%
