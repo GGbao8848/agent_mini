@@ -49,6 +49,28 @@ follow-up 只发新消息 + thread_id，由 checkpointer **全量重放**历史�
 6. 启动顺序坑：`uv run` 服务必须用持久后台方式启动（shell `&` 会随会话退出被杀）；
    pkill 匹配串含在自身命令行时用 `[s]erve_console` 防自杀。
 
+## System 侧瘦身边际实测（P1.1 条目级量化）
+
+对真实 avatar graph（生产 db 副本 + 记录型 fake model）做条目级拆解：
+
+| 组成 | ≈tokens |
+|------|---------|
+| System message（avatar 提示 + autonomy + 运行环境 + 技能 manifest 段） | 1738 |
+| 核心 harness/builtin 工具 schema（9 个：grep 571 / task 433 / read_file 429…） | 2672 |
+| service 工具（ensure_packages/install_skill/create_schedule/request_help） | ~500 |
+| **MCP 工具 schema（31 个，tinyfish 为主）** | **12188** |
+| 合计固定开销 | **≈17k** |
+
+两个假设被数据修正：① 技能文档**并非**全量注入——deepagents 的 SkillsMiddleware
+本来就是 manifest 化（name + description + 读取路径），无需改造；② 真正的大头是
+**MCP 工具 schema**：31 个注册工具共 12.2k tokens（70%），而生产 trace 显示历史上
+只有 2 个 MCP 工具被调用过（tinyfish_search 20 次、fetch_content 6 次）。
+
+落地：`MCPServerDefinition.exposed_tools` allowlist（None=全暴露兼容旧行为），
+connect 时过滤 + 收窄时清理旧注册，`PATCH /v1/mcp/servers/{id}` 编辑并自动重连
+即时生效。生产已配 tinyfish allowlist=[search, fetch_content]：注册工具 35→18，
+预计每轮 prefill 固定开销下降 ≈9-10k tokens。
+
 ## 摘要触发实测（summlab 实验，trigger_tokens=1500 / keep_messages=4）
 
 用低阈值测试 agent 跑 3 轮大工具输出对话（生成 20KB 文件 + cat 全文 ×2）：
@@ -69,8 +91,8 @@ follow-up 只发新消息 + thread_id，由 checkpointer **全量重放**历史�
 
 1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
 2. ~~启动时孤儿 checkpoint GC~~ ✅ `ff15198`（生产首次启动回收 33 线程）
-3. **摘要触发实测**：创建带 `SummarizationPolicy(trigger_tokens=小值)` 的测试 agent
-   跑长对话，观察摘要后 keep_messages 保留行为、远轮记忆损失、checkpoint 收缩。
-4. **提示词引导**：environment_note 里加"优先 grep/分段读取，避免全文 cat 大文件"。
+3. ~~摘要触发实测~~ ✅（见上节）。
+4. ~~提示词引导 + 内容信任边界~~ ✅（environment_note 读片段引导 + `<untrusted-content>`
+   信任边界，MCP 结果包裹 + 系统提示声明"数据非指令"）。
 5. ~~长期记忆分层~~：⚠️ 最小记忆系统已回退（见 #12 行的教训）；aimemory MCP 维持下线。重试需换设计。
 6. 远期：历史筛选/压缩策略（#10）。
