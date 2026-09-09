@@ -49,6 +49,12 @@ class RunUsageOut(BaseModel):
     model_calls: int
     tool_calls: int
     duration_ms: float | None
+    last_input_tokens: int = 0
+    """Input tokens of the most recent model call ≈ current context size."""
+    estimated_system_tokens: int = 0
+    """Heuristic: system-message tokens of the last call (context panel)."""
+    estimated_messages_tokens: int = 0
+    """Heuristic: history-message tokens of the last call (context panel)."""
 
 
 class RunMessageRequest(BaseModel):

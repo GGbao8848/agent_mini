@@ -252,3 +252,31 @@ class TestContextBreakdown:
         assert breakdown["builtin_tools"] > 0
         assert breakdown["mcp_tools"] > 0
         assert breakdown["skills"] > 0
+
+
+class TestApiExposure:
+    def test_run_out_serializes_new_usage_fields(self) -> None:
+        """The wire schema whitelists fields — a domain-side addition without
+        the matching RunUsageOut field silently vanishes from the API (that
+        is exactly what broke the context gauge: last_input_tokens never
+        reached the frontend)."""
+        from agent_core.api.schemas import RunOut
+        from agent_core.domain.agent import AgentSpec
+        from agent_core.domain.metrics import RunUsage
+        from agent_core.domain.task import Run
+        from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
+        from agent_core.runtime.runtime import AgentRuntime
+
+        agents = AgentRegistry()
+        agents.register(AgentSpec(id="helper", name="Helper"))
+        runtime = AgentRuntime(agents, ToolRegistry(), SkillRegistry())
+        run = runtime.create_run("helper", "hello")
+        run.usage = RunUsage(
+            input_tokens=5000, total_tokens=5300, last_input_tokens=4800,
+            estimated_system_tokens=900, estimated_messages_tokens=3600,
+        )
+        out = RunOut.model_validate(run)
+        assert out.usage is not None
+        assert out.usage.last_input_tokens == 4800
+        assert out.usage.estimated_system_tokens == 900
+        assert out.usage.estimated_messages_tokens == 3600
