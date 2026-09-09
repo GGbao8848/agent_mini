@@ -74,18 +74,21 @@ export function ContextGauge({ taskId }: { taskId?: string | null }) {
   const config = useModelConfig()
 
   const usage = run?.usage ?? null
-  if (!usage || !taskId) return null
-  const tokens = usage.last_input_tokens ?? 0
-  if (tokens <= 0) return null
+  // Always render the ring in an existing conversation (an empty one with a
+  // hint when it has no token data yet) — a missing gauge reads as "feature
+  // not deployed". The brand-new-task composer passes no taskId and gets none.
+  if (!taskId) return null
+  const tokens = usage?.last_input_tokens ?? 0
+  const hasData = tokens > 0
 
   const { window: window_, estimated } = currentWindow(config.data)
-  const pct = Math.min(100, (tokens / window_) * 100)
+  const pct = hasData ? Math.min(100, (tokens / window_) * 100) : 0
   const pctLabel = Math.round(pct)
 
   const breakdown = ((run as Run | undefined)?.metadata?.context_breakdown ?? {}) as Breakdown
   const parts = [
-    { label: "消息", tokens: usage.estimated_messages_tokens ?? 0 },
-    { label: "系统提示词", tokens: usage.estimated_system_tokens ?? 0 },
+    { label: "消息", tokens: usage?.estimated_messages_tokens ?? 0 },
+    { label: "系统提示词", tokens: usage?.estimated_system_tokens ?? 0 },
     { label: "系统工具", tokens: breakdown.builtin_tools ?? 0 },
     { label: "MCP工具", tokens: breakdown.mcp_tools ?? 0 },
     { label: "技能", tokens: breakdown.skills ?? 0 },
@@ -118,32 +121,41 @@ export function ContextGauge({ taskId }: { taskId?: string | null }) {
           }
         />
         <TooltipContent className="w-64 p-3">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between text-xs">
+          {hasData ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-baseline justify-between text-xs">
+                <span className="font-medium">上下文容量</span>
+                <span className="font-mono text-muted-foreground">
+                  {fmtTokens(tokens)} / {estimated ? "≈" : ""}
+                  {fmtTokens(window_)} · {pctLabel}%
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-foreground/60"
+                  style={{ width: `${Math.min(100, pct)}%` }}
+                />
+              </div>
+              <div className="mt-1 flex flex-col gap-1 border-t pt-2">
+                <Part label="消息" tokens={parts[0].tokens} total={tokens} />
+                <Part label="系统提示词" tokens={parts[1].tokens} total={tokens} />
+                <Part label="系统工具" tokens={parts[2].tokens} total={tokens} />
+                <Part label="MCP工具" tokens={parts[3].tokens} total={tokens} />
+                <Part label="技能" tokens={parts[4].tokens} total={tokens} />
+                <Part label="其他" tokens={other} total={tokens} />
+              </div>
+              <p className="text-[10px] leading-snug text-muted-foreground">
+                按最近一次模型调用估算{estimated ? "；端点未配置 context_window，按 256k 计" : ""}
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1 text-xs">
               <span className="font-medium">上下文容量</span>
-              <span className="font-mono text-muted-foreground">
-                {fmtTokens(tokens)} / {estimated ? "≈" : ""}
-                {fmtTokens(window_)} · {pctLabel}%
+              <span className="text-muted-foreground">
+                这条对话还没有容量数据（旧版本时期创建的运行不带统计）。发送一条消息后即可显示。
               </span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-foreground/60"
-                style={{ width: `${Math.min(100, pct)}%` }}
-              />
-            </div>
-            <div className="mt-1 flex flex-col gap-1 border-t pt-2">
-              <Part label="消息" tokens={parts[0].tokens} total={tokens} />
-              <Part label="系统提示词" tokens={parts[1].tokens} total={tokens} />
-              <Part label="系统工具" tokens={parts[2].tokens} total={tokens} />
-              <Part label="MCP工具" tokens={parts[3].tokens} total={tokens} />
-              <Part label="技能" tokens={parts[4].tokens} total={tokens} />
-              <Part label="其他" tokens={other} total={tokens} />
-            </div>
-            <p className="text-[10px] leading-snug text-muted-foreground">
-              按最近一次模型调用估算{estimated ? "；端点未配置 context_window，按 256k 计" : ""}
-            </p>
-          </div>
+          )}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
