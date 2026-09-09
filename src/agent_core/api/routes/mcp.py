@@ -12,7 +12,7 @@ import contextlib
 from fastapi import APIRouter
 
 from agent_core.api.deps import ServiceDep
-from agent_core.api.schemas import MCPServerCreateRequest, MCPServerOut
+from agent_core.api.schemas import MCPServerCreateRequest, MCPServerOut, MCPServerUpdateRequest
 from agent_core.domain.mcp import MCPServerDefinition, MCPServerStatus
 from agent_core.errors.exceptions import AgentError
 
@@ -61,3 +61,28 @@ async def connect_server(server_id: str, service: ServiceDep) -> MCPServerOut:
 async def disconnect_server(server_id: str, service: ServiceDep) -> MCPServerOut:
     await service.disconnect_server(server_id)
     return MCPServerOut.of(service.mcp_registry.get(server_id))
+
+
+@router.patch("/{server_id}", response_model=MCPServerOut)
+async def update_server(
+    server_id: str, payload: MCPServerUpdateRequest, service: ServiceDep
+) -> MCPServerOut:
+    """Edit server config (endpoint / description / tool allowlist).
+
+    A healthy server reconnects automatically so allowlist changes take
+    effect immediately; a disconnected one just picks them up on next
+    connect.
+    """
+    definition = service.mcp_registry.get(server_id)
+    updates = payload.model_dump(exclude_none=True)
+    for field, value in updates.items():
+        setattr(definition, field, value)
+    service.mcp_registry.replace(definition)
+    was_live = definition.status.value == "healthy"
+    if was_live:
+        with contextlib.suppress(AgentError):
+            await service.disconnect_server(server_id)
+        with contextlib.suppress(AgentError):
+            await service.connect_server(server_id)
+        definition = service.mcp_registry.get(server_id)
+    return MCPServerOut.of(definition)

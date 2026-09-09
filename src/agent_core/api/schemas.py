@@ -421,6 +421,17 @@ class MCPServerCreateRequest(BaseModel):
     exposed_tools: list[str] | None = None
 
 
+class MCPServerUpdateRequest(BaseModel):
+    """Partial server update; omitted fields are left unchanged."""
+
+    description: str | None = None
+    endpoint: str | None = None
+    exposed_tools: list[str] | None = Field(
+        default=None,
+        description="Allowlist of tool names; empty list exposes none, omit to keep current",
+    )
+
+
 class MCPServerOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
