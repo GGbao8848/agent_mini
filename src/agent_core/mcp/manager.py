@@ -71,8 +71,18 @@ class MCPManager:
 
         self._connections[server_id] = connection
         self._registry.set_status(server_id, MCPServerStatus.HEALTHY)
+        exposed = definition.exposed_tools
+        allowed = set(exposed) if exposed is not None else None
+        # Tools a previous session registered but the allowlist no longer
+        # covers must go — otherwise they linger as stale definitions.
+        if allowed is not None:
+            for stale in self._registered.get(server_id, []):
+                if stale not in allowed and stale in self._tools:
+                    self._tools.remove(stale)
         names: list[str] = []
         for tool_definition in discovered:
+            if allowed is not None and tool_definition.name not in allowed:
+                continue
             handler = self._make_handler(server_id, tool_definition)
             if tool_definition.name in self._tools:
                 # Reconnect after restart: the definition was restored from

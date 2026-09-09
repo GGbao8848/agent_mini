@@ -418,6 +418,7 @@ class MCPServerCreateRequest(BaseModel):
     endpoint: str = ""
     auth_ref: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    exposed_tools: list[str] | None = None
 
 
 class MCPServerOut(BaseModel):
@@ -432,6 +433,7 @@ class MCPServerOut(BaseModel):
     auth_ref: str | None
     status: str
     metadata: dict[str, Any]
+    exposed_tools: list[str] | None = None
 
     @classmethod
     def of(cls, definition: MCPServerDefinition) -> MCPServerOut:

@@ -45,3 +45,12 @@ class MCPServerDefinition(BaseModel):
     )
     status: MCPServerStatus = MCPServerStatus.UNKNOWN
     metadata: dict[str, Any] = Field(default_factory=dict)
+    exposed_tools: list[str] | None = Field(
+        default=None,
+        description=(
+            "Allowlist of tool names this server may register. None exposes "
+            "everything the server announces; a list both caps the prompt cost "
+            "of chatty servers and keeps newly added remote tools out until "
+            "they are explicitly allowed."
+        ),
+    )

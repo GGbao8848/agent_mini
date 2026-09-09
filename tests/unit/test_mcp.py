@@ -263,3 +263,72 @@ class TestMCPManager:
         await manager.connect("demo")
 
         assert captured["credential"] == "sekrit"
+
+
+class TestExposedToolsAllowlist:
+    async def test_allowlist_filters_discovered_tools(self) -> None:
+        from langchain_core.tools import tool as lc_tool
+
+        extra = ToolDefinition(
+            name="demo_heavy",
+            description="A heavy tool nobody uses",
+            source=ToolSource.MCP,
+            input_schema={"type": "object", "properties": {"x": {"type": "string"}}},
+            metadata={"mcp_server": "demo", "mcp_tool": "heavy"},
+        )
+        session = FakeSession([echo_tool(), extra], {"echo": "echo: {text}", "heavy": "heavy: {x}"})
+        registry = MCPRegistry()
+        registry.register(
+            MCPServerDefinition(
+                id="demo",
+                name="Demo",
+                transport=MCPTransport.STDIO,
+                endpoint="python demo.py",
+                exposed_tools=["demo_echo"],
+            )
+        )
+        manager, tools, _ = make_manager(opener=fake_opener(session), registry=registry)
+
+        names = await manager.connect("demo")
+
+        assert names == ["demo_echo"]
+        assert tools.get("demo_echo") is not None
+        import pytest as _pytest
+
+        from agent_core.errors.exceptions import RegistryError
+
+        with _pytest.raises(RegistryError):
+            tools.get("demo_heavy")
+
+    async def test_allowlist_prunes_stale_registrations_on_reconnect(self) -> None:
+        session = FakeSession([echo_tool()], {"echo": "echo: {text}"})
+        registry = MCPRegistry()
+        registry.register(
+            MCPServerDefinition(
+                id="demo",
+                name="Demo",
+                transport=MCPTransport.STDIO,
+                endpoint="python demo.py",
+                exposed_tools=["demo_echo"],
+            )
+        )
+        manager, tools, _ = make_manager(opener=fake_opener(session), registry=registry)
+        await manager.connect("demo")
+        await manager.disconnect("demo")
+
+        # The allowlist widens: reconnect exposes more.
+        registry.get("demo").exposed_tools = None
+        names = await manager.connect("demo")
+        assert names == ["demo_echo"]
+
+        # It narrows again: previously exposed tools are pruned, not stale.
+        await manager.disconnect("demo")
+        registry.get("demo").exposed_tools = ["demo_noop"]
+        names = await manager.connect("demo")
+        assert names == []
+        import pytest as _pytest
+
+        from agent_core.errors.exceptions import RegistryError
+
+        with _pytest.raises(RegistryError):
+            tools.get("demo_echo")
