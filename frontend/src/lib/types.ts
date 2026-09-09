@@ -7,6 +7,8 @@ export interface RunUsage {
   model_calls: number
   tool_calls: number
   duration_ms: number | null
+  /** Input tokens of the most recent model call ≈ current context size. */
+  last_input_tokens?: number
 }
 
 export type RunStatus =
@@ -218,6 +220,7 @@ export interface CustomModel {
   models: string[]
   key_hint: string | null
   builtin?: boolean
+  context_window?: number | null
 }
 
 export interface ModelConfig {

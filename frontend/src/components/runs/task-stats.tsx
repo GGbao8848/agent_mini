@@ -1,8 +1,7 @@
 import * as React from "react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useRun, useTask } from "@/hooks/use-console"
+import { useRun } from "@/hooks/use-console"
 import { fmtDuration } from "@/lib/format"
 import { CheckIcon, CopyIcon, TimerIcon } from "lucide-react"
 
@@ -50,52 +49,11 @@ export function TaskIdChip({ taskId }: { taskId: string }) {
   )
 }
 
-/** Live task stats for the top nav: current task id + the active run's usage.
- *
- * "实时" comes from the same polling the chat uses: ``useRun`` refetches every
- * 10s while the active run is non-terminal, and ``useTask`` keeps the id fresh
- * across follow-up messages (each new turn swaps the active run).
- */
-export function LiveTaskStats({ taskId }: { taskId: string }) {
-  const { data: task } = useTask(taskId)
-  const activeRunId = task?.active_run_id ?? null
-  const { data: run } = useRun(activeRunId)
-  const { copied, copy } = useCopyId()
-  const usage = run?.usage
-
-  return (
-    <div className="flex items-center gap-2">
-      <Badge variant="outline" className="gap-1 font-mono text-xs font-normal">
-        <span className="text-muted-foreground">task</span>
-        <span className="max-w-40 truncate">{taskId}</span>
-        <button
-          type="button"
-          title={`复制任务 id：${taskId}`}
-          onClick={() => void copy(taskId)}
-          className="flex items-center text-muted-foreground transition-colors hover:text-foreground"
-        >
-          {copied ? (
-            <CheckIcon className="size-3 text-emerald-500" />
-          ) : (
-            <CopyIcon className="size-3" />
-          )}
-        </button>
-      </Badge>
-      {usage && (
-        <span className="hidden text-xs text-muted-foreground md:inline">
-          {usage.duration_ms != null ? `${fmtDuration(usage.duration_ms)} · ` : ""}
-          {usage.total_tokens} tokens · {usage.model_calls} 模型 · {usage.tool_calls} 工具
-        </span>
-      )}
-    </div>
-  )
-}
-
-/** Per-run usage line shown under an assistant bubble (the "child" of the
- *  header's live stats): same format, scoped to the run that produced that
- *  reply. ``useRun`` refetches while the run is active, so the newest bubble's
- *  stats grow as the task runs and settle once it completes.
- */
+/** Per-run usage line shown under an assistant bubble: same format, scoped to
+ *  the run that produced that reply. ``useRun`` refetches while the run is
+ *  active, so the newest bubble's stats grow as the task runs and settle once
+ *  it completes. The conversation-level stats live in the composer's context
+ *  gauge now (the header only keeps the task id chip). */
 export function RunStatsLine({ runId }: { runId: string }) {
   const { data: run } = useRun(runId)
   const usage = run?.usage

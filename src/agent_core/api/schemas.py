@@ -543,6 +543,8 @@ class CustomModelOut(BaseModel):
     builtin: bool = False
     """True for the built-in providers (openai/openrouter/local) — the card
     can be overridden/edited but not removed from the list."""
+    context_window: int | None = None
+    """Configured max input tokens; drives the console's context gauge."""
 
     @classmethod
     def of(cls, m: CustomModelSpec) -> CustomModelOut:
@@ -554,6 +556,7 @@ class CustomModelOut(BaseModel):
             api_format=m.api_format,
             models=list(m.models),
             key_hint=mask_secret(m.api_key) if m.api_key else None,
+            context_window=m.context_window,
         )
 
 
@@ -564,6 +567,10 @@ class CustomModelUpsertRequest(BaseModel):
     api_format: str = "openai"
     api_key: str | None = None
     models: list[str] = Field(default_factory=list)
+    context_window: int | None = Field(
+        default=None,
+        description="Max input tokens the endpoint accepts (for context accounting)",
+    )
 
 
 # ------------------------------------------------------------------ projects

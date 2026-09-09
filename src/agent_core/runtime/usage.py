@@ -44,6 +44,10 @@ class UsageCollector(BaseCallbackHandler):
         self._usage.input_tokens += tokens["input"]
         self._usage.output_tokens += tokens["output"]
         self._usage.total_tokens += tokens["total"]
+        # Overwrite, not accumulate: the newest call's prompt is the current
+        # conversation replay (the context gauge reads this).
+        if tokens["input"]:
+            self._usage.last_input_tokens = tokens["input"]
 
 
 def _tokens_from_result(response: LLMResult) -> dict[str, int]:

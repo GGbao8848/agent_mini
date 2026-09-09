@@ -57,10 +57,25 @@ class TestUsageCollector:
         assert snapshot.model_calls == 0
         assert collector.usage.model_calls == 1
 
+    def test_last_input_tokens_tracks_latest_call(self) -> None:
+        collector = UsageCollector()
+        collector.on_llm_end(_result(100, 20))
+        collector.on_llm_end(_result(5000, 10))
+        usage = collector.usage
+        # input_tokens sums every call; last_input_tokens is the newest
+        # prompt — the context gauge's "how full is the window" signal.
+        assert usage.input_tokens == 5100
+        assert usage.last_input_tokens == 5000
+
     def test_add_merges_instances(self) -> None:
         total = RunUsage(input_tokens=1, output_tokens=2, total_tokens=3, model_calls=1)
         other = RunUsage(
-            input_tokens=10, output_tokens=20, total_tokens=30, model_calls=2, tool_calls=4
+            input_tokens=10,
+            output_tokens=20,
+            total_tokens=30,
+            model_calls=2,
+            tool_calls=4,
+            last_input_tokens=30,
         )
         total.add(other)
         assert total.model_dump() == {
@@ -70,7 +85,16 @@ class TestUsageCollector:
             "model_calls": 3,
             "tool_calls": 4,
             "duration_ms": None,
+            "last_input_tokens": 30,
         }
+
+    def test_add_keeps_newest_context_snapshot(self) -> None:
+        # A subagent's later call is a later context state: merging takes the
+        # newest snapshot, never a sum.
+        total = RunUsage(last_input_tokens=100)
+        total.add(RunUsage(last_input_tokens=7000))
+        total.add(RunUsage(last_input_tokens=0))  # zero = no data, keep prior
+        assert total.last_input_tokens == 7000
 
 
 class _CallbackAwareGraph:

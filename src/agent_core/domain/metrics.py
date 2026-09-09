@@ -20,6 +20,14 @@ class RunUsage(BaseModel):
     model_calls: int = 0
     tool_calls: int = 0
     duration_ms: float | None = None
+    last_input_tokens: int = 0
+    """Input tokens of the most recent model call.
+
+    Unlike ``input_tokens`` (summed over every call of the run) this mirrors
+    the *current* context size: one model call's prompt covers the whole
+    replayed conversation, so the last call's input is the closest cheap
+    approximation of "how full is the context window right now".
+    """
 
     def add(self, other: RunUsage) -> None:
         """Accumulate ``other`` into this instance (in place)."""
@@ -28,3 +36,7 @@ class RunUsage(BaseModel):
         self.total_tokens += other.total_tokens
         self.model_calls += other.model_calls
         self.tool_calls += other.tool_calls
+        if other.last_input_tokens:
+            # Later calls see later context: the merged run reports the
+            # newest snapshot (summing per-call prompts is meaningless).
+            self.last_input_tokens = other.last_input_tokens

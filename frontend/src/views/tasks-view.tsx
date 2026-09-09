@@ -1,5 +1,6 @@
 import * as React from "react"
 import { getSelectedModel, ModelPicker } from "@/components/chat/model-picker"
+import { ContextGauge } from "@/components/chat/context-gauge"
 import { Markdown } from "@/components/chat/markdown"
 import { ApprovalCard } from "@/components/runs/approval-card"
 import { RunActivity, RunArtifacts } from "@/components/runs/run-activity"
@@ -109,6 +110,7 @@ function Composer({
   running,
   onStop,
   children,
+  taskId,
 }: {
   placeholder: string
   pending: boolean
@@ -117,6 +119,8 @@ function Composer({
   running?: boolean
   onStop?: () => void
   children?: React.ReactNode
+  /** Set in an existing conversation: shows the context-capacity gauge. */
+  taskId?: string
 }) {
   const [text, setText] = React.useState("")
   const [files, setFiles] = React.useState<PendingFile[]>([])
@@ -234,6 +238,7 @@ function Composer({
               e.target.value = ""
             }}
           />
+          <ContextGauge taskId={taskId} />
           <Button
             size="icon-sm"
             variant={running ? "destructive" : "default"}
@@ -544,6 +549,7 @@ function ChatThread({ task }: { task: Task }) {
             placeholder="继续这条对话…（分身带着全部上下文）"
             pending={followup.isPending}
             running={running}
+            taskId={current.id}
             onStop={() => setConfirmStop(true)}
             onSubmit={(text, attachments, model) =>
               followup.mutate({ taskId: current.id, input: text, attachments, model })

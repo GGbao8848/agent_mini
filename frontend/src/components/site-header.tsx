@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { LiveTaskStats } from "@/components/runs/task-stats"
+import { TaskIdChip } from "@/components/runs/task-stats"
 import { StatusBadge } from "@/components/runs/status-badge"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -99,8 +99,9 @@ export function SiteHeader({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2 px-3">
-        {taskId && <LiveTaskStats taskId={taskId} />}
-        {taskId && run && (
+        {/* Context stats moved into the composer's capacity gauge; the header
+            keeps only the conversation id chip. */}
+        {taskId && <TaskIdChip taskId={taskId} />}{taskId && run && (
           <>
             <Button
               variant="ghost"

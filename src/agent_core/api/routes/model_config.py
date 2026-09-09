@@ -84,6 +84,7 @@ def _endpoint_cards(overrides: ModelConfig) -> list[CustomModelOut]:
                 models=list(stored.models),
                 key_hint=mask_secret(key) if key else None,
                 builtin=stored.name in PROVIDER_ENV_VARS,
+                context_window=stored.context_window,
             )
         )
         seen.add(stored.name)
@@ -225,6 +226,8 @@ def upsert_custom_model(name: str, payload: CustomModelUpsertRequest) -> ModelCo
         api_format=payload.api_format,
         api_key=payload.api_key or (existing.api_key if existing else None),
         models=payload.models,
+        context_window=payload.context_window
+        or (existing.context_window if existing else None),
     )
     others = [m for m in current.custom_models if m.name != name]
     updated = current.model_copy(update={"custom_models": [*others, entry]})
