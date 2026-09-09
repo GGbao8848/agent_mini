@@ -1,89 +1,60 @@
-# 上下文管理工程问题观察与修复计划（Phase 27）
+# 上下文工程手册：问题清单、实测与解决方式（agent_mini）
 
-分支：`feat/context-management`。目标：通过真实多轮对话 + 工具调用，实测 agent_core
-在上下文管理上的工程问题（对照业界常见 15 类问题清单），逐项确认/修复/回归，
-完成后合并 main。
+> 独立参考文档：记录本项目上下文管理（Context Engineering）的全部工程问题、
+> 实测数据与解决方式。随优化持续推进更新。勘察/实验基线：2026-09-08/09（Phase 27）。
 
-## 系统现状（勘察结论）
+## 架构现状（一句话）
 
-- 历史 = LangGraph `AsyncSqliteSaver` 按 `thread_id` 全量重放；follow-up 只发新消息 +
-  thread_id，**不做任何窗口化**（`runtime/executor.py:68-80`）。
-- 图每 run 重建；系统提示每 run 重建但有界（`runtime/builder.py:71-105`）。
-- 摘要：deepagents `SummarizationMiddleware` 常驻。本地/自定义端点无 model profile →
-  触发阈值 **扁平 170k tokens**（`compute_summarization_defaults`）。本地 qwen3.8-27b
-  vLLM `max_model_len=262144`，170k < 256k，能触发，但触发前每轮 prefill 已巨大。
-- 工具结果截断：gate 层 `cap_text` 4000 字符（仅字符串）；`run_code` stdout/stderr 各
-  8000 字符。**dict/list 结构化结果不截断**（`permissions/gate.py:301-305`）。
-- checkpoint 库无清理：删除任务/运行不删 checkpoint 线程（生产库已 309MB/1.4 万行）。
-- token 观测：`UsageCollector` 汇总进 run usage；无 per-call/per-turn 的上下文大小观测。
+FastAPI → AgentCoreService → AgentRuntime → AgentBuilder（每 run 编译 deepagents 图）
+→ AgentExecutor 以 `thread_id` 调用 → LangGraph `AsyncSqliteSaver` 持久化全量消息状态，
+follow-up 只发新消息 + thread_id，由 checkpointer **全量重放**历史。上下文窗口化/摘要
+完全委托给 deepagents 的 SummarizationMiddleware。
 
-## 问题映射（15 类 → 本项目）
+## 问题→解决方式总表（持续更新）
 
-| # | 问题 | 本项目状态 | 实验验证 | 修复 |
-|---|------|-----------|---------|------|
-| 1 | Context 过长 | 全量重放 + 170k 才摘要 | R1 tokens 曲线/延迟 | R2 |
-| 2 | Context 丢失 | sqlite checkpointer 重启恢复 ✓ | 既有单测 | — |
-| 3 | 信息太多抓不住重点 | 超长历史无筛选 | R1 观察远轮引用 | 视观测 |
-| 4 | 历史消息污染 | 摘要仅在 170k 后重写 | 同上 | 视观测 |
-| 5 | Tool 返回太大 | 字符串已截断；**结构化未截断** | R1 构造结构化大返回 | R2 |
-| 6 | 多 Agent 上下文传递 | 子代理 thread=None 隔离（有意） | — | — |
-| 7 | 上下文重复 | 系统提示有界 | — | — |
-| 8 | 长任务状态丢失 | 每超步 checkpoint ✓ | — | — |
-| 9 | Context/Memory 混淆 | 无长期记忆模块 | — | — |
-| 10 | Prompt 越写越大 | 有界 | — | — |
-| 11 | Tool 太多 | MCP 19 工具 schema 占用 | 测量 system 大小 | 视测量 |
-| 12 | 注入风险 | approval gate ✓ | — | — |
-| 13 | 并发污染 | thread 隔离 ✓（有单测） | — | — |
-| 14 | 不可观测 | usage 汇总有；per-turn 无 | R1 用 usage 曲线 | R2 补观测 |
-| 15 | 恢复困难 | 重启恢复 ✓；孤儿线程问题 | R1 删除任务验证 | R2 清理 |
+| # | 问题 | 根因 | 解决方式 | 状态 | 提交/文件 |
+|---|------|------|---------|------|----------|
+| 1 | **token usage 恒为 0**：预算控制失效、UI 恒 0、增长不可观测 | langchain-openai 只对官方 OpenAI base URL 默认开 `stream_usage`，自定义端点（vLLM）流式响应不带 usage | `build_model` 对 custom/local/openrouter 强制 `stream_usage=True` | ✅ | `4755550` runtime/model.py |
+| 2 | **API 白名单剥离新字段**：领域模型加字段后 API 静默丢弃（gauge 恒空环） | `RunUsageOut` 是字段白名单，新字段未同步 | 同步 wire schema + 回归测试（领域模型过一遍 RunOut 序列化断言字段存在） | ✅ | `16b2c73` api/schemas.py + test_usage.py |
+| 3 | **结构化工具结果不限长**：dict/list 绕过 cap_text，一次 verbose 工具污染后续所有 prefill | gate 只对 str 截断 | `cap_result`：dict/list 序列化后限额，超限替换为截断字符串（限额内保持原结构）；顺带修 `cap_text` 的 `value[-0:]` 反向膨胀 | ✅ | `4755550` runtime/text.py + gate.py + test_text.py |
+| 4 | **checkpoint 永久孤儿**：删任务不删 LangGraph 线程（生产 309MB/1.4 万行） | delete_task 只清业务表 | delete_task 连带 `adelete_thread`；启动时孤儿 GC（见遗留 #2 计划） | ✅（删除清理）/⏳（GC） | `4755550` runtime.py + routes/tasks.py + test_sessions.py |
+| 5 | **摘要阈值与真实窗口错配**：无 model profile 时 deepagents 用扁平 170k 触发 | 自定义端点无 profile | `CustomModel.context_window` → 注入 `profile={"max_input_tokens": …}` → 摘要按真实窗口 fraction 0.85 触发 | ✅（机制）/⏳（UI 录入） | `4755550` model_config.py + model.py |
+| 6 | **上下文增长不可见**：用户看不到对话占了多少窗口、花在哪 | 无 per-call 快照指标 | `RunUsage.last_input_tokens`（最近一次调用 input ≈ 当前上下文）+ `estimated_system/messages_tokens`（on_chat_model_start 按 CJK 启发式拆 system/历史）+ `run.metadata.context_breakdown`（构建时静态估算工具 schema/技能清单） | ✅ | `2481005`/`6d19a9f` metrics/usage/builder/context_breakdown.py |
+| 7 | **控制台无容量指示**：用户不知道何时该开新对话 | — | Composer 上下文圆环（灰黑单色）+ 悬停白底明细面板（消息/系统提示词/系统工具/MCP工具/技能/其他 各行占比） | ✅ | `2481005`/`6d19a9f`/`c48ecd4` chat/context-gauge.tsx |
+| 8 | **发消息瞬间归零闪断**：新 run 无 usage，gauge 切过去读了个空 | gauge 只读 active run | 回退遍历最近 run 取最近一个带快照的，标注"（上一轮）"，新值到达后无缝切换 | ✅ | `c48ecd4` context-gauge.tsx |
+| 9 | 上下文过长（全量重放、prefill 逐轮变大） | 无窗口化；摘要 170k 才触发 | 已可观测（#6/#7）；阈值已可配（#5）。实测 turn5 单跳 8.5k tokens（5 轮），生产 7 轮 14k→62k | 🟡 可观测/可控，未做主动压缩 | — |
+| 10 | 信息太多抓不住重点 / 历史污染 | 长历史无筛选 | 未处理。方向：spec 级 SummarizationPolicy（已有机制，`keep_messages` 可配）实测 + 提示词引导 | ⏳ | — |
+| 11 | checkpoint 每超步全量快照存储放大 | LangGraph 固有 | 靠 #4 清理；长对话摘要重写状态会自然收缩 | 🟡 接受 | — |
 
-## 实验设计
+## 实测数据（隔离环境 R1/R3 + 生产验证）
 
-- R1：隔离服务（8010，独立 db/workspace）。任务：生成大文件 + cat（大工具输出），
-  随后 ≥4 轮跟问（每轮引用早轮内容并触发新工具）。记录每轮 run usage
-  （input/output tokens）、耗时、checkpoints.db 尺寸、摘要是否触发、远轮内容引用情况。
-- R2：按实测结果修复（预期：① 模型 ctx 感知/摘要阈值合理化；② 结构化工具结果截断；
-  ③ 任务删除连带清理 checkpoint 线程；④ per-call 上下文观测），每项配测试。
-- R3：重复 R1 验证效果（曲线回落/摘要触发/删除清理生效）。
-- R4：补充修复 + 全量回归（pytest、mypy strict、控制台冒烟）→ 合并 main。
+- R1（修复前）：5 轮 usage 全 0；checkpoint 5 轮 0→1.37MB（每轮 +220~330KB 递增）。
+- R3（修复后）：usage 曲线 21101/13823/14522/24486/8558（turn5 单跳 8.5k = 全量重放
+  prefill 实测）；删任务后 checkpoint rows=0。
+- 生产（`16b2c73` 后）：7 轮会话 input 14329→14533→144361→59377→62038；新 run
+  `last_input_tokens=23854` 正常返回。
+- 对话质量：5 轮内远轮记忆（文件名/内容特征）全部正确；多代理隔离/并发隔离/重启恢复
+  均有既有单测覆盖。
 
-## 实测结果（R1 → R3）
+## 关键经验（踩坑记录）
 
-R1（修复前）三大发现：
+1. **wire schema 是白名单**：领域 pydantic 模型加字段，必须同步 `api/schemas.py` 的
+   Out 模型，否则 API 静默剥离。回归测试：领域实例过一遍 Out 序列化断言新字段。
+2. **langchain-openai 的流式 usage 默认关**（非官方端点）：必须显式 `stream_usage=True`。
+3. **react adapter 的 effect 依赖含回调引用**：传给 FileViewer 的 onError 等必须
+   useCallback/memo，否则每次重渲染整个 viewer 重建（预览面板拖拽踩过）。
+4. **cap_text 的 `value[-0:]` 等于全串**：keep_head >= max_chars 时会反向膨胀。
+5. **本地 vLLM qwen3.8-27b**：`max_model_len=262144`；端点 `http://10.10.10.146:8001/v1`。
+6. 启动顺序坑：`uv run` 服务必须用持久后台方式启动（shell `&` 会随会话退出被杀）；
+   pkill 匹配串含在自身命令行时用 `[s]erve_console` 防自杀。
 
-1. **token usage 全为 0**（5 轮 × 全部字段）。根因：langchain-openai 只对官方
-   OpenAI base URL 默认开流式 usage，自定义端点（vLLM）默认关闭 → 流式响应从不带
-   usage。连锁后果：BudgetMiddleware 的 max_total_tokens 永不触发、控制台 token
-   展示恒为 0、上下文增长完全不可观测（15 类问题中的 #14 + #1）。
-2. **checkpoint 库每轮 +220~330KB 且增量递增**（5 轮 0→1.37MB；生产库 197 线程
-   309MB 吻合）。LangGraph 每超步存全量 state 快照；删除任务不删线程 → 永久孤儿
-   （#15 变体：不是恢复难，而是恢复数据永不清理）。
-3. **对话质量本身在短程内无问题**：turn5 无工具远轮回忆全部正确（#2/#13 达标）。
+## 下一步（Backlog，按价值排序）
 
-R3（修复后）验证：
-
-- usage 曲线真实可见：input tokens 按轮 21101 / 13823 / 14522 / 24486 / 8558。
-  turn5 单次调用 8558 tokens 即该对话全量重放的 prefill 成本——上下文增长首次可量化。
-- 删除任务后 checkpoints 表 rows=0（DELETE /v1/tasks/{id} 连带 adelete_thread）。
-- checkpoint 增长曲线与 R1 一致（461→1367KB）：快照膨胀是 LangGraph 设计使然，
-  控制手段是删除清理（已做）+ 预算/摘要阈值（已有，触发依赖真实窗口配置）。
-
-## 修复清单（已落地，均在 feat/context-management 分支）
-
-| 修复 | 文件 | 测试 |
-|------|------|------|
-| 非 OpenAI 官方端点强制 stream_usage=True | runtime/model.py | test_model_factory.py |
-| CustomModel.context_window → max_input_tokens profile（摘要阈值按真实窗口 fraction 0.85 触发，替代 170k 扁平默认） | config/model_config.py + runtime/model.py | test_model_factory.py |
-| cap_result：dict/list 工具结果序列化后限额，超限替换为截断字符串（限额内保持原结构） | runtime/text.py + permissions/gate.py | test_text.py（新增） |
-| cap_text 修复 keep_head >= max_chars 时 value[-0:] 返回全串的反向膨胀 | runtime/text.py | test_text.py |
-| delete_task 连带 adelete_thread 清理 checkpoint 线程 | runtime/runtime.py + api/routes/tasks.py | test_sessions.py |
-
-## 遗留（不阻塞合并）
-
-- 本地端点未配置 context_window（registry 里用户数据，不擅自改）；配置后摘要阈值
-  即从 170k 变为 262144×0.85。可在模型配置页补该字段的 UI（前端后续）。
-- checkpoint 每超步全量快照的存储放大是 LangGraph 固有行为；长对话可考虑定期
-  压缩历史线程（摘要重写状态即自然收缩），属后续优化。
-- turn4（把 50KB 文件 cat 进历史）单轮 prefill 24.5k tokens——应用层若要进一步
-  控制成本，可引导 agent 优先用 grep/分段读取替代全文 cat（提示词层面，未做）。
-
+1. **模型配置页 context_window 输入框**（前端 add-model-dialog/model-panel + 类型）——
+   补完 #5 闭环，让圆环显示真实窗口而非 256k 估算。
+2. **启动时孤儿 checkpoint GC**：扫描 checkpoints 线程，删除 tasks 表已不存在的
+   thread（生产 309MB 直接受益；删除清理只覆盖今后）。
+3. **摘要触发实测**：创建带 `SummarizationPolicy(trigger_tokens=小值)` 的测试 agent
+   跑长对话，观察摘要后 keep_messages 保留行为、远轮记忆损失、checkpoint 收缩。
+4. **提示词引导**：environment_note 里加"优先 grep/分段读取，避免全文 cat 大文件"。
+5. 远期：历史筛选/压缩策略（#10）、长期记忆分层（9 类混淆）。
