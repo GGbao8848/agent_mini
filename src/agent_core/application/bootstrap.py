@@ -112,9 +112,12 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     service.schedules = schedules
     # Register service-bound tools (schedule + skill creation) against the
     # fully built service.
+    from agent_core.builtins.memory import make_save_memory
+
     for definition, handler in (
         make_create_schedule(service),
         make_install_skill(service),
+        make_save_memory(runtime),
     ):
         try:
             tools.register(definition, handler)

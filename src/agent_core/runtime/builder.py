@@ -48,6 +48,7 @@ class AgentBuilder:
         usage_provider: Callable[[], RunUsage | None] | None = None,
         help_tool: BaseTool | None = None,
         checkpointer_provider: Callable[[], Any] | None = None,
+        memories_provider: Callable[[], list[Any]] | None = None,
     ) -> None:
         self._agents = agents
         self._tools = tools
@@ -58,6 +59,7 @@ class AgentBuilder:
         self._usage_provider = usage_provider
         self._help_tool = help_tool
         self._checkpointer_provider = checkpointer_provider
+        self._memories_provider = memories_provider
 
     def _default_model_factory(self, model_spec: str | None) -> BaseChatModel:
         from agent_core.runtime.context import get_current_model_override
@@ -91,6 +93,10 @@ class AgentBuilder:
         system_prompt = (system_prompt or "") + environment_note(
             current_task_dir(Path(settings.workspace_dir)), settings
         )
+        if self._memories_provider is not None:
+            from agent_core.domain.memory import memories_prompt
+
+            system_prompt += memories_prompt(self._memories_provider())
         return create_deep_agent(
             model=self._model_factory(spec.model),
             tools=tools,

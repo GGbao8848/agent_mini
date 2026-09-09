@@ -7,6 +7,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { useApprovals, useGlobalEvents } from "@/hooks/use-console"
 import { McpView } from "@/views/mcp-view"
+import { MemoryView } from "@/views/memory-view"
 import { ModelView } from "@/views/model-view"
 import { SchedulesView } from "@/views/schedules-view"
 import { SkillsView } from "@/views/skills-view"
@@ -21,6 +22,7 @@ const OTHER_VIEWS: Record<
   "技能": () => <SkillsView />,
   "MCP": () => <McpView />,
   "工具": () => <ToolsView />,
+  "记忆": () => <MemoryView />,
   "模型配置": () => <ModelView />,
 }
 

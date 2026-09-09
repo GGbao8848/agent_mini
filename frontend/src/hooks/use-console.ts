@@ -13,6 +13,7 @@ import {
   type Artifact,
   type DirBrowse,
   type MCPServer,
+  type MemoryEntry,
   type ModelConfig,
   type ModelConfigUpdate,
   type ModelDiscover,
@@ -507,6 +508,33 @@ export function useBrowseDir(path: string | null) {
       api.get<DirBrowse>(`/v1/dirs/browse?path=${encodeURIComponent(path ?? "")}`),
     staleTime: 10_000,
   })
+}
+
+/* ------------------------------------------------------------- memories */
+
+export function useMemories() {
+  return useQuery({
+    queryKey: ["memories"],
+    queryFn: () => api.get<MemoryEntry[]>("/v1/memories"),
+  })
+}
+
+export function useMemoryActions() {
+  const queryClient = useQueryClient()
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["memories"] })
+  const add = useToastMutation<MemoryEntry, string>({
+    mutationFn: (content) => api.post<MemoryEntry>("/v1/memories", { content }),
+    onSuccess: invalidate,
+  })
+  const update = useToastMutation<MemoryEntry, { id: string; content: string }>({
+    mutationFn: ({ id, content }) => api.patch<MemoryEntry>(`/v1/memories/${id}`, { content }),
+    onSuccess: invalidate,
+  })
+  const remove = useToastMutation<MemoryEntry, string>({
+    mutationFn: (id) => api.del<MemoryEntry>(`/v1/memories/${id}`),
+    onSuccess: invalidate,
+  })
+  return { add, update, remove }
 }
 
 /* --------------------------------------------------------- task actions */

@@ -27,6 +27,7 @@ from agent_core.artifacts import (
 from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
+from agent_core.domain.memory import MAX_CONTENT_CHARS, MAX_MEMORIES, Memory
 from agent_core.domain.metrics import RunUsage
 from agent_core.domain.task import Run, RunStatus, Task, make_title, new_id
 from agent_core.domain.trace import EventType
@@ -130,10 +131,12 @@ class AgentRuntime:
             usage_provider=self._live_usage,
             help_tool=make_help_tool(self.gate),
             checkpointer_provider=lambda: self.checkpointer,
+            memories_provider=self.list_memories,
         )
         self.executor = AgentExecutor(self.fanout)
         self._runs: dict[str, Run] = {}
         self._tasks: dict[str, Task] = {}
+        self._memories: dict[str, Memory] = {}
         self._running: dict[str, asyncio.Task[Run]] = {}
         self._collectors: dict[str, UsageCollector] = {}
         self._store = store
@@ -255,6 +258,50 @@ class AgentRuntime:
             return updated
         return task
 
+    # -------------------------------------------------------------- memories
+
+    def list_memories(self) -> list[Memory]:
+        """All memories, newest first."""
+        return sorted(self._memories.values(), key=lambda m: m.updated_at, reverse=True)
+
+    def add_memory(self, content: str, *, source: str = "manual", task_id: str | None = None) -> Memory:
+        """Store one durable memory (write-through). Agent writes are capped
+        by the same limits the panel enforces."""
+        content = content.strip()[:MAX_CONTENT_CHARS]
+        if not content:
+            raise StateError("memory content is empty")
+        if len(self._memories) >= MAX_MEMORIES and source == "agent":
+            raise StateError(
+                f"memory list is full ({MAX_MEMORIES}); ask the human to prune it",
+                details={"limit": MAX_MEMORIES},
+            )
+        memory = Memory(content=content, source=source, task_id=task_id)
+        self._memories[memory.id] = memory
+        if self._store is not None:
+            self._store.save_item("memory", memory.id, memory.model_dump_json())
+        return memory
+
+    def update_memory(self, memory_id: str, content: str) -> Memory:
+        """Edit one memory's text (memory panel)."""
+        memory = self._memories.get(memory_id)
+        if memory is None:
+            raise RegistryError(kind="memory", key=memory_id, detail="not found")
+        content = content.strip()[:MAX_CONTENT_CHARS]
+        if not content:
+            raise StateError("memory content is empty")
+        memory.content = content
+        memory.updated_at = datetime.now(UTC)
+        if self._store is not None:
+            self._store.save_item("memory", memory.id, memory.model_dump_json())
+        return memory
+
+    def delete_memory(self, memory_id: str) -> None:
+        """Drop one memory (write-through)."""
+        if self._memories.pop(memory_id, None) is None:
+            raise RegistryError(kind="memory", key=memory_id, detail="not found")
+        if self._store is not None:
+            self._store.delete_item("memory", memory_id)
+
     async def cleanup_orphan_checkpoints(self) -> int:
         """Delete LangGraph threads whose task no longer exists (boot-time GC).
 
@@ -367,6 +414,9 @@ class AgentRuntime:
         """
         if self._store is None:
             return
+        for _key, data in self._store.load_items("memory"):
+            memory = Memory.model_validate_json(data)
+            self._memories[memory.id] = memory
         for data in self._store.load_tasks():
             try:
                 task = Task.model_validate_json(data)

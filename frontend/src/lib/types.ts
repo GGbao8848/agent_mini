@@ -261,6 +261,15 @@ export interface DirBrowse {
   entries: DirEntry[]
 }
 
+export interface MemoryEntry {
+  id: string
+  content: string
+  source: 'manual' | 'agent' | string
+  task_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface ModelDiscover {
   ok: boolean
   models: string[]
