@@ -87,6 +87,13 @@ connect 时过滤 + 收窄时清理旧注册，`PATCH /v1/mcp/servers/{id}` 编�
 4. 未发现 offload 文件落在 task 目录（deepagents 的 conversation_history 路径
    在本项目布局下未显现，待查）。
 
+## 手动压缩上线（compact，真实会话验证）
+
+`POST /v1/tasks/{id}/compact`：强制把 thread 压为摘要 + 最近 6 条；原始历史
+offload 到任务目录 markdown（17 轮生产会话实测：26 条消息 → 7 条，摘要 936 字，
+offload 197 行，压缩后 follow-up 正常且能复述会话主题）。拒绝运行中任务。
+控制台对话头部新增「压缩」按钮（确认框 + 前后条数 toast）。
+
 ## 下一步（Backlog，按价值排序）
 
 1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
