@@ -47,6 +47,20 @@ class SkillRegistry:
                 manifest.model_dump_json(),
             )
 
+    def update(self, manifest: SkillManifest) -> SkillManifest:
+        """Persist edits to an existing manifest (e.g. the enabled toggle)."""
+        versions = self._versions.get(manifest.id)
+        if versions is None or manifest.version not in versions:
+            raise RegistryError(kind=self.kind, key=manifest.id, detail="not found")
+        versions[manifest.version] = manifest
+        if self._store is not None:
+            self._store.save_item(
+                self.kind,
+                self._key(manifest.id, manifest.version),
+                manifest.model_dump_json(),
+            )
+        return manifest
+
     def get(self, skill_id: str, version: str | None = None) -> SkillManifest:
         """Return ``version`` of the skill, or the latest registered version."""
         versions = self._versions.get(skill_id)

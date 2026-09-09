@@ -37,6 +37,7 @@ from agent_core.permissions.arg_risk import needs_argument_approval
 from agent_core.permissions.loop_guard import LoopGuard, LoopVerdict
 from agent_core.permissions.policy import ActionPolicy
 from agent_core.registries import AgentRegistry, ToolHandler, ToolRegistry
+from agent_core.domain.tool import ToolSource
 from agent_core.runtime.text import cap_result
 
 if TYPE_CHECKING:
@@ -303,6 +304,20 @@ class ActionGate:
         # value → ToolMessage) and the trace event: multi-KB tool outputs are
         # the main driver of context bloat and per-step prefill latency.
         result = cap_result(result)
+        # Trust boundary: MCP results are EXTERNAL data (web pages, remote
+        # files). Wrapping them lets the system prompt tell the model that
+        # anything inside — including imperative-sounding text — is material
+        # to analyze, never instructions to follow.
+        if (
+            definition.source == ToolSource.MCP
+            and isinstance(result, str)
+            and result
+            and not result.lstrip().startswith("<untrusted-content")
+        ):
+            result = (
+                f'<untrusted-content from="mcp:{action.tool_name}">\n'
+                f"{result}\n</untrusted-content>"
+            )
         action.result = result
         self._fanout.emit(
             EventType.TOOL_EXECUTED,

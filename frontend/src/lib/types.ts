@@ -169,6 +169,7 @@ export interface Skill {
   version: string
   description: string
   path: string | null
+  enabled: boolean
 }
 
 export interface MCPServer {
@@ -181,6 +182,8 @@ export interface MCPServer {
   auth_ref: string | null
   status: string
   metadata: Record<string, unknown>
+  enabled: boolean
+  exposed_tools?: string[] | null
 }
 
 /** SSE event types the console subscribes to (mirrors the runtime trace vocabulary). */
@@ -259,6 +262,15 @@ export interface DirBrowse {
   path: string
   parent: string | null
   entries: DirEntry[]
+}
+
+export interface CompactResult {
+  compacted: boolean
+  before: number
+  after?: number
+  reason?: string
+  summary_chars?: number
+  offload?: string
 }
 
 export interface ModelDiscover {

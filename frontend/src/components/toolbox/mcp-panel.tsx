@@ -275,6 +275,14 @@ function ServerToolsDialog({
     ? (tools.data ?? []).filter((t) => t.metadata?.mcp_server === server.id)
     : []
   const healthy = server?.status === "healthy"
+  const allowlist = server?.exposed_tools ?? null
+
+  const toggleExposed = (name: string, exposed: boolean) => {
+    if (!server) return
+    const current = allowlist ?? serverTools.map((t) => t.name)
+    const next = exposed ? [...new Set([...current, name])] : current.filter((n) => n !== name)
+    mcp.update.mutate({ serverId: server.id, patch: { exposed_tools: next } })
+  }
 
   return (
     <Dialog open={server !== null} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -325,13 +333,34 @@ function ServerToolsDialog({
               <p className="text-sm text-muted-foreground">该服务器没有注册任何工具。</p>
             ) : (
               <div className="flex min-h-0 flex-1 flex-col gap-2">
-                <h4 className="text-xs font-medium text-muted-foreground">
-                  工具（{serverTools.length}）
-                </h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-medium text-muted-foreground">
+                    工具（{serverTools.length}）
+                  </h4>
+                  <span className="text-[10px] text-muted-foreground">
+                    勾选 = 暴露给分身（schema 进每次对话）
+                  </span>
+                </div>
                 <div className="-mx-1 flex flex-col gap-2 overflow-y-auto px-1 pb-1">
-                  {serverTools.map((tool) => (
-                    <ToolRow key={tool.name} tool={tool} />
-                  ))}
+                  {serverTools.map((tool) => {
+                    const exposed = allowlist === null || allowlist.includes(tool.name)
+                    return (
+                      <label
+                        key={tool.name}
+                        className="flex cursor-pointer items-start gap-2 rounded-lg border p-2 transition-colors hover:bg-accent/40"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={exposed}
+                          onChange={(e) => toggleExposed(tool.name, e.target.checked)}
+                          className="mt-0.5 size-4 accent-[var(--primary)]"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <ToolRow tool={tool} />
+                        </span>
+                      </label>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -433,34 +462,51 @@ export function McpPanel() {
                     {server.description}
                   </p>
                 )}
-                <div className="mt-auto flex gap-2 pt-1">
-                  {healthy ? (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      disabled={mcp.action.isPending}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        mcp.action.mutate({ serverId: server.id, action: "disconnect" })
-                      }}
-                    >
-                      <UnplugIcon data-icon="inline-start" />
-                      断开
-                    </Button>
-                  ) : (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      disabled={mcp.action.isPending}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        mcp.action.mutate({ serverId: server.id, action: "connect" })
-                      }}
-                    >
-                      <PlugIcon data-icon="inline-start" />
-                      连接
-                    </Button>
-                  )}
+                <div className="mt-auto flex items-center gap-2 pt-1">
+                  <label
+                    className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
+                    title={server.enabled ? "已启用：自动连接并暴露工具" : "已停用：不连接，工具对分身不可见"}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={server.enabled}
+                      disabled={mcp.action.isPending || mcp.update.isPending}
+                      onChange={(e) =>
+                        mcp.update.mutate({ serverId: server.id, patch: { enabled: e.target.checked } })
+                      }
+                      className="size-4 accent-[var(--primary)]"
+                    />
+                    启用
+                  </label>
+                  {server.enabled &&
+                    (healthy ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={mcp.action.isPending}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          mcp.action.mutate({ serverId: server.id, action: "disconnect" })
+                        }}
+                      >
+                        <UnplugIcon data-icon="inline-start" />
+                        断开
+                      </Button>
+                    ) : (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={mcp.action.isPending}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          mcp.action.mutate({ serverId: server.id, action: "connect" })
+                        }}
+                      >
+                        <PlugIcon data-icon="inline-start" />
+                        连接
+                      </Button>
+                    ))}
                   <Button
                     size="xs"
                     variant="ghost"

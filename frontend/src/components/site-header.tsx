@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { useDeleteTask, useRun, useTask } from "@/hooks/use-console"
+import { useCompactTask, useDeleteTask, useRun, useTask } from "@/hooks/use-console"
 import { TERMINAL_RUN_STATUSES } from "@/lib/types"
 import {
   AlertDialog,
@@ -18,7 +18,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { TriangleAlertIcon, Trash2Icon, CircleCheckIcon, CircleAlertIcon } from "lucide-react"
+import {
+  ArchiveIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  Loader2Icon,
+  Trash2Icon,
+  TriangleAlertIcon,
+} from "lucide-react"
+import { toast } from "sonner"
 import type { ConnState } from "@/hooks/use-console"
 
 const CONN_BADGE: Record<ConnState, { label: string; className: string }> = {
@@ -68,7 +76,9 @@ export function SiteHeader({
   taskId?: string | null
 }) {
   const [removing, setRemoving] = React.useState(false)
+  const [compacting, setCompacting] = React.useState(false)
   const deleteTask = useDeleteTask()
+  const compact = useCompactTask()
 
   // The open conversation's live state: task → active run. The event stream
   // and activity trail live in the chat thread itself now (no run drawer).
@@ -106,6 +116,20 @@ export function SiteHeader({
             <Button
               variant="ghost"
               size="sm"
+              disabled={compact.isPending}
+              title="把对话历史压缩为摘要，长对话变慢时使用；原始记录存到任务目录"
+              onClick={() => setCompacting(true)}
+            >
+              {compact.isPending ? (
+                <Loader2Icon className="size-4 animate-spin" data-icon="inline-start" />
+              ) : (
+                <ArchiveIcon data-icon="inline-start" />
+              )}
+              压缩
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               className="text-destructive hover:bg-destructive/10 hover:text-destructive"
               disabled={deleteTask.isPending}
               onClick={() => setRemoving(true)}
@@ -139,6 +163,39 @@ export function SiteHeader({
             </AlertDialog>
           </>
         )}
+        <AlertDialog open={compacting} onOpenChange={(open) => !open && setCompacting(false)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>压缩对话上下文？</AlertDialogTitle>
+              <AlertDialogDescription>
+                把历史消息压缩为一份摘要（原文存到任务目录），后续每轮对话显著变快；
+                分身对久远细节的记忆会变模糊。运行中的任务需先停止。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={compact.isPending}
+                onClick={() => {
+                  if (!taskId) return
+                  compact.mutate(taskId, {
+                    onSuccess: (r) => {
+                      setCompacting(false)
+                      if (r.compacted) {
+                        toast.success(`已压缩：${r.before} 条 → ${r.after} 条`)
+                      } else {
+                        toast.info(r.reason ?? "无需压缩")
+                      }
+                    },
+                    onError: () => setCompacting(false),
+                  })
+                }}
+              >
+                压缩
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {pendingApprovals > 0 && (
           <Badge variant="outline" className="border-amber-500/30 bg-amber-500/15 text-amber-700 dark:text-amber-400">
             <TriangleAlertIcon />

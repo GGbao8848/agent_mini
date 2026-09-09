@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from pydantic import ValidationError
 
 from agent_core.artifacts import (
@@ -24,10 +25,13 @@ from agent_core.artifacts import (
     scan_task_artifacts,
     scan_workspace_artifacts,
 )
+from langchain_core.messages import HumanMessage, RemoveMessage
+
 from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
 from agent_core.domain.metrics import RunUsage
+from agent_core.runtime.text import extract_text
 from agent_core.domain.task import Run, RunStatus, Task, make_title, new_id
 from agent_core.domain.trace import EventType
 from agent_core.errors.exceptions import (
@@ -254,6 +258,88 @@ class AgentRuntime:
             self._save_task(updated)
             return updated
         return task
+
+    async def compact_task(self, task_id: str, *, keep: int = 6) -> dict[str, Any]:
+        """Force-summarize the conversation thread (long-conversation rescue).
+
+        The summarization middleware only fires near the context ceiling —
+        far later than a conversation actually becomes slow and expensive.
+        This shrinks the thread to a summary plus the last ``keep`` messages
+        on demand: the raw history is offloaded next to the task so nothing
+        is lost, and the follow-up prefill drops accordingly. Running tasks
+        are refused; compacting a mid-flight thread would race the agent.
+        """
+        task = self.get_task(task_id)
+        active = self.task_active_run(task_id)
+        if active is not None and not active.status.is_terminal:
+            raise StateError(
+                f"Task '{task_id}' is running; stop it before compacting",
+                details={"task_id": task_id, "run_id": active.id},
+            )
+        if task.thread_id is None:
+            raise StateError(
+                f"Task '{task_id}' has no conversation thread to compact",
+                details={"task_id": task_id},
+            )
+        spec = self.agents.get(task.agent_id)
+        await self._ensure_checkpointer_ready()
+        graph = self.builder.build(spec)
+        from langchain_core.runnables import RunnableConfig
+        config: RunnableConfig = {"configurable": {"thread_id": task.thread_id}}
+        state = await graph.aget_state(config)
+        messages = list((state.values or {}).get("messages", []))
+        before = len(messages)
+        if before <= keep + 2:
+            return {
+                "compacted": False,
+                "before": before,
+                "reason": f"仅 {before} 条消息，无需压缩",
+            }
+        transcript = []
+        for m in messages[:-keep]:
+            content = m.content if isinstance(m.content, str) else extract_text(m.content)
+            transcript.append(f"[{getattr(m, 'type', 'message')}] {content[:2000]}")
+        prompt = (
+            "把以下 agent 工作对话压缩为要点摘要，保留：用户的目标与要求、"
+            "已完成的工作与产物（文件名/路径等具体信息）、重要事实与决定、"
+            "未完成的事项。用中文要点列表输出，不要寒暄。\n\n"
+            + "\n".join(transcript)
+        )[:60000]
+        from agent_core.runtime.model import build_model
+
+        model = build_model(spec.model)
+        result = await model.ainvoke(prompt)
+        summary = extract_text(result.content).strip()
+        if not summary:
+            raise StateError("summarization model returned empty output")
+        task_dir = Path(get_settings().workspace_dir) / "tasks" / task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        offload = task_dir / f"conversation-history-{stamp}.md"
+        offload.write_text("\n\n".join(transcript), encoding="utf-8")
+        summary_msg = HumanMessage(
+            content=(
+                f"（此前 {before} 条消息已压缩为下面的摘要；"
+                f"完整原始记录见 {offload.name}）\n\n{summary}"
+            )
+        )
+        await graph.aupdate_state(
+            config,
+            {
+                "messages": [
+                    RemoveMessage(id=REMOVE_ALL_MESSAGES),
+                    summary_msg,
+                    *messages[-keep:],
+                ]
+            },
+        )
+        return {
+            "compacted": True,
+            "before": before,
+            "after": keep + 1,
+            "summary_chars": len(summary),
+            "offload": str(offload),
+        }
 
     async def cleanup_orphan_checkpoints(self) -> int:
         """Delete LangGraph threads whose task no longer exists (boot-time GC).

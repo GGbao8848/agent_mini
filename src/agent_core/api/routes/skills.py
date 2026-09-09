@@ -15,7 +15,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, Query, UploadFile
 
 from agent_core.api.deps import ServiceDep
-from agent_core.api.schemas import SkillCreateRequest, SkillOut
+from agent_core.api.schemas import SkillCreateRequest, SkillOut, SkillUpdateRequest
 from agent_core.api.skills_upload import install_skill_from_zip
 from agent_core.config.settings import get_settings
 from agent_core.domain.skill import SkillManifest
@@ -78,3 +78,12 @@ def uninstall_skill(
 ) -> SkillOut:
     """Remove one version, or the whole skill when ``version`` is omitted."""
     return SkillOut.of(service.runtime.skills.remove(skill_id, version))
+
+
+@router.patch("/{skill_id}", response_model=SkillOut)
+def update_skill(skill_id: str, payload: SkillUpdateRequest, service: ServiceDep) -> SkillOut:
+    """Toggle/edit a skill's registration fields (enabled drives staging)."""
+    manifest = service.runtime.skills.get(skill_id)
+    if payload.enabled is not None:
+        manifest.enabled = payload.enabled
+    return SkillOut.of(service.runtime.skills.update(manifest))

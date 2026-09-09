@@ -164,7 +164,7 @@ class AgentBuilder:
         relative to the backend. ``.skills/`` is wiped and rebuilt on every
         build so the staged copy always matches the registry.
         """
-        manifests = self._skills.list()
+        manifests = [m for m in self._skills.list() if m.enabled]
         if not manifests:
             return None
         staged = stage_root / ".skills"

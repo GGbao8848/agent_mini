@@ -30,6 +30,10 @@ class SkillManifest(BaseModel):
     description: str = ""
     path: Path | None = Field(default=None, description="Directory containing SKILL.md")
     dependencies: list[str] = Field(default_factory=list)
+    enabled: bool = Field(
+        default=True,
+        description="Disabled skills are not staged into the agent backend (invisible).",
+    )
     allowed_tools: list[str] = Field(
         default_factory=list,
         description="Tool names this skill may use; empty means unrestricted",

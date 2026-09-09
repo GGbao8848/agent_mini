@@ -192,15 +192,32 @@ export function SkillsPanel() {
                   {skill.path}
                 </p>
               )}
-              <Button
-                size="xs"
-                variant="ghost"
-                className="mt-auto self-end text-destructive"
-                onClick={() => setRemovingId(skill.id)}
-              >
-                <Trash2Icon data-icon="inline-start" />
-                删除
-              </Button>
+              <div className="mt-auto flex items-center justify-between pt-1">
+                <label
+                  className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
+                  title={skill.enabled ? "已启用：注入分身的技能清单" : "已停用：对分身不可见"}
+                >
+                  <input
+                    type="checkbox"
+                    checked={skill.enabled}
+                    disabled={manage.update.isPending}
+                    onChange={(e) =>
+                      manage.update.mutate({ id: skill.id, enabled: e.target.checked })
+                    }
+                    className="size-4 accent-[var(--primary)]"
+                  />
+                  启用
+                </label>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="text-destructive"
+                  onClick={() => setRemovingId(skill.id)}
+                >
+                  <Trash2Icon data-icon="inline-start" />
+                  删除
+                </Button>
+              </div>
             </div>
           ))}
         </div>

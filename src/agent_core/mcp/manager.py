@@ -106,6 +106,8 @@ class MCPManager:
             if server.id in self._connections:
                 results[server.id] = list(self._registered.get(server.id, []))
                 continue
+            if not server.enabled:
+                results[server.id] = None  # console toggle is off
             try:
                 results[server.id] = await self.connect(server.id)
             except Exception:  # noqa: BLE001 - per-server best effort

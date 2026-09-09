@@ -385,6 +385,12 @@ class SkillCreateRequest(BaseModel):
         return directory
 
 
+class SkillUpdateRequest(BaseModel):
+    """Partial skill-registration update."""
+
+    enabled: bool | None = None
+
+
 class SkillOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -395,12 +401,12 @@ class SkillOut(BaseModel):
     path: Path | None
     dependencies: list[str]
     allowed_tools: list[str]
+    enabled: bool = True
     metadata: dict[str, str]
 
     @classmethod
     def of(cls, manifest: SkillManifest) -> SkillOut:
         return cls.model_validate(manifest)
-
 
 class MCPServerCreateRequest(BaseModel):
     """Registration payload; secrets are referenced, never sent.
@@ -418,6 +424,7 @@ class MCPServerCreateRequest(BaseModel):
     endpoint: str = ""
     auth_ref: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
     exposed_tools: list[str] | None = None
 
 
@@ -444,6 +451,7 @@ class MCPServerOut(BaseModel):
     auth_ref: str | None
     status: str
     metadata: dict[str, Any]
+    enabled: bool = True
     exposed_tools: list[str] | None = None
 
     @classmethod

@@ -154,6 +154,16 @@ def update_task(task_id: str, payload: TaskUpdateRequest, service: ServiceDep) -
     return _conversation_out(service, task.id)
 
 
+@router.post("/{task_id}/compact")
+async def compact_task(task_id: str, service: ServiceDep) -> dict[str, Any]:
+    """Force-summarize the conversation thread (long-conversation rescue).
+
+    Refused while the conversation is running; the raw history is offloaded
+    to the task directory so nothing is lost.
+    """
+    return await service.runtime.compact_task(task_id)
+
+
 @router.post("/{task_id}/read", response_model=TaskOut)
 def mark_task_read(task_id: str, service: ServiceDep) -> TaskOut:
     """Advance the conversation's read marker to its latest turn."""

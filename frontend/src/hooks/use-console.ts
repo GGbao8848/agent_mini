@@ -24,6 +24,7 @@ import {
   type Schedule,
   type SchedulePayload,
   type Skill,
+  type CompactResult,
   type Task,
   type Tool,
 } from "@/lib/types"
@@ -294,11 +295,19 @@ export function useMcpAction() {
     mutationFn: ({ serverId, action }) => api.post(`/v1/mcp/servers/${serverId}/${action}`),
     onSuccess: invalidate,
   })
+  const update = useToastMutation<
+    unknown,
+    { serverId: string; patch: { enabled?: boolean; exposed_tools?: string[] | null } }
+  >({
+    mutationFn: ({ serverId, patch }) =>
+      api.patch(`/v1/mcp/servers/${serverId}`, patch),
+    onSuccess: invalidate,
+  })
   const remove = useToastMutation<unknown, string>({
     mutationFn: (serverId) => api.del(`/v1/mcp/servers/${serverId}`),
     onSuccess: invalidate,
   })
-  return { create, action, remove }
+  return { create, action, update, remove }
 }
 
 export function useSkillManage() {
@@ -309,6 +318,10 @@ export function useSkillManage() {
   }
   const install = useToastMutation<unknown, Record<string, unknown>>({
     mutationFn: (payload) => api.post("/v1/skills", payload),
+    onSuccess: invalidate,
+  })
+  const update = useToastMutation<unknown, { id: string; enabled: boolean }>({
+    mutationFn: ({ id, enabled }) => api.patch(`/v1/skills/${id}`, { enabled }),
     onSuccess: invalidate,
   })
   const upload = useToastMutation<unknown, { file: File; skillId?: string }>({
@@ -324,7 +337,7 @@ export function useSkillManage() {
     mutationFn: (skillId) => api.del(`/v1/skills/${skillId}`),
     onSuccess: invalidate,
   })
-  return { install, upload, remove }
+  return { install, update, upload, remove }
 }
 
 export function useUpdateAgent() {
@@ -510,6 +523,18 @@ export function useBrowseDir(path: string | null) {
 }
 
 /* --------------------------------------------------------- task actions */
+
+export function useCompactTask() {
+  const queryClient = useQueryClient()
+  return useToastMutation<CompactResult, string>({
+    mutationFn: (taskId) => api.post<CompactResult>(`/v1/tasks/${taskId}/compact`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task'] })
+      queryClient.invalidateQueries({ queryKey: ['run'] })
+    },
+  })
+}
 
 export function useMarkTaskRead() {
   const queryClient = useQueryClient()

@@ -284,3 +284,42 @@ class TestCheckpointGC:
         assert await runtime.checkpointer.aget_tuple(
             {"configurable": {"thread_id": kept.thread_id}}
         ) is not None
+
+
+class TestCompact:
+    async def test_compact_shrinks_thread_and_keeps_continuity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from langchain_core.messages import AIMessage
+
+        import agent_core.runtime.model as model_module
+
+        class StubModel:
+            async def ainvoke(self, prompt: str):
+                return AIMessage("- 用户打了招呼\n- 连续发了 a/b/c 三条消息")
+
+        monkeypatch.setattr(model_module, "build_model", lambda spec=None: StubModel())
+        runtime = make_runtime(tmp_path, monkeypatch)
+        conversation = runtime.create_conversation("helper", "hello")
+        for text in ("a", "b", "c"):
+            run = runtime.create_run("helper", text, task=conversation)
+            await runtime.execute_run(run)
+
+        async def thread_len() -> int:
+            graph = runtime.builder.build(runtime.agents.get("helper"))
+            config = {"configurable": {"thread_id": conversation.thread_id}}
+            state = await graph.aget_state(config)
+            return len((state.values or {}).get("messages", []))
+
+        before = await thread_len()
+
+        result = await runtime.compact_task(conversation.id, keep=2)
+
+        assert result["compacted"] is True
+        after = await thread_len()
+        assert after < before
+        # The thread still replays: a follow-up sees summary + kept tail + new.
+        followup = runtime.create_run("helper", "and now?", task=conversation)
+        await runtime.execute_run(followup)
+        assert service_output(runtime, followup).startswith("saw-")
+        assert result["offload"]

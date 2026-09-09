@@ -78,7 +78,13 @@ async def update_server(
     for field, value in updates.items():
         setattr(definition, field, value)
     service.mcp_registry.replace(definition)
+    enabled_now = definition.enabled
     was_live = definition.status.value == "healthy"
+    if not enabled_now and was_live:
+        # Master switch off: disconnect now AND on every future boot.
+        with contextlib.suppress(AgentError):
+            await service.disconnect_server(server_id)
+        return MCPServerOut.of(service.mcp_registry.get(server_id))
     if was_live:
         with contextlib.suppress(AgentError):
             await service.disconnect_server(server_id)
