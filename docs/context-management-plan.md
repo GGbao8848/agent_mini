@@ -25,7 +25,7 @@ follow-up 只发新消息 + thread_id，由 checkpointer **全量重放**历史�
 | 9 | 上下文过长（全量重放、prefill 逐轮变大） | 无窗口化；摘要 170k 才触发 | 已可观测（#6/#7）；阈值已可配（#5）。实测 turn5 单跳 8.5k tokens（5 轮），生产 7 轮 14k→62k | 🟡 可观测/可控，未做主动压缩 | — |
 | 10 | 信息太多抓不住重点 / 历史污染 | 长历史无筛选 | 未处理。方向：spec 级 SummarizationPolicy（已有机制，`keep_messages` 可配）实测 + 提示词引导 | ⏳ | — |
 | 11 | checkpoint 每超步全量快照存储放大 | LangGraph 固有 | 靠 #4 清理；长对话摘要重写状态会自然收缩 | 🟡 接受 | — |
-| 12 | **长期记忆缺失**：跨会话知识（用户偏好/项目约定）不带过来 | 无记忆模块 | 自建最小记忆系统：扁平 Memory 列表 + 记忆面板（人策划）+ `save_memory` 工具（agent 提议，上限 100 条/条 2000 字）+ 全量注入每轮 system prompt（无检索机制，列表大了再上检索）| ✅ | `c7ece65` domain/memory.py + builtins/memory.py + api/routes/memories.py + views/memory-view.tsx |
+| 12 | **长期记忆缺失**：跨会话知识（用户偏好/项目约定）不带过来 | 无记忆模块 | 自建最小记忆系统：扁平 Memory 列表 + 记忆面板（人策划）+ `save_memory` 工具（agent 提议，上限 100 条/条 2000 字）+ 全量注入每轮 system prompt（无检索机制，列表大了再上检索）+ **每轮后自动提炼**（单次廉价调用判断是否入库，带已有记忆做语义去重，AGENT_CORE_AUTO_MEMORY 默认开）| ✅ | `c7ece65` + 自动提炼（本日） domain/memory.py + builtins/memory.py + api/routes/memories.py + views/memory-view.tsx |
 
 ## 实测数据（隔离环境 R1/R3 + 生产验证）
 
