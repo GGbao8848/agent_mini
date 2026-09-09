@@ -49,6 +49,22 @@ follow-up 只发新消息 + thread_id，由 checkpointer **全量重放**历史�
 6. 启动顺序坑：`uv run` 服务必须用持久后台方式启动（shell `&` 会随会话退出被杀）；
    pkill 匹配串含在自身命令行时用 `[s]erve_console` 防自杀。
 
+## 摘要触发实测（summlab 实验，trigger_tokens=1500 / keep_messages=4）
+
+用低阈值测试 agent 跑 3 轮大工具输出对话（生成 20KB 文件 + cat 全文 ×2）：
+
+1. **摘要真实触发且有效**：turn1 多次调用累计 input 39743（历史远超阈值），
+   turn2 的 input 骤降到 **14965（-62%）**——历史确实被摘要重写，证明
+   SummarizationMiddleware 在本项目链路里端到端工作。
+2. **keep_messages 窗口保住近轮细节**：keep=4 下，最近的 cat 结果（gate 截断后
+   头部 2000 字符含 marker）留在窗口内，紧邻两轮的无工具回忆探针全部答对。
+   远轮损失需要更长链路才能观测（预期：窗口轮转后早期细节只剩摘要概述）。
+3. **摘要后仍占 ~15k**：大头不是对话历史，而是 system 侧固定开销（工具 schema +
+   技能文档注入）——与控制台 breakdown 面板的分布一致。**压缩对话历史的边际
+   收益有限，优化系统提示/工具清单才是下一块大头**（#10/#11）。
+4. 未发现 offload 文件落在 task 目录（deepagents 的 conversation_history 路径
+   在本项目布局下未显现，待查）。
+
 ## 下一步（Backlog，按价值排序）
 
 1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
