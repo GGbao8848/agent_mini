@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -193,21 +194,20 @@ export function SkillsPanel() {
                 </p>
               )}
               <div className="mt-auto flex items-center justify-between pt-1">
-                <label
+                <span
                   className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
                   title={skill.enabled ? "已启用：注入分身的技能清单" : "已停用：对分身不可见"}
                 >
-                  <input
-                    type="checkbox"
+                  <Switch
+                    size="sm"
                     checked={skill.enabled}
                     disabled={manage.update.isPending}
-                    onChange={(e) =>
-                      manage.update.mutate({ id: skill.id, enabled: e.target.checked })
+                    onCheckedChange={(checked) =>
+                      manage.update.mutate({ id: skill.id, enabled: checked === true })
                     }
-                    className="size-4 accent-[var(--primary)]"
                   />
                   启用
-                </label>
+                </span>
                 <Button
                   size="xs"
                   variant="ghost"

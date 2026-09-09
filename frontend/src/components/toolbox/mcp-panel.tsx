@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
 import { useMcpServers, useMcpAction, useTools } from "@/hooks/use-console"
 import { normalizeMcpConfig, validateServerPayload } from "@/lib/mcp-config"
 import type { MCPServer, Tool } from "@/lib/types"
@@ -345,20 +346,20 @@ function ServerToolsDialog({
                   {serverTools.map((tool) => {
                     const exposed = allowlist === null || allowlist.includes(tool.name)
                     return (
-                      <label
+                      <div
                         key={tool.name}
-                        className="flex cursor-pointer items-start gap-2 rounded-lg border p-2 transition-colors hover:bg-accent/40"
+                        className="flex items-start gap-3 rounded-lg border p-2 transition-colors hover:bg-accent/40"
                       >
-                        <input
-                          type="checkbox"
+                        <Switch
+                          size="sm"
                           checked={exposed}
-                          onChange={(e) => toggleExposed(tool.name, e.target.checked)}
-                          className="mt-0.5 size-4 accent-[var(--primary)]"
+                          onCheckedChange={(checked) => toggleExposed(tool.name, checked === true)}
+                          className="mt-0.5"
                         />
                         <span className="min-w-0 flex-1">
                           <ToolRow tool={tool} />
                         </span>
-                      </label>
+                      </div>
                     )
                   })}
                 </div>
@@ -463,22 +464,21 @@ export function McpPanel() {
                   </p>
                 )}
                 <div className="mt-auto flex items-center gap-2 pt-1">
-                  <label
+                  <span
                     className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
                     title={server.enabled ? "已启用：自动连接并暴露工具" : "已停用：不连接，工具对分身不可见"}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <input
-                      type="checkbox"
+                    <Switch
+                      size="sm"
                       checked={server.enabled}
                       disabled={mcp.action.isPending || mcp.update.isPending}
-                      onChange={(e) =>
-                        mcp.update.mutate({ serverId: server.id, patch: { enabled: e.target.checked } })
+                      onCheckedChange={(checked) =>
+                        mcp.update.mutate({ serverId: server.id, patch: { enabled: checked === true } })
                       }
-                      className="size-4 accent-[var(--primary)]"
                     />
                     启用
-                  </label>
+                  </span>
                   {server.enabled &&
                     (healthy ? (
                       <Button
