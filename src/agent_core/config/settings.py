@@ -36,12 +36,6 @@ class Settings(BaseSettings):
     # console). Turn off if a provider chokes on SSE streaming.
     model_streaming: bool = True
 
-    # After each completed turn, one cheap model call decides whether the
-    # conversation produced a durable fact worth remembering; if so it lands
-    # in long-term memory automatically. The agent can still call save_memory
-    # explicitly — this is the silent fallback for unstated preferences.
-    auto_memory: bool = True
-
     # Optional persistence (Phase 16): set to "sqlite:///./agent_core.db" to
     # mirror registries/runs/approvals/events into SQLite and restore on boot.
     database_url: str | None = None
