@@ -69,6 +69,11 @@ function fileBaseName(path: string): string {
  * then stays cached for the session. */
 function LazyFileViewer({ target }: { target: PreviewTarget }) {
   const [failed, setFailed] = React.useState(false)
+  // Stable identity is load-bearing: the react adapter destroys and recreates
+  // the whole viewer whenever onError/onUnsupported change identity, and the
+  // pane re-renders on every drag frame. An inline arrow here would rebuild
+  // (and re-fetch + re-parse) the file dozens of times per drag.
+  const onError = React.useCallback(() => setFailed(true), [])
   return (
     <React.Suspense
       fallback={
@@ -82,10 +87,10 @@ function LazyFileViewer({ target }: { target: PreviewTarget }) {
         <DownloadCard target={target} />
       ) : (
         <div className="h-full">
-          <FileViewerLoaded
+          <MemoFileViewerLoaded
             url={downloadHref(target)}
             name={fileBaseName(target.path)}
-            onError={() => setFailed(true)}
+            onError={onError}
           />
         </div>
       )}
@@ -192,6 +197,11 @@ const FileViewerLoaded = React.lazy(async () => {
   }
 })
 
+/* Memoized so drag-resizing the pane (which re-renders it every frame) never
+ * reaches the viewer: with url/name/onError all referentially stable, the
+ * adapter's effect deps don't change and the viewer isn't rebuilt. */
+const MemoFileViewerLoaded = React.memo(FileViewerLoaded)
+
 /* ------------------------------------------------------------- preview body */
 
 function PreviewBody({ target }: { target: PreviewTarget }) {
@@ -236,6 +246,9 @@ function Panel({ target, onClose }: { target: PreviewTarget; onClose: () => void
   const [width, setWidth] = React.useState<number>(loadWidth)
   const widthRef = React.useRef(width)
   const rootRef = React.useRef<HTMLElement>(null)
+  // Tracks an active drag. Persisting on every pointermove (let alone on every
+  // React render of a resize) would hammer localStorage; only the pointerup
+  // that ends a drag writes the final width.
   const dragRef = React.useRef<{
     startX: number
     startWidth: number
@@ -251,6 +264,11 @@ function Panel({ target, onClose }: { target: PreviewTarget; onClose: () => void
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const root = rootRef.current
     if (!root?.parentElement) return
+    // Only the primary button drags; anything else (right-click…) is ignored.
+    if (e.button !== 0) return
+    // Dragging a divider must never leave stray text selections in the chat.
+    const selection = window.getSelection()
+    if (selection) selection.removeAllRanges()
     const maxWidth = Math.max(MIN_WIDTH, root.parentElement.clientWidth * MAX_WIDTH_RATIO)
     dragRef.current = { startX: e.clientX, startWidth: widthRef.current, maxWidth }
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -262,10 +280,21 @@ function Panel({ target, onClose }: { target: PreviewTarget; onClose: () => void
     applyWidth(next)
   }
   const onPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current) return
+    const d = dragRef.current
+    if (!d) return
     dragRef.current = null
     e.currentTarget.releasePointerCapture(e.pointerId)
-    localStorage.setItem(WIDTH_KEY, String(widthRef.current))
+    // Only write when the width actually changed — a click on the divider
+    // (pointerdown + pointerup with no move) shouldn't touch storage.
+    if (widthRef.current !== d.startWidth) {
+      localStorage.setItem(WIDTH_KEY, String(widthRef.current))
+    }
+  }
+
+  // Double-clicking the divider snaps the pane back to the default width.
+  const resetWidth = () => {
+    applyWidth(DEFAULT_WIDTH)
+    localStorage.setItem(WIDTH_KEY, String(DEFAULT_WIDTH))
   }
 
   return (
@@ -278,11 +307,13 @@ function Panel({ target, onClose }: { target: PreviewTarget; onClose: () => void
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="调整预览面板宽度"
+        aria-label="调整预览面板宽度（双击恢复默认）"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
         onPointerCancel={onPointerEnd}
+        onDoubleClick={resetWidth}
+        title="拖拽调整宽度，双击恢复默认"
         className="group absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none"
       >
         <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-foreground/40 group-active:bg-foreground/40" />

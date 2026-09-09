@@ -329,14 +329,14 @@ export function RunArtifacts({ runId, artifacts }: { runId: string; artifacts: A
           key={artifact.path}
           type="button"
           onClick={() => preview.open({ runId: artifact.run_id ?? runId, path: artifact.path })}
-          className="w-fit cursor-zoom-in overflow-hidden rounded-lg border"
+          className="w-fit max-w-full cursor-zoom-in overflow-hidden rounded-lg border"
           title={`${artifact.path}（点击预览）`}
         >
           <img
             src={artifactUrl(artifact.run_id ?? runId, artifact.path)}
             alt={artifact.path}
             loading="lazy"
-            className="max-h-56 object-contain"
+            className="max-h-56 max-w-full object-contain"
           />
         </button>
       ))}
@@ -345,10 +345,10 @@ export function RunArtifacts({ runId, artifacts }: { runId: string; artifacts: A
           key={artifact.path}
           type="button"
           onClick={() => preview.open({ runId: artifact.run_id ?? runId, path: artifact.path })}
-          className="flex w-fit cursor-pointer items-baseline gap-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="flex w-fit min-w-0 max-w-full cursor-pointer items-baseline gap-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
           title={`${artifact.path}（点击预览）`}
         >
-          <span className="truncate underline underline-offset-2 decoration-border">
+          <span className="min-w-0 truncate underline underline-offset-2 decoration-border">
             {artifact.path}
           </span>
           <span className="shrink-0 font-mono text-[10px]">{fmtSize(artifact.size)}</span>
