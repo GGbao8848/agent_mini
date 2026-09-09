@@ -437,6 +437,10 @@ class MCPServerUpdateRequest(BaseModel):
         default=None,
         description="Allowlist of tool names; empty list exposes none, omit to keep current",
     )
+    enabled: bool | None = Field(
+        default=None,
+        description="Master switch: off disconnects now and skips auto-connect on boot",
+    )
 
 
 class MCPServerOut(BaseModel):

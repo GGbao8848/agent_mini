@@ -95,11 +95,14 @@ class MCPManager:
         return names
 
     async def auto_connect_all(self) -> dict[str, list[str] | None]:
-        """Best-effort connect every registered server (restart recovery).
+        """Best-effort connect every enabled server (restart recovery).
 
-        A server that fails to connect is left disconnected (status
+        Disabled servers are skipped — the console toggle is the master
+        switch: off means disconnected now AND on every future boot. A
+        server that fails to connect is left disconnected (status
         UNREACHABLE); callers can retry from the console. Returns
-        ``{server_id: tool names}`` — or ``None`` for a server that failed.
+        ``{server_id: tool names}`` — or ``None`` for a server that was
+        skipped or failed.
         """
         results: dict[str, list[str] | None] = {}
         for server in self._registry.list():
@@ -108,6 +111,7 @@ class MCPManager:
                 continue
             if not server.enabled:
                 results[server.id] = None  # console toggle is off
+                continue
             try:
                 results[server.id] = await self.connect(server.id)
             except Exception:  # noqa: BLE001 - per-server best effort

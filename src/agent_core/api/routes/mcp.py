@@ -67,25 +67,28 @@ async def disconnect_server(server_id: str, service: ServiceDep) -> MCPServerOut
 async def update_server(
     server_id: str, payload: MCPServerUpdateRequest, service: ServiceDep
 ) -> MCPServerOut:
-    """Edit server config (endpoint / description / tool allowlist).
+    """Edit server config (endpoint / description / tool allowlist / enabled).
 
-    A healthy server reconnects automatically so allowlist changes take
-    effect immediately; a disconnected one just picks them up on next
-    connect.
+    ``enabled`` is the master switch the console toggles: off disconnects
+    now and skips auto-connect on every future boot, on connects now. The
+    other fields describe the connection itself — a live server reconnects
+    so they take effect immediately, a disconnected one picks them up on
+    next connect.
     """
     definition = service.mcp_registry.get(server_id)
     updates = payload.model_dump(exclude_none=True)
     for field, value in updates.items():
         setattr(definition, field, value)
     service.mcp_registry.replace(definition)
-    enabled_now = definition.enabled
-    was_live = definition.status.value == "healthy"
-    if not enabled_now and was_live:
-        # Master switch off: disconnect now AND on every future boot.
-        with contextlib.suppress(AgentError):
-            await service.disconnect_server(server_id)
+    if "enabled" in updates:
+        if updates["enabled"]:
+            with contextlib.suppress(AgentError):
+                await service.connect_server(server_id)
+        elif definition.status.value == "healthy":
+            with contextlib.suppress(AgentError):
+                await service.disconnect_server(server_id)
         return MCPServerOut.of(service.mcp_registry.get(server_id))
-    if was_live:
+    if definition.status.value == "healthy":
         with contextlib.suppress(AgentError):
             await service.disconnect_server(server_id)
         with contextlib.suppress(AgentError):
