@@ -272,6 +272,23 @@ token **5262 → 4282（−18.6%）**，MCP 一家 −28%；`AGENT_CORE_TOOL_SCH
 现改量 tool factory 真正生成的 pydantic args 模型（TinyFish example 一项就虚报 ~500 token）。
 **注**：这是"压缩"，不是"裁剪工具集"；§10 更彻底的"只发 shortlist、用时展开 schema"仍待做。
 
+**R20 §10 第二步：工具分层披露（`ef804bb`）**：压缩只把描述截短，工具数一多固定成本照样线性涨。
+这一步直接解决：**冷工具（默认 MCP）只广告「名字 + 一句摘要」的 stub，真正调用时才注入完整
+schema**。靠在真实框架上验证过的性质——**执行集 > 广告集**：所有工具仍注册进图（任何调用都能
+解析），中间件只控制"这一轮告诉模型哪些"。因为 provider 只允许模型调用被广告的工具，冷工具
+必须仍被广告（以 stub 形式），否则不可达。
+
+流程（`runtime/tool_tiering.py`）：stub 广告 → 模型调冷工具 → `awrap_tool_call` 在真实 schema
+校验前拦截 → 标记激活 + 合成 ToolMessage 让模型重试 → 下一轮带全量 schema → 执行。**触发点是
+"调用"而不是"先 load_tools"**，所以不依赖模型主动加载——调工具本来就是模型的自然行为，只需
+一次额外往返、且只在真用到冷工具时付出。
+
+三步实测广告成本：**5262（原始）→ 4282（压缩）→ 2844（分层；MCP 2284 → 96）**。
+生产验证：真实 TinyFish 任务在 checkpoint 里留下激活 ToolMessage，模型共 3 轮（stub→激活→执行）
+并完成。`AGENT_CORE_TOOL_TIERING_ENABLED` / `_COLD_TOOLS`。
+*排查坑*：checkpoint 表是 lz4 压缩的二进制列，`grep` 文本会假阴性；明文在 `writes` 表里。
+
+
 **回归修复：host 模式又把 skill 说没了（`69778c2`）**：用户反映"又找不到 skill 了"。
 真实 `创建一个ppt` 任务里 agent 自述"txt2img 技能在当前环境也未挂载"，探针确认
 `ls /skills` 在宿主机上失败——但 skill 注册表里 txt2img 是 enabled、路径也在磁盘上。

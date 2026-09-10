@@ -14,7 +14,7 @@
 |---|---|---|
 | 有序/有预算/可解释的 Context（§8/§9） | ✅ | `src/agent_core/context/`，每次 run 记 `context_sections` |
 | Context 不再以"聊天历史"为唯一来源（§7） | 🟡 | 已有 task_state/memory 段；但历史仍是消息主体（见 R25 长任务） |
-| **Tool Schema 治理（§10，PR-03）** | ✅ | `compact_definition` + 注册点/水合归一：丢掉纯装饰 schema 键（example/$schema/title…）并按上限截断工具/参数描述（默认 500/400 字符），**调用方式不变**。实测模型可见工具 token **5262 → 4282（−18.6%）**，MCP 一家 −28%。`AGENT_CORE_TOOL_SCHEMA_COMPACTION`（默认开）。**更进一步的"按需展开 schema"（只发 shortlist、用到再展开）仍未做**——当前是"压缩"，不是"裁剪工具集"。 |
+| **Tool Schema 治理（§10，PR-03）** | ✅ | 两步：①**压缩**（`84c9186`）——丢装饰 schema 键、截断工具/参数描述，模型可见 token **5262 → 4282**；②**分层披露**（`ef804bb`）——冷工具（默认 MCP）以「名字 + 一句摘要」的 stub 广告，真正**调用时**才注入完整 schema（`awrap_tool_call` 在真实 schema 校验前拦截 → 标记激活 → 合成 ToolMessage 让模型重试 → 下一轮带全量 schema 执行）。广告成本再降到 **2844**（MCP 2284 → 96）。`AGENT_CORE_TOOL_TIERING_ENABLED`、`_COLD_TOOLS`。生产验证：真实 TinyFish 任务在 checkpoint 里留下激活消息、模型跑了 3 轮（stub→激活→执行）并完成。**剩余**：L1 预选层（按任务/技能收窄常驻集）仍未做——当前是"压缩 + 冷热分层"，没有"按相关性预选"。 |
 | 30–50 turn 仍 context bounded（§47 验收） | ⬜ | 未跑；依赖 R25 长任务 |
 | 硬性 context-window 闸门 | ⬜ | 目前只有 token/调用次数预算（`BudgetMiddleware`）+ 可选摘要，没有"接近窗口前强制裁剪" |
 
