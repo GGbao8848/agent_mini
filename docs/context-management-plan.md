@@ -149,5 +149,13 @@ memory↔runtime 循环导入。
    信任边界，MCP 结果包裹 + 系统提示声明"数据非指令"）。
 5. ~~长期记忆分层~~ ✅ 见上「Runtime 边界加固专项」（检索式重建，行为改变已验证）。
 6. 远期：历史筛选/压缩策略（#10）。
-7. `refactor/runtime-boundaries` 尚未合入 main；完整验收书 Round 1–4 全量证据矩阵待跑。
+7. ~~`refactor/runtime-boundaries` 合入 main~~ ✅ `e9a1f5e`（no-ff 合并；完整验收书
+   Round 1–4 证据矩阵见 `acceptance/reports/full-rounds-1-4.md`，PASS / P0=0）。
+   验收中发现并修了 4 个 P2：前端只渲染 thinking+tool（丢弃审批/循环/预算/子代理/
+   技能/失败事件）、空白思考框（模型吐 `\n\n` 分片新开空框）、SSE 未禁反代缓冲、
+   产物契约字段生产恒缺失（`register_artifact` 无调用方，全靠目录扫描 → 改在
+   `_collect_artifacts` 统一 `enrich_artifact` 补全）。
+8. **下一专项：长任务可观测性**（本次"PPT 任务像卡住"暴露）——运行时无心跳、
+   run 注册表进程内（重启丢运行态）。方向：进度/心跳事件、超时兜底、重启后非终态
+   run 恢复或明确标记失败。
 
