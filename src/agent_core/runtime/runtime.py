@@ -110,7 +110,9 @@ class AgentRuntime:
         self.tracer = tracer or InMemoryTracer()
         self.bus = bus or EventBus()
         self.fanout = EventFanout(self.tracer, self.bus)
-        self.policy = policy or ActionPolicy()
+        # Skill capability binding: the policy resolves each bound skill's
+        # allowed_tools so the gate can deny out-of-scope tool calls (I-11).
+        self.policy = policy or ActionPolicy(skill_allowed_tools=self._skill_allowed_tools)
         self.approvals = approvals or ApprovalManager()
         self.loop_guard = LoopGuard()
         self.tool_executor = ToolExecutor()
@@ -157,6 +159,18 @@ class AgentRuntime:
             return None
         collector = self._collectors.get(active.id)
         return collector.usage if collector else None
+
+    def _skill_allowed_tools(self, skill_id: str) -> list[str] | None:
+        """A bound skill's allowed_tools, or ``None`` when the skill is unknown.
+
+        Used by :class:`ActionPolicy` to enforce skill capability binding; an
+        unknown skill returns ``None`` (unrestricted) so a stale binding never
+        silently locks an agent out of all of its tools.
+        """
+        try:
+            return self.skills.get(skill_id).allowed_tools
+        except RegistryError:
+            return None
 
     # ---------------------------------------------------------------- queries
 

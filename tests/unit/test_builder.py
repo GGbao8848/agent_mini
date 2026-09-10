@@ -148,7 +148,7 @@ class TestBuild:
 
         assert builder._agent_tool_names(base_spec()) == []
 
-    def test_skills_stage_all_registered_into_workspace_backend(self, tmp_path: Path) -> None:
+    def test_skills_mount_read_only_without_copying_into_workspace(self, tmp_path: Path) -> None:
         skills_root = tmp_path / "skills"
         skill_dir = skills_root / "web-research"
         skill_dir.mkdir(parents=True)
@@ -162,20 +162,17 @@ class TestBuild:
         workspace = tmp_path / "workspace"
         builder = make_builder(skills=skills, workspace=workspace)
 
-        # Skills are a shared pool: the spec's own skills field is ignored and
-        # every registered skill is staged under a single .skills/ root.
+        # Skills are a shared pool, but they are mounted read-only from their
+        # source — never copied into the (writable) task root. Invariant I-03.
         spec = base_spec()
         graph = builder.build(spec)
 
         assert hasattr(graph, "ainvoke")
-        # Staged under the workspace (not re-rooted there): file tools keep
-        # workspace-rooted behavior while skills stay backend-readable.
-        staged = workspace / ".skills" / "web-research" / "SKILL.md"
-        assert staged.is_file()
-        assert (workspace / ".skills" / "data-plot" / "SKILL.md").is_file()
+        assert not (workspace / ".skills").exists()
+        assert list(workspace.rglob("SKILL.md")) == []
         kwargs = builder._backend_kwargs(spec)
-        assert kwargs["backend"].cwd == workspace.resolve()
-        assert kwargs["skills"] == [".skills"]
+        assert kwargs["skills"] == ["/skills/"]
+        assert (skill_dir / "SKILL.md").is_file()
 
     def test_registered_skill_without_path_raises(self, tmp_path: Path) -> None:
         skills = SkillRegistry()
