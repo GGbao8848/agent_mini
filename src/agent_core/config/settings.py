@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     # around 0.4-0.5, so this gates paraphrase-only noise.
     memory_semantic_threshold: float = 0.55
 
+    # Token ceiling for the *droppable* system-prompt sections (retrieved
+    # memory + correction hint). Unset disables trimming. The agent's own
+    # instructions are never trimmed — see agent_core.context.
+    context_injected_budget: int | None = None
+
     # Outbound HTTP proxy for model providers / MCP (e.g. http://127.0.0.1:7890).
     # Applied to the standard HTTP_PROXY / HTTPS_PROXY env vars so every HTTP
     # client in the process (OpenAI SDK, langchain, MCP) picks it up.

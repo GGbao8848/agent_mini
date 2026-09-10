@@ -18,6 +18,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from agent_core.config.settings import Settings, get_settings
+from agent_core.context.builder import ContextBuilder
 from agent_core.domain.agent import AgentSpec, SubAgentRef
 from agent_core.domain.metrics import RunUsage
 from agent_core.errors.exceptions import ConfigurationError, SkillError
@@ -80,43 +81,60 @@ class AgentBuilder:
             )
         tools = self._resolve_available_tools(spec)
         system_prompt = spec.system_prompt or None
+        autonomy_text = ""
         if spec.autonomy is not None:
             # Autonomy adds the escape hatch (request_help) and the rules that
             # keep the agent from spinning or guessing instead of asking.
             tools = tools + ([self._help_tool] if self._help_tool is not None else [])
-            system_prompt = (system_prompt or "") + autonomy_prompt_addendum()
+            autonomy_text = autonomy_prompt_addendum()
         # Environment note regenerated per build: it reflects the ACTUAL
         # working root (project dir when bound, sandbox mapping otherwise) so
         # agents never chase stale hard-coded paths like /work, and it carries
         # the hygiene rules (no full-disk find, ensure_packages first).
         settings = self._settings or get_settings()
-        system_prompt = (system_prompt or "") + environment_note(
+        environment_text = environment_note(
             current_task_dir(Path(settings.workspace_dir)), settings
         )
         # Retrieved long-term memory: only the few entries relevant to this
         # request (see agent_core.memory), never the whole store (MEM-005).
         # The runtime precomputes the block asynchronously (hybrid retrieval);
         # this sync build just reads it.
+        memory_text = ""
+        lesson_text = ""
         if self._memory_enabled:
             from agent_core.runtime.context import get_current_memory_block, get_current_query
 
             query = get_current_query() or ""
-            system_prompt = (system_prompt or "") + get_current_memory_block()
+            memory_text = get_current_memory_block()
             # Deterministic correction nudge (R11): only on turns that read like
             # a correction, so ordinary turns pay nothing and record nothing.
             from agent_core.memory.lesson import lesson_hint
 
-            system_prompt += lesson_hint(query)
+            lesson_text = lesson_hint(query)
         # Explicit task progress (R21): a compact record of the plan/status/
         # failures so a long conversation does not have to be re-read to answer
         # "where are we". Empty for a fresh, trivial task.
-        from agent_core.runtime.context import get_current_task_state_block
+        from agent_core.runtime.context import (
+            current_context,
+            get_current_task_state_block,
+        )
 
-        system_prompt = (system_prompt or "") + get_current_task_state_block()
+        task_state_text = get_current_task_state_block()
+        # Assemble the prompt as ordered, budgeted sections (R20) — the single
+        # place that decides what the model sees and in what order.
+        context = self._context_builder().build(
+            system_prompt=system_prompt or "",
+            autonomy=autonomy_text,
+            environment=environment_text,
+            task_state=task_state_text,
+            memory=memory_text,
+            lesson=lesson_text,
+        )
+        current_context.set(context)
         return create_deep_agent(
             model=self._model_factory(spec.model),
             tools=tools,
-            system_prompt=system_prompt,
+            system_prompt=context.prompt,
             subagents=[self._resolve_subagent(ref, parent_id=spec.id) for ref in spec.subagents]
             or None,
             middleware=build_middleware(spec, self._model_factory, self._usage_provider),
@@ -128,6 +146,11 @@ class AgentBuilder:
             name=spec.name,
             **self._backend_kwargs(spec),
         )
+
+    def _context_builder(self) -> ContextBuilder:
+        """The prompt assembler for this run (budget from settings)."""
+        settings = self._settings or get_settings()
+        return ContextBuilder(injected_budget=settings.context_injected_budget)
 
     def context_breakdown(self, spec: AgentSpec) -> dict[str, int]:
         """Estimate the static prompt parts for ``spec``: tool schemas and

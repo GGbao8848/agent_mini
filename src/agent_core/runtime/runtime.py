@@ -62,6 +62,7 @@ from agent_core.runtime.context import (
     current_task_id,
     current_task_root,
     current_task_state_block,
+    get_current_context,
 )
 from agent_core.runtime.executor import AgentExecutor
 from agent_core.runtime.help_tool import make_help_tool
@@ -741,6 +742,15 @@ class AgentRuntime:
             context_breakdown = getattr(self.builder, "context_breakdown", None)
             if context_breakdown is not None:
                 run.metadata["context_breakdown"] = context_breakdown(spec)
+            # R20: record what the prompt was actually made of (per-section
+            # tokens + why), so "what is in the context" is answerable. Only
+            # the real builder sets this; stub builders leave it unset.
+            context = get_current_context()
+            if context is not None:
+                run.metadata["context_sections"] = context.explain()
+                run.metadata["context_injected_tokens"] = context.injected_tokens
+                if context.dropped:
+                    run.metadata["context_dropped"] = list(context.dropped)
             output = await self.executor.execute(
                 graph,
                 run=run,
