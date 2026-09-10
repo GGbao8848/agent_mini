@@ -215,3 +215,53 @@ LOW-risk 工具：
    实际只跑几分钟却标 90 分钟超时；现在只有 wait_for 自身 deadline 映射为
    `RunTimeoutError`，内层超时算单步失败。重启后非终态 run 已由 `hydrate` 标 FAILED。
 
+## Runtime Hardening 2.0（2026-09-10，分支 `feat/runtime-hardening-2`）
+
+来源：《agent_mini Runtime Hardening 2.0 实施指南》。R20–R24 已落地并阶段验收
+（`acceptance/reports/stage-3.md`，PASS / P0=0）。核心心智：Runtime =
+Context + State + Capabilities + Execution Policy + Persistence + Recovery + Observability。
+
+- **R20 Context Architecture**（`7aebd3e`，新包 `src/agent_core/context/`）：把
+  system prompt 从"到处字符串拼接"改为**有序、有预算、可解释**的 section 列表
+  （base/autonomy/environment/task_state/memory/lesson，各带 priority 与来源）。
+  `ContextBuilder` 对可丢弃段（记忆/提示）做整段丢弃（不截半句），agent 自身指令
+  `required` 永不裁剪。每次 run 记录 `metadata.context_sections`（每段 token + 来源）
+  → 能回答"这段为什么在 prompt 里、多大"。新设置 `AGENT_CORE_CONTEXT_INJECTED_BUDGET`
+  （默认不裁）。实测：任务 1 的 sections = system 318 / autonomy 116 / environment 349
+  / memory 334；**MCP schema 3208 token 是最大固定成本**（下一步优化方向）。
+- **R21 Task State**（`a6d0fcd` + 修复 `5fe51f5`，新包 `src/agent_core/task_state/`）：
+  给"任务现在到哪了"一个**显式记录**，不再靠模型读 50 轮聊天重新推断。状态是**投影**：
+  status/failures/artifacts/activity 从 trace 事件折叠（纯函数 reducer，非 LLM），
+  plan 由 agent 用 `update_plan` 工具声明；服务按 `registry_items(kind=task_state)`
+  落库，重启 `hydrate` 后 `reconcile` 修正残留 running。`GET /tasks/{id}/state` 给控制台。
+  *坑（真实 E2E 发现，P2）*：模型对 schema 遵守很松——`update_plan` 的 `steps` 先传
+  字符串数组、再 `[{step}]`、`[{text}]`，第四次才 `[{description}]`；原 handler 假设
+  字典直接崩。`_normalize_steps` 现容忍字符串/任意常见键名。**失败的"调查类工具"不计入
+  activity**，否则"重试记计划"被误判成有效进展。
+- **R22 Capability Resolver**（`1cb4c75`，新包 `src/agent_core/capabilities/`）：
+  "agent 能不能调 X"此前分散在 6 处、可能互相矛盾（`allowed_tools` 声明了却只在
+  一处强制；`tools=[]` 静默等于"全部"）。现在 `CapabilityResolver` 是唯一事实来源
+  （agent 绑定 ∩ 技能 allowed_tools ∩ 有 handler ∩ 权限规则 ∩ 风险阈值），
+  `ActionPolicy` 退化为薄适配层（gate 的决定 == resolver 的决定），builder 用同一对象
+  取工具名，`GET /agents/{id}/capabilities` 返回**同一份计算** → 展示与强制不再分叉。
+- **R23 Memory Governance**（`2d932c3`）：`scope` 此前是装饰性的（agent 能写 ORG，
+  检索不分 scope，A 项目记忆会漂到 B 项目）。现在记忆身份 = `(scope, scope_id)` 对；
+  `MemoryPolicy` 决定**谁能写哪个 scope / 一次 run 能读哪些 scope**：agent 可写
+  USER/PROJECT/AGENT 但**不能写 ORG**（组织级由人工在控制台维护），写 PROJECT 必须有
+  绑定项目；读只含本轮语境（USER + 自己的 AGENT + ORG + 绑定 PROJECT）。新增
+  `source_run_id`/`created_by`/`scope_id` 溯源。
+- **R24 Execution / Network Policy**（`62b4283`，新包 `src/agent_core/execution/`）：
+  执行信封从"一个 `sandbox` 开关 + argv 里硬编码 `--network host`"变成显式的
+  `ExecutionPolicy`（文件/网络/环境/超时/资源五问）。**如实标注**：host 模式下网络
+  `enforced=false`（podman 无法按地址过滤），不假装有边界。新设置
+  `AGENT_CORE_SANDBOX_NETWORK=host|private|none`、`_NETWORK_ALLOW`、`_ENV_ALLOW`
+  （env 只转发真实存在且被点名者，密钥不隐式过界）；`GET /execution/policy` 给控制台。
+
+**运维（本次）**：`.env` 不再导出代理（`AGENT_CORE_PROXY_URL` 注释掉）——代理改由
+任务按需显式使用 `http://10.10.10.214:7890`（已存为 project 记忆）；sandbox 保持 host。
+
+**Backlog（R25/R26 及剩余）**：① 6 个固定 Scenario ×5 重复性验收；② Release Gate
+报告（`release-gate-<version>.md`）；③ podman 下 `--cap-drop`/`--security-opt`/只读
+根文件系统；④ 把能力集写入每个 Run 记录（审计/回放）；⑤ MCP schema 的按需加载
+（当前最大固定上下文成本）。
+

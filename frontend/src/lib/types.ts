@@ -191,7 +191,7 @@ export const EVENT_TYPES = [
   'agent_thinking', 'agent_finished', 'subagent_started', 'subagent_finished',
   'skill_loaded', 'tool_requested', 'tool_started', 'tool_executed', 'tool_failed',
   'action_pending', 'action_approved', 'action_rejected', 'loop_detected',
-  'budget_warning', 'run_heartbeat', 'run_status_changed',
+  'budget_warning', 'run_heartbeat', 'run_status_changed', 'plan_updated',
 ] as const
 
 export const TERMINAL_RUN_EVENTS = new Set(['run_finished', 'run_failed', 'run_cancelled'])

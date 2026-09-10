@@ -240,6 +240,29 @@ function buildItems(events: RunEvent[]): ActivityItem[] {
       item.running = false
       continue
     }
+    if (event.event_type === "plan_updated") {
+      // The agent declared/updated its step plan (R21). Surface it so the
+      // console shows progress the runtime already records, instead of the
+      // event looking dropped from the chain.
+      const steps = Array.isArray(event.metadata?.steps) ? event.metadata.steps : []
+      const current = event.metadata?.current_index
+      const total = steps.length
+      const label =
+        typeof current === "number" ? `计划更新：第 ${current + 1}/${total} 步` : "计划更新"
+      const detail = steps
+        .map((s: unknown, i: number) => {
+          const desc =
+            typeof s === "string"
+              ? s
+              : text((s as { description?: unknown })?.description)
+          return `${i === current ? "▶" : "·"} ${desc}`
+        })
+        .join("\n")
+      notice(key, label, detail, ts)
+      const item = items[items.length - 1]
+      item.running = false
+      continue
+    }
     if (event.event_type === "subagent_started") {
       closeThinking(ts)
       const name = String(event.metadata?.subagent ?? "子代理")

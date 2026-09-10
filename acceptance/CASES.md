@@ -20,6 +20,20 @@
 | I-11 | Skill/tool 能力被真正强制（非仅 prompt） | SKILL-004 / TOOL-002 | ⬜ |
 | I-12 | Agent 不能未经授权改 Control Plane 状态 | SEC-* | ⬜ |
 
+## Runtime Hardening 2.0 不变量（R20–R24，2026-09-10）
+
+| ID | 不变量 | 测试 |
+|---|---|---|
+| I-20 | 任务状态由事件投影（非 LLM 臆测） | `tests/runtime_boundary/test_task_state.py` |
+| I-21 | 嵌套运行（验证器/子代理）事件不改任务状态 | 同上 |
+| I-22 | 重启后状态被修正、不残留 running | 同上 + E2E 重启复验 |
+| I-23 | 能力展示与运行时强制同源 | `tests/runtime_boundary/test_capabilities.py` |
+| I-24 | agent 不能写 ORG / 无绑定项目的 PROJECT 记忆 | `tests/runtime_boundary/test_memory_governance.py` |
+| I-25 | 记忆读取按 (scope, owner) 隔离 | `tests/runtime_boundary/test_memory_governance*.py` |
+| I-26 | 执行/网络/环境信封显式且如实 | `tests/runtime_boundary/test_execution_policy.py` |
+
+阶段报告见 `reports/stage-3.md`（PASS / P0=0，真实 E2E 发现 1 个 P2 已修）。
+
 ## 复现记录
 
 （每条：Case ID / 命令 / 观察 / 根因 file:line / 判定）
