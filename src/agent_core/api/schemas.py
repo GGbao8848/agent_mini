@@ -28,6 +28,7 @@ from agent_core.domain.task import Run, Task, Turn
 from agent_core.domain.tool import ToolDefinition
 from agent_core.domain.trace import TraceEvent
 from agent_core.errors.exceptions import SkillError
+from agent_core.execution.policy import ExecutionPolicy
 from agent_core.task_state.domain import TaskState
 
 if TYPE_CHECKING:
@@ -162,6 +163,48 @@ class TaskOut(BaseModel):
             pinned=task.pinned,
             has_unread=task.has_unread,
             metadata=task.metadata,
+        )
+
+
+class ExecutionPolicyOut(BaseModel):
+    """The code-execution envelope (R24), shown to operators."""
+
+    mode: str
+    sandbox_image: str | None = None
+    filesystem_isolated: bool
+    filesystem: dict[str, Any]
+    network_mode: str
+    network_allow: list[str]
+    network_enforced: bool
+    network_note: str
+    env_forwarded: list[str]
+    env_host_secrets_visible: bool
+    memory_mb: int
+    cpus: float
+    pids_limit: int
+    timeout_seconds: float
+    timeout_max_seconds: float
+    summary: dict[str, str]
+
+    @classmethod
+    def of(cls, policy: ExecutionPolicy) -> ExecutionPolicyOut:
+        return cls(
+            mode=policy.mode.value,
+            sandbox_image=policy.sandbox_image,
+            filesystem_isolated=policy.filesystem.isolated,
+            filesystem=policy.filesystem.model_dump(),
+            network_mode=policy.network.mode.value,
+            network_allow=list(policy.network.allow),
+            network_enforced=policy.network.enforced,
+            network_note=policy.network.note,
+            env_forwarded=list(policy.env.forwarded),
+            env_host_secrets_visible=policy.env.host_secrets_visible,
+            memory_mb=policy.resources.memory_mb,
+            cpus=policy.resources.cpus,
+            pids_limit=policy.resources.pids_limit,
+            timeout_seconds=policy.resources.timeout_seconds,
+            timeout_max_seconds=policy.resources.timeout_max_seconds,
+            summary=policy.summary(),
         )
 
 

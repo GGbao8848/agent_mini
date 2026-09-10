@@ -58,6 +58,21 @@ class Settings(BaseSettings):
     sandbox_memory_mb: int = 2048
     sandbox_cpus: float = 2.0
     sandbox_pids_limit: int = 256
+    # Container network mode (R24). "host" shares the host netstack — required
+    # for the sandbox to reach the LAN model/TTS services, but it means outbound
+    # network is unrestricted. "private" (slirp4netns/pasta) gives the container
+    # its own netns; "none" removes networking entirely. Only meaningful for the
+    # podman backend.
+    sandbox_network: Literal["host", "private", "none"] = "host"
+    # Comma-separated hosts:ports the sandbox is *intended* to reach. Recorded
+    # in the execution policy and shown in the console. Under "host" networking
+    # it is documentation only — podman cannot filter destinations there; use
+    # "private" plus an external firewall for actual enforcement.
+    sandbox_network_allow: str | None = None
+    # Environment variables forwarded into the sandbox (comma-separated names).
+    # Only names present in the host environment are passed; secrets are not
+    # forwarded implicitly. Unset keeps the built-in behaviour (proxy vars only).
+    sandbox_env_allow: str | None = None
 
     # Agent-managed Python environment for the "host" sandbox backend (venv
     # with --system-site-packages). Defaults to ~/.agent_core/agent-env.
