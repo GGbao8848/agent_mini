@@ -141,7 +141,7 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     for definition, handler in (
         make_create_schedule(service),
         make_install_skill(service),
-        make_remember(memories),
+        make_remember(memories, context_provider=runtime.memory_write_context),
         make_recall_memories(memories),
         make_forget_memories(memories),
         make_update_plan(runtime.fanout),

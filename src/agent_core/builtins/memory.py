@@ -16,6 +16,8 @@ All are LOW risk: they touch only the memory store, never the host/workspace.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from agent_core.domain.action import RiskLevel
@@ -25,6 +27,35 @@ from agent_core.errors.exceptions import ToolError
 
 if TYPE_CHECKING:
     from agent_core.memory.service import MemoryService
+
+
+@dataclass(frozen=True)
+class MemoryWriteContext:
+    """Who is writing and into what, resolved at call time (R23 governance)."""
+
+    scope_id: str | None = None
+    agent_id: str | None = None
+    project_id: str | None = None
+    task_id: str | None = None
+    run_id: str | None = None
+
+
+WriteContextProvider = Callable[[], MemoryWriteContext]
+"""Resolve the current run's memory write context (from context vars)."""
+
+
+def current_write_context() -> MemoryWriteContext:
+    """Default provider: reads the in-flight run/task context vars."""
+    from agent_core.runtime.context import get_current_run
+
+    run = get_current_run()
+    if run is None:
+        return MemoryWriteContext()
+    return MemoryWriteContext(
+        agent_id=run.agent_id,
+        task_id=run.task_id,
+        run_id=run.id,
+    )
 
 REMEMBER_TOOL = "remember"
 RECALL_MEMORIES_TOOL = "recall_memories"
@@ -71,7 +102,13 @@ def _format(memory: Memory) -> str:
     return f"[#{memory.id[:8]}] ({memory.scope.value}/{memory.type.value}) {memory.content}"
 
 
-def make_remember(service: MemoryService) -> tuple[ToolDefinition, Any]:
+def make_remember(
+    service: MemoryService,
+    *,
+    context_provider: WriteContextProvider | None = None,
+) -> tuple[ToolDefinition, Any]:
+    provide: WriteContextProvider = context_provider or current_write_context
+
     async def remember(
         content: str,
         scope: str | None = None,
@@ -80,6 +117,17 @@ def make_remember(service: MemoryService) -> tuple[ToolDefinition, Any]:
     ) -> str:
         if not content.strip():
             raise ToolError("remember requires non-empty content", details={"tool": REMEMBER_TOOL})
+        from agent_core.memory.policy import MemoryOrigin
+
+        context = provide()
+        target_scope = _scope_of(scope) or MemoryScope.USER
+        # A PROJECT memory belongs to the bound project; an AGENT memory to the
+        # writing agent. USER/ORG need no id (R23).
+        scope_id = None
+        if target_scope is MemoryScope.PROJECT:
+            scope_id = context.project_id
+        elif target_scope is MemoryScope.AGENT:
+            scope_id = context.agent_id
         old_ids: list[str] = []
         unresolved: list[str] = []
         for token in supersedes or []:
@@ -89,21 +137,49 @@ def make_remember(service: MemoryService) -> tuple[ToolDefinition, Any]:
             else:
                 old_ids.append(memory_id)
         if old_ids:
+            self_decision = service.policy.can_write(
+                scope=target_scope,
+                origin=MemoryOrigin.AGENT,
+                agent_id=context.agent_id,
+                project_id=context.project_id,
+            )
+            if self_decision.value == "deny":
+                raise ToolError(
+                    service.policy.deny_reason(target_scope),
+                    details={"tool": REMEMBER_TOOL, "scope": target_scope.value},
+                )
             memory = service.supersede_many(
                 old_ids,
                 content,
-                scope=_scope_of(scope),
+                scope=target_scope,
+                scope_id=scope_id,
                 type=_type_of(type),
                 source="agent",
+                source_run_id=context.run_id,
+                created_by=context.agent_id or "agent",
             )
             note = f"（已退役 {len(old_ids)} 条旧记忆）"
         else:
-            memory = service.add(
-                content,
-                scope=_scope_of(scope) or MemoryScope.USER,
-                type=_type_of(type) or MemoryType.FACT,
-                source="agent",
-            )
+            try:
+                memory = service.add_governed(
+                    content,
+                    scope=target_scope,
+                    scope_id=scope_id,
+                    type=_type_of(type) or MemoryType.FACT,
+                    origin=MemoryOrigin.AGENT,
+                    agent_id=context.agent_id,
+                    project_id=context.project_id,
+                    task_id=context.task_id,
+                    source_run_id=context.run_id,
+                    created_by=context.agent_id or "agent",
+                )
+            except Exception as exc:
+                # Surface the policy refusal as a tool-level error the model
+                # can act on (switch scope) rather than failing the run.
+                raise ToolError(
+                    service.policy.deny_reason(target_scope),
+                    details={"tool": REMEMBER_TOOL, "scope": target_scope.value},
+                ) from exc
             note = ""
         if unresolved:
             note += f"（未找到：{', '.join(unresolved)}）"

@@ -27,6 +27,7 @@ from agent_core.artifacts import (
     scan_task_artifacts,
     scan_workspace_artifacts,
 )
+from agent_core.builtins.memory import MemoryWriteContext
 from agent_core.capabilities import CapabilityResolver
 from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
@@ -255,18 +256,26 @@ class AgentRuntime:
         except RegistryError:
             return None
 
-    async def _memory_block(self, query: str) -> str:
+    async def _memory_block(self, query: str, task: Task) -> str:
         """System-prompt block of memories relevant to ``query`` (empty if none).
 
         Hybrid retrieval (semantic + keyword) — only the top-k entries that
         match the request reach the prompt (MEM-005). Async because the
         semantic channel embeds the query.
+
+        Retrieval is scope-filtered (R23): the run sees the user scope, its own
+        agent scope, ORG, and its bound project's scope — never another
+        project's or agent's entries.
         """
         if self.memories is None:
             return ""
         from agent_core.memory import memory_prompt
 
-        return memory_prompt(await self.memories.aretrieve(query))
+        refs = self.memories.policy.visible_scopes(
+            agent_id=task.agent_id, project_id=task.project_id
+        )
+        hits = await self.memories.aretrieve(query, scope_refs=refs)
+        return memory_prompt(hits)
 
     def _on_task_state_event(self, event: TraceEvent) -> None:
         """Bus listener: fold one progress event into the task state (R21)."""
@@ -277,6 +286,25 @@ class AgentRuntime:
             logging.getLogger(__name__).exception(
                 "task-state reducer failed for %s", event.event_type.value
             )
+
+    def memory_write_context(self) -> MemoryWriteContext:
+        """The in-flight run's memory write context (R23 governance).
+
+        Resolves the bound project from the run's conversation so a PROJECT
+        memory is written into the project the run actually works in, and a
+        run with no bound project cannot write one at all.
+        """
+        run = current_run.get()
+        if run is None:
+            return MemoryWriteContext()
+        task = self._tasks.get(run.task_id)
+        return MemoryWriteContext(
+            scope_id=None,
+            agent_id=run.agent_id,
+            project_id=task.project_id if task is not None else None,
+            task_id=run.task_id,
+            run_id=run.id,
+        )
 
     def task_state(self, task_id: str) -> TaskState | None:
         """The recorded progress of a conversation, or None when none exists."""
@@ -735,7 +763,9 @@ class AgentRuntime:
             # build is synchronous but semantic retrieval is async, so compute
             # the block here and publish it via a context var.
             if self.memories is not None:
-                block = await self._memory_block(str(run.metadata.get("input") or task.input))
+                block = await self._memory_block(
+                    str(run.metadata.get("input") or task.input), task
+                )
                 memory_token = current_memory_block.set(block)
             # Explicit task progress (R21): the recorded plan/status/failures,
             # so the model works from a state record instead of re-deriving

@@ -34,7 +34,9 @@ def create_memory(payload: MemoryCreateRequest, service: ServiceDep) -> MemoryOu
     memory = service.runtime.memories.add(
         payload.content,
         scope=_scope(payload.scope, MemoryScope.USER),
+        scope_id=payload.scope_id,
         type=_type(payload.type, MemoryType.FACT),
+        created_by="human",
     )
     return MemoryOut.of(memory)
 
@@ -48,6 +50,8 @@ def update_memory(
         memory.content = payload.content
     if payload.scope is not None:
         memory.scope = _scope(payload.scope, memory.scope)
+    if payload.scope_id is not None:
+        memory.scope_id = payload.scope_id or None
     if payload.type is not None:
         memory.type = _type(payload.type, memory.type)
     return MemoryOut.of(service.runtime.memories.upsert(memory))

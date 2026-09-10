@@ -774,14 +774,18 @@ class MemoryOut(BaseModel):
 
     id: str
     scope: str
+    scope_id: str | None = None
     type: str
     content: str
     source: str
     task_id: str | None
+    source_run_id: str | None = None
+    created_by: str = "human"
     confidence: float
     importance: int
     active: bool
     superseded_by: str | None
+    expires_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -793,6 +797,10 @@ class MemoryOut(BaseModel):
 class MemoryCreateRequest(BaseModel):
     content: str = Field(min_length=1)
     scope: str = "user"
+    scope_id: str | None = Field(
+        default=None,
+        description="Owner within the scope (project id / agent id); unused for user/org",
+    )
     type: str = "fact"
 
 
@@ -801,4 +809,5 @@ class MemoryUpdateRequest(BaseModel):
 
     content: str | None = None
     scope: str | None = None
+    scope_id: str | None = None
     type: str | None = None

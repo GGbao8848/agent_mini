@@ -22,9 +22,13 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING
 
 from agent_core.domain.memory import Memory, MemoryScope
 from agent_core.text.tokens import estimate_tokens
+
+if TYPE_CHECKING:
+    from agent_core.memory.policy import ScopeRef
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -79,11 +83,24 @@ def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     return 0.0 if denom == 0.0 else dot / denom
 
 
+def _visible(memory: Memory, scope_refs: Sequence[ScopeRef] | None) -> bool:
+    """True when ``memory``'s concrete (scope, scope_id) is in ``scope_refs``.
+
+    ``None`` means "no scoping requested" (unrestricted, the pre-R23 default).
+    """
+    if scope_refs is None:
+        return True
+    return any(
+        ref.scope is memory.scope and ref.scope_id == memory.scope_id for ref in scope_refs
+    )
+
+
 def retrieve(
     memories: Iterable[Memory],
     query: str,
     *,
     scopes: Sequence[MemoryScope] | None = None,
+    scope_refs: Sequence[ScopeRef] | None = None,
     limit: int = DEFAULT_LIMIT,
     token_budget: int = DEFAULT_TOKEN_BUDGET,
     query_vector: Sequence[float] | None = None,
@@ -93,10 +110,13 @@ def retrieve(
 ) -> list[Memory]:
     """Return the top-``limit`` live memories for ``query`` within a token budget.
 
-    Only active, non-superseded entries in ``scopes`` (all scopes when omitted)
-    are considered. When ``query_vector``/``vectors`` are provided the semantic
-    channel is blended in with ``semantic_weight``; otherwise retrieval is
-    keyword-only (the graceful fallback when embeddings are unavailable).
+    Only active, non-superseded entries in ``scopes``/``scope_refs`` (all scopes
+    when both are omitted) are considered. ``scope_refs`` is the stricter R23
+    filter: it matches the concrete ``(scope, scope_id)`` pair, so project A's
+    entries never surface in project B's conversation. When ``query_vector``/
+    ``vectors`` are provided the semantic channel is blended in with
+    ``semantic_weight``; otherwise retrieval is keyword-only (the graceful
+    fallback when embeddings are unavailable).
 
     ``semantic_threshold`` gates the semantic channel: an entry with no keyword
     overlap whose cosine falls below it is dropped. Without this, cosine's high
@@ -108,7 +128,9 @@ def retrieve(
     candidates = [
         memory
         for memory in memories
-        if memory.is_live() and (scopes is None or memory.scope in scopes)
+        if memory.is_live()
+        and (scopes is None or memory.scope in scopes)
+        and _visible(memory, scope_refs)
     ]
 
     scored: list[tuple[Memory, float]] = []
