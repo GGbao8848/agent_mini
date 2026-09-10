@@ -110,6 +110,36 @@ offload 197 行，压缩后 follow-up 正常且能复述会话主题）。拒绝
   面互相组合出了用户眼中的"灵异"行为；同类状态能用一个显式按钮表达就不要用
   隐式布尔推导。wire schema 白名单陷阱（pydantic 静默丢字段）二次确认。
 
+## Runtime 边界加固专项（2026-09-10，分支 `refactor/runtime-boundaries`）
+
+依据《Agent Runtime 工程化重构与验证指南》+《验收书》。**方法论**：先写能失败的
+边界测试（`tests/runtime_boundary/`，每条标注不变量 I-01…I-12），再改生产代码转绿；
+每完成一个 R 分组做一次**阶段验收**（回归 + 真实 E2E 抽查 + `acceptance/reports/stage-N.md`），
+不为每个改动跑全量 E2E。
+
+| R | 内容 | 不变量 |
+|---|---|---|
+| R1–R3 | 新包 `workspace/`：逻辑挂载 inputs(RO)/workspace+outputs+tmp(RW)/skills(RO)；`BoundaryBackend` 数据层拦写 + `FilesystemPermission` 工具层拦 | I-01/02/05 |
+| R4 | 删除 `_stage_skills()` 的 per-task 复制，`CompositeBackend` 只读挂载 `/skills/<id>` | I-03 |
+| R5–R6 | Skill 源不可变；`ActionPolicy` 强制 `allowed_tools`（此前全库零强制） | I-02/11 |
+| R7 | `install_skill` 升 HIGH risk = 需人工审批 | I-04 |
+| R8 | Artifact 显式契约（id/mime/sha256）；修 claims 被扫描覆盖 | I-06 |
+| R9 | Conversation/Checkpoint 分工（已有 test_sessions 覆盖 + 真实重启验证） | I-07/08 |
+| R10 | 记忆重建：scope/type/lifecycle + 去重/supersede + **检索式注入**（非整表） | I-09/10 |
+| R11 | Error→Lesson：仅纠错语气加提示，无每轮 LLM 提炼 | I-09 |
+| R12–R13 | 对抗回归 + 多进程一致性契约 | — |
+
+**记忆重试的关键教训**（对照本手册 #12 行的回退）：旧设计"整表注入 + 每轮自动提炼"
+被判定不好用；新设计改为"**检索式注入 + 显式写入**"——域模型带 scope/type，
+`MemoryService` 归一化去重（旧库同一条事实存了 3 份）、`supersede` 退役旧事实、
+`retriever` 只取与当前请求相关的 top-k。真实验证：全新会话问身份能答对；记住
+"生成 PPT 前先验证文件存在"后，新会话生成 PPT 时 trace 两次 `run_code`（生成+验证）——
+**行为真的改变**，非仅 API 有记录。
+
+**其他踩坑**：`.gitignore` 的 `workspace/` 须写成 `/workspace/`，否则误伤新源码包
+`src/agent_core/workspace/`；`estimate_tokens` 移到 `agent_core/text/tokens.py` 破
+memory↔runtime 循环导入。
+
 ## 下一步（Backlog，按价值排序）
 
 1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
@@ -117,5 +147,7 @@ offload 197 行，压缩后 follow-up 正常且能复述会话主题）。拒绝
 3. ~~摘要触发实测~~ ✅（见上节）。
 4. ~~提示词引导 + 内容信任边界~~ ✅（environment_note 读片段引导 + `<untrusted-content>`
    信任边界，MCP 结果包裹 + 系统提示声明"数据非指令"）。
-5. ~~长期记忆分层~~：⚠️ 最小记忆系统已回退（见 #12 行的教训）；aimemory MCP 维持下线。重试需换设计。
+5. ~~长期记忆分层~~ ✅ 见上「Runtime 边界加固专项」（检索式重建，行为改变已验证）。
 6. 远期：历史筛选/压缩策略（#10）。
+7. `refactor/runtime-boundaries` 尚未合入 main；完整验收书 Round 1–4 全量证据矩阵待跑。
+
