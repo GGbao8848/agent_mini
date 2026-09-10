@@ -140,6 +140,27 @@ offload 197 行，压缩后 follow-up 正常且能复述会话主题）。拒绝
 `src/agent_core/workspace/`；`estimate_tokens` 移到 `agent_core/text/tokens.py` 破
 memory↔runtime 循环导入。
 
+## Memory 深化：语义检索（移植 aimemory，`04b214d`）
+
+参考 `/home/user/project/market/aimemory`（Node 版企业记忆 MCP），移植其**混合检索**
+与**半熔断**到 `agent_core/memory/`（未移植其 MCP 服务/多租户/Keycloak/素材提炼）：
+
+- `embedding.py`：OpenAI 兼容 `/v1/embeddings` 客户端 + **半熔断**（连续 3 次失败开
+  60s，每窗放行一次探测自愈）。任何失败返回 `None` → 检索降级关键词，绝不因 embedding
+  挂掉而中断。
+- **混合排序**：余弦相似度与既有关键词重叠加权（`memory_semantic_weight`=0.7），并设
+  **相似度阈值**（`memory_semantic_threshold`=0.55）：余弦基线偏高（无关中文仍有
+  ~0.4–0.5），低于阈值且无关键词命中的条目丢弃，避免噪声进 prompt；关键词命中永不门控。
+  实测同义改写"说话能精简点吗" → 偏好条目排第一（纯关键词会把公司事实排前面）。
+- **向量持久化**：独立 `memory_embeddings` 表（schema **v3**，派生索引、可重建），不塞进
+  注册表 JSON；`hydrate` 回载 + 启动 `embed_missing()` 为历史记忆补向量。
+- 检索改为异步 `aretrieve`；runtime 在**同步**建图前异步算好记忆块，经 context var
+  (`current_memory_block`) 传给 builder。
+- 配置在 `.env`（gitignored）：端点 `10.10.10.146:8005` Qwen3-Embedding-8B（4096 维）。
+
+**未移植**（按需再议）：素材提炼入库（我们走显式 `remember`）、facts/entities 二次抽取、
+MCP 服务化、多租户/Keycloak、FTS5 trigram 关键词通道（我们用字符重叠已够）。
+
 ## 下一步（Backlog，按价值排序）
 
 1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
