@@ -300,3 +300,43 @@ class TestProviderAndModelApi:
         async with make_client(service) as client:
             response = await client.get("/v1/model-config/custom/nope/key")
             assert response.status_code == 404
+
+    async def test_provider_discover_and_batch_add(self, tmp_path, monkeypatch) -> None:
+        """探测添加: probe a saved provider, then add the chosen models at once."""
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            await client.put(
+                "/v1/model-config/custom/batch",
+                json={"base_url": "http://h/v1", "models": ["m1"]},
+            )
+            # No endpoint is reachable in tests, so the probe reports failure
+            # cleanly rather than raising (the page shows the error).
+            probed = await client.post("/v1/model-config/custom/batch/discover")
+            assert probed.status_code == 200
+            assert probed.json()["ok"] is False
+
+            added = await client.post(
+                "/v1/model-config/custom/batch/models",
+                json={"models": ["m2", "m3", "m1"], "context_window": 4096},
+            )
+            assert added.status_code == 200
+            card = next(c for c in added.json()["custom_models"] if c["name"] == "batch")
+            # m1 was already present and is not duplicated.
+            assert [e["id"] for e in card["catalog"]] == ["m1", "m2", "m3"]
+            windows = {e["id"]: e["context_window"] for e in card["catalog"]}
+            assert windows["m2"] == 4096 and windows["m3"] == 4096
+            assert windows["m1"] is None  # existing entry untouched
+
+    async def test_batch_add_unknown_provider_404(self, tmp_path, monkeypatch) -> None:
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            r = await client.post(
+                "/v1/model-config/custom/nope/models", json={"models": ["x"]}
+            )
+            assert r.status_code == 404
+            r2 = await client.post("/v1/model-config/custom/nope/discover")
+            assert r2.status_code == 404

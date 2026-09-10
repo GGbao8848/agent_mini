@@ -14,6 +14,7 @@
 import * as React from "react"
 
 import { AddProviderDialog } from "@/components/settings/add-provider-dialog"
+import { ProbeModelsDialog } from "@/components/settings/probe-models-dialog"
 import { ModelRowDialog } from "@/components/settings/model-row-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -33,6 +34,7 @@ import {
   Loader2Icon,
   PencilIcon,
   PlusIcon,
+  SearchIcon,
   SparklesIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -89,6 +91,7 @@ export function ModelPanel() {
   const [selected, setSelected] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
   const [rowDialog, setRowDialog] = React.useState<{ modelId?: string } | null>(null)
+  const [probeFor, setProbeFor] = React.useState<string | null>(null)
 
   const providers = config.data?.custom_models ?? []
 
@@ -168,6 +171,7 @@ export function ModelPanel() {
                 key={current.name}
                 provider={current}
                 onModelRow={(modelId) => setRowDialog({ modelId })}
+                onProbeModels={() => setProbeFor(current.name)}
               />
             ) : (
               <p className="text-sm text-muted-foreground">从左侧选择一个供应商。</p>
@@ -181,6 +185,13 @@ export function ModelPanel() {
         onOpenChange={setAddOpen}
         onSaved={(name) => setSelected(name)}
       />
+      {current && probeFor === current.name && (
+        <ProbeModelsDialog
+          open
+          onOpenChange={(open) => !open && setProbeFor(null)}
+          provider={current}
+        />
+      )}
       {current && rowDialog && (
         <ModelRowDialog
           open
@@ -202,9 +213,11 @@ export function ModelPanel() {
 function ProviderDetail({
   provider,
   onModelRow,
+  onProbeModels,
 }: {
   provider: CustomModel
   onModelRow: (modelId?: string) => void
+  onProbeModels: () => void
 }) {
   const manage = useCustomModelManage()
   const reveal = useRevealProviderKey()
@@ -403,15 +416,16 @@ function ProviderDetail({
             </div>
           ))}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="self-start"
-          onClick={() => onModelRow(undefined)}
-        >
-          <PlusIcon data-icon="inline-start" />
-          添加模型
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onProbeModels}>
+            <SearchIcon data-icon="inline-start" />
+            探测添加
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => onModelRow(undefined)}>
+            <PlusIcon data-icon="inline-start" />
+            添加模型
+          </Button>
+        </div>
       </div>
 
       <div className="flex justify-end">

@@ -846,6 +846,15 @@ class ProviderKeyRevealOut(BaseModel):
     """``page`` (stored override) or ``env`` (from the environment)."""
 
 
+class ProviderModelsAddRequest(BaseModel):
+    """Batch-add models to an existing provider (the 探测添加 flow)."""
+
+    models: list[str] = Field(min_length=1)
+    context_window: int | None = Field(
+        default=None, gt=0, description="Optional window applied to the added models"
+    )
+
+
 # ------------------------------------------------------------------ projects
 
 

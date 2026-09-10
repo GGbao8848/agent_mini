@@ -627,3 +627,27 @@ export function useRevealProviderKey() {
     mutationFn: (name) => api.get(`/v1/model-config/custom/${encodeURIComponent(name)}/key`),
   })
 }
+
+/** Probe a SAVED provider's model list (server uses its stored key). */
+export function useDiscoverProviderModels() {
+  return useToastMutation<ModelDiscover, string>({
+    mutationFn: (name) =>
+      api.post<ModelDiscover>(`/v1/model-config/custom/${encodeURIComponent(name)}/discover`),
+  })
+}
+
+/** Batch-add discovered models to an existing provider. */
+export function useAddProviderModels() {
+  const queryClient = useQueryClient()
+  return useToastMutation<
+    ModelConfig,
+    { provider: string; models: string[]; context_window?: number | null }
+  >({
+    mutationFn: ({ provider, ...payload }) =>
+      api.post<ModelConfig>(
+        `/v1/model-config/custom/${encodeURIComponent(provider)}/models`,
+        payload,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["model-config"] }),
+  })
+}

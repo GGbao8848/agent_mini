@@ -31,6 +31,7 @@ from agent_core.api.schemas import (
     ModelVerifyRequest,
     ProviderKeyOut,
     ProviderKeyRevealOut,
+    ProviderModelsAddRequest,
     ProviderUpdateRequest,
 )
 from agent_core.config.model_config import (
@@ -208,14 +209,32 @@ async def verify_model(payload: ModelVerifyRequest, service: ServiceDep) -> Mode
 # ------------------------------------------------------- custom endpoints
 
 
-@router.post("/discover", response_model=ModelDiscoverOut)
-async def discover_models(payload: ModelDiscoverRequest) -> ModelDiscoverOut:
-    """Probe an OpenAI-compatible endpoint's ``GET /models`` for its list."""
-    base = payload.base_url.rstrip("/")
-    url = f"{base}/models"
-    headers = {}
-    if payload.api_key:
-        headers["Authorization"] = f"Bearer {payload.api_key}"
+def _models_url(base_url: str, api_format: str) -> str:
+    """The endpoint's model-list URL for its wire format.
+
+    OpenAI-compatible servers expose ``{base}/models``; Anthropic's list lives
+    at ``{origin}/v1/models``, so a base without ``/v1`` gets it appended.
+    """
+    base = base_url.rstrip("/")
+    if api_format == "anthropic" and not base.endswith("/v1"):
+        return f"{base}/v1/models"
+    return f"{base}/models"
+
+
+def _model_list_headers(api_key: str | None, api_format: str) -> dict[str, str]:
+    if not api_key:
+        return {}
+    if api_format == "anthropic":
+        return {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    return {"Authorization": f"Bearer {api_key}"}
+
+
+async def _probe_models(
+    base_url: str, api_format: str, api_key: str | None
+) -> ModelDiscoverOut:
+    """Shared probe: GET the endpoint's model list and normalize the ids."""
+    url = _models_url(base_url, api_format)
+    headers = _model_list_headers(api_key, api_format)
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(url, headers=headers)
@@ -235,6 +254,12 @@ async def discover_models(payload: ModelDiscoverRequest) -> ModelDiscoverOut:
             elif isinstance(item, str):
                 models.append(item)
     return ModelDiscoverOut(ok=True, models=sorted(models))
+
+
+@router.post("/discover", response_model=ModelDiscoverOut)
+async def discover_models(payload: ModelDiscoverRequest) -> ModelDiscoverOut:
+    """Probe an endpoint's model list with an explicit URL/key (pre-save flow)."""
+    return await _probe_models(payload.base_url, payload.api_format, payload.api_key)
 
 
 _API_FORMATS = frozenset({"openai", "responses", "anthropic"})
@@ -419,6 +444,52 @@ def delete_provider_model(name: str, model_id: str) -> ModelConfigOut:
     ]
     updated = current.model_copy(update={"custom_models": models})
     return _config_out(save_model_config(updated))
+
+
+@router.post("/custom/{name}/discover", response_model=ModelDiscoverOut)
+async def discover_provider_models(name: str) -> ModelDiscoverOut:
+    """Probe a SAVED provider's model list using its stored/effective key.
+
+    The browser never holds the plaintext key, so this runs server-side: it
+    resolves the key exactly as ``build_model`` would (page override, else the
+    provider's env var) and lists what the endpoint offers — the data source for
+    the page's 「探测添加」.
+    """
+    card = next((c for c in _endpoint_cards(get_model_config()) if c.name == name), None)
+    if card is None:
+        raise HTTPException(status_code=404, detail=f"provider '{name}' not found")
+    stored = next((m for m in get_model_config().custom_models if m.name == name), None)
+    env_var = PROVIDER_ENV_VARS.get(name)
+    key = (stored.api_key if stored else None) or (os.environ.get(env_var) if env_var else None)
+    return await _probe_models(card.base_url, card.api_format, key)
+
+
+@router.post("/custom/{name}/models", response_model=ModelConfigOut)
+def add_provider_models(name: str, payload: ProviderModelsAddRequest) -> ModelConfigOut:
+    """Add several models at once (the 「探测添加」 batch).
+
+    Existing ids are left untouched (so a re-probe never resets a window the
+    user already set); new ids are appended with the given/default window.
+    """
+    current = get_model_config()
+    index = next((i for i, m in enumerate(current.custom_models) if m.name == name), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail=f"provider '{name}' not found")
+    entry = current.custom_models[index]
+    known = {e.id for e in entry.catalog}
+    added = [
+        ModelEntry(id=model_id, context_window=payload.context_window, enabled=True)
+        for model_id in payload.models
+        if model_id and model_id not in known
+    ]
+    if not added:
+        return _config_out(current)
+    catalog = [*entry.catalog, *added]
+    updated_entry = entry.model_copy(
+        update={"catalog": catalog, "models": [e.id for e in catalog]}
+    )
+    models = [updated_entry if i == index else m for i, m in enumerate(current.custom_models)]
+    return _config_out(save_model_config(current.model_copy(update={"custom_models": models})))
 
 
 @router.delete("/custom/{name}", response_model=ModelConfigOut)
