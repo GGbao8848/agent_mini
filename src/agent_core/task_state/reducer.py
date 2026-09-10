@@ -147,7 +147,11 @@ class TaskStateReducer:
     def _on_tool_failed(self, state: TaskState, event: TraceEvent) -> TaskState:
         tool = event.tool or ""
         if tool:
-            self._record_activity(state, tool, failed=True)
+            # A failed *investigation* tool is still not task progress — record
+            # the failure but do not claim an activity step (mirrors the success
+            # path). Without this a retried update_plan looked like real work.
+            if tool not in _INVESTIGATION_TOOLS:
+                self._record_activity(state, tool, failed=True)
             self._add_failure(state, f"{tool}: {event.error or 'failed'}")
         return state
 

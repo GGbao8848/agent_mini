@@ -187,3 +187,46 @@ def test_prompt_block_renders_plan_and_failures() -> None:
     assert "任务状态" in block
     assert "读取 A" in block
     assert "把 A 转 B" in block
+
+
+class TestUpdatePlanStepNormalization:
+    """The update_plan tool must tolerate the shapes a real model sends.
+
+    A production trace showed the model call update_plan with a list of plain
+    strings, then {step}, then {text}, before finally using {description} — the
+    parser must accept all of these rather than failing the call.
+    """
+
+    def test_plain_strings(self) -> None:
+        from agent_core.builtins.plan import _normalize_steps
+
+        assert _normalize_steps(["读文件", "写文件"]) == [
+            {"description": "读文件", "tool": None},
+            {"description": "写文件", "tool": None},
+        ]
+
+    def test_alternate_dict_keys(self) -> None:
+        from agent_core.builtins.plan import _normalize_steps
+
+        for key in ("description", "step", "text", "title", "name", "content"):
+            assert _normalize_steps([{key: "做某事"}]) == [
+                {"description": "做某事", "tool": None}
+            ]
+
+    def test_tool_is_preserved(self) -> None:
+        from agent_core.builtins.plan import _normalize_steps
+
+        assert _normalize_steps([{"description": "跑脚本", "tool": "run_code"}]) == [
+            {"description": "跑脚本", "tool": "run_code"}
+        ]
+
+    def test_empty_and_junk_items_are_dropped(self) -> None:
+        from agent_core.builtins.plan import _normalize_steps
+
+        assert _normalize_steps(["  ", {}, {"description": ""}, 42, None]) == []
+
+    def test_non_list_returns_empty(self) -> None:
+        from agent_core.builtins.plan import _normalize_steps
+
+        assert _normalize_steps("不是列表") == []
+        assert _normalize_steps(None) == []

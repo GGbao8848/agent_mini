@@ -34,7 +34,10 @@ _SCHEMA = {
     "properties": {
         "steps": {
             "type": "array",
-            "description": "按执行顺序排列的完整步骤列表（包含已完成和未完成的）",
+            "description": (
+                "按执行顺序排列的完整步骤列表（包含已完成和未完成的）。"
+                "每项写成字符串，或带 description 字段的对象。"
+            ),
             "items": {
                 "type": "object",
                 "properties": {
@@ -74,6 +77,40 @@ _SCHEMA = {
     "required": ["steps"],
 }
 
+# Keys a model has been observed to use for a step's text (the tool must be
+# tolerant: real models do not follow the schema precisely — production traces
+# showed "str", {step}, {text} and {description} across four attempts).
+_DESCRIPTION_KEYS = ("description", "step", "text", "title", "name", "content")
+
+
+def _normalize_steps(steps: Any) -> list[dict[str, Any]]:
+    """Coerce whatever ``steps`` the model sent into ``{description, tool}`` dicts.
+
+    Accepts a list of strings, or of dicts using any of the common key names for
+    a step's text. Items that carry no usable text are dropped rather than
+    failing the whole call — a partial plan is more useful than a tool error.
+    """
+    if not isinstance(steps, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for item in steps:
+        if isinstance(item, str):
+            text = item.strip()
+            tool = None
+        elif isinstance(item, dict):
+            text = ""
+            for key in _DESCRIPTION_KEYS:
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    text = value.strip()
+                    break
+            tool = item.get("tool")
+        else:
+            continue
+        if text:
+            normalized.append({"description": text, "tool": tool})
+    return normalized
+
 
 def make_update_plan(fanout: Any) -> tuple[ToolDefinition, Any]:
     """Build the ``update_plan`` definition and handler.
@@ -96,14 +133,7 @@ def make_update_plan(fanout: Any) -> tuple[ToolDefinition, Any]:
             raise ToolError(
                 "update_plan must run inside a task", details={"tool": UPDATE_PLAN_TOOL}
             )
-        cleaned = [
-            {
-                "description": str(item.get("description") or "").strip(),
-                "tool": item.get("tool"),
-            }
-            for item in (steps or [])
-            if str(item.get("description") or "").strip()
-        ]
+        cleaned = _normalize_steps(steps)
         if not cleaned:
             raise ToolError(
                 "update_plan requires at least one non-empty step",
