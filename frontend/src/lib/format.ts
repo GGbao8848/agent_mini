@@ -71,7 +71,6 @@ export const STATUS_STYLES: Record<string, string> = {
   needs_input: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30',
   waiting_approval: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30',
   running: 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30',
-  planning: 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30',
   created: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-zinc-500/30',
 }
 
@@ -84,7 +83,6 @@ export const STATUS_DOT: Record<string, string> = {
   needs_input: 'bg-amber-500',
   waiting_approval: 'bg-amber-500',
   running: 'bg-blue-500',
-  planning: 'bg-blue-500',
   created: 'bg-zinc-400 dark:bg-zinc-600',
 }
 
@@ -96,7 +94,6 @@ export const STATUS_LABELS: Record<RunStatus | string, string> = {
   needs_input: '待输入',
   waiting_approval: '待审批',
   running: '运行中',
-  planning: '规划中',
   created: '已创建',
 }
 

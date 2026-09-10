@@ -20,13 +20,6 @@ def test_happy_path_lifecycle() -> None:
     assert run.finished_at is not None
 
 
-def test_planning_step_is_valid() -> None:
-    run = Run(task_id="t", agent_id="a")
-    run.transition_to(RunStatus.PLANNING)
-    run.transition_to(RunStatus.RUNNING)
-    assert run.status is RunStatus.RUNNING
-
-
 def test_terminal_states_are_frozen() -> None:
     run = Run(task_id="t", agent_id="a")
     run.transition_to(RunStatus.RUNNING)

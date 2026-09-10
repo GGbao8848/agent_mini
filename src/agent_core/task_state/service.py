@@ -23,7 +23,6 @@ from agent_core.task_state.repository import TaskStateRepository
 
 _STATUS_LABELS = {
     "created": "未开始",
-    "planning": "规划中",
     "running": "进行中",
     "waiting_approval": "等待审批",
     "needs_input": "等待人工回复",

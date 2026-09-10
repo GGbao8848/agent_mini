@@ -16,7 +16,6 @@ export interface RunUsage {
 
 export type RunStatus =
   | 'created'
-  | 'planning'
   | 'running'
   | 'waiting_approval'
   | 'needs_input'
