@@ -215,3 +215,110 @@ LOW-risk 工具：
    实际只跑几分钟却标 90 分钟超时；现在只有 wait_for 自身 deadline 映射为
    `RunTimeoutError`，内层超时算单步失败。重启后非终态 run 已由 `hydrate` 标 FAILED。
 
+## Runtime Hardening 2.0（2026-09-10，分支 `feat/runtime-hardening-2`）
+
+来源：《agent_mini Runtime Hardening 2.0 实施指南》。R20–R24 已落地并阶段验收
+（`acceptance/reports/stage-3.md`，PASS / P0=0）。核心心智：Runtime =
+Context + State + Capabilities + Execution Policy + Persistence + Recovery + Observability。
+
+- **R20 Context Architecture**（`7aebd3e`，新包 `src/agent_core/context/`）：把
+  system prompt 从"到处字符串拼接"改为**有序、有预算、可解释**的 section 列表
+  （base/autonomy/environment/task_state/memory/lesson，各带 priority 与来源）。
+  `ContextBuilder` 对可丢弃段（记忆/提示）做整段丢弃（不截半句），agent 自身指令
+  `required` 永不裁剪。每次 run 记录 `metadata.context_sections`（每段 token + 来源）
+  → 能回答"这段为什么在 prompt 里、多大"。新设置 `AGENT_CORE_CONTEXT_INJECTED_BUDGET`
+  （默认不裁）。实测：任务 1 的 sections = system 318 / autonomy 116 / environment 349
+  / memory 334；**MCP schema 3208 token 是最大固定成本**（下一步优化方向）。
+- **R21 Task State**（`a6d0fcd` + 修复 `5fe51f5`，新包 `src/agent_core/task_state/`）：
+  给"任务现在到哪了"一个**显式记录**，不再靠模型读 50 轮聊天重新推断。状态是**投影**：
+  status/failures/artifacts/activity 从 trace 事件折叠（纯函数 reducer，非 LLM），
+  plan 由 agent 用 `update_plan` 工具声明；服务按 `registry_items(kind=task_state)`
+  落库，重启 `hydrate` 后 `reconcile` 修正残留 running。`GET /tasks/{id}/state` 给控制台。
+  *坑（真实 E2E 发现，P2）*：模型对 schema 遵守很松——`update_plan` 的 `steps` 先传
+  字符串数组、再 `[{step}]`、`[{text}]`，第四次才 `[{description}]`；原 handler 假设
+  字典直接崩。`_normalize_steps` 现容忍字符串/任意常见键名。**失败的"调查类工具"不计入
+  activity**，否则"重试记计划"被误判成有效进展。
+- **R22 Capability Resolver**（`1cb4c75`，新包 `src/agent_core/capabilities/`）：
+  "agent 能不能调 X"此前分散在 6 处、可能互相矛盾（`allowed_tools` 声明了却只在
+  一处强制；`tools=[]` 静默等于"全部"）。现在 `CapabilityResolver` 是唯一事实来源
+  （agent 绑定 ∩ 技能 allowed_tools ∩ 有 handler ∩ 权限规则 ∩ 风险阈值），
+  `ActionPolicy` 退化为薄适配层（gate 的决定 == resolver 的决定），builder 用同一对象
+  取工具名，`GET /agents/{id}/capabilities` 返回**同一份计算** → 展示与强制不再分叉。
+- **R23 Memory Governance**（`2d932c3`）：`scope` 此前是装饰性的（agent 能写 ORG，
+  检索不分 scope，A 项目记忆会漂到 B 项目）。现在记忆身份 = `(scope, scope_id)` 对；
+  `MemoryPolicy` 决定**谁能写哪个 scope / 一次 run 能读哪些 scope**：agent 可写
+  USER/PROJECT/AGENT 但**不能写 ORG**（组织级由人工在控制台维护），写 PROJECT 必须有
+  绑定项目；读只含本轮语境（USER + 自己的 AGENT + ORG + 绑定 PROJECT）。新增
+  `source_run_id`/`created_by`/`scope_id` 溯源。
+- **R24 Execution / Network Policy**（`62b4283`，新包 `src/agent_core/execution/`）：
+  执行信封从"一个 `sandbox` 开关 + argv 里硬编码 `--network host`"变成显式的
+  `ExecutionPolicy`（文件/网络/环境/超时/资源五问）。**如实标注**：host 模式下网络
+  `enforced=false`（podman 无法按地址过滤），不假装有边界。新设置
+  `AGENT_CORE_SANDBOX_NETWORK=host|private|none`、`_NETWORK_ALLOW`、`_ENV_ALLOW`
+  （env 只转发真实存在且被点名者，密钥不隐式过界）；`GET /execution/policy` 给控制台。
+
+**运维（本次）**：`.env` 不再导出代理（`AGENT_CORE_PROXY_URL` 注释掉）——代理改由
+任务按需显式使用 `http://10.10.10.214:7890`（已存为 project 记忆）；sandbox 保持 host。
+
+**R20 残留补齐：工具 schema 压缩（`84c9186`）**：工具 schema **每次模型调用都发**，
+所以冗长描述不是一次性成本而是逐步附加税。实测注册表固定成本 5262 token，大头是 MCP——
+工具描述 1882/2027 字符、单个参数描述最长 1080 字符（TinyFish 还塞了一堆模型根本用不到的
+`example`）。`domain/tool.py` 加 `compact_definition`：丢纯装饰键（example/examples/$schema/
+$id/title/$comment）+ 按上限截断描述（默认工具 500 / 参数 400 字符，带省略号），
+**类型/required/enum/default/嵌套全部原样保留——调用方式不变**。在三个注册点接入
+（builtin / service 工具 / MCP 发现）并**归一化水合数据**（旧行也压）。实测模型可见工具
+token **5262 → 4282（−18.6%）**，MCP 一家 −28%；`AGENT_CORE_TOOL_SCHEMA_COMPACTION` 默认开。
+顺带修 `context_breakdown`：它此前量的是 raw schema（含 example），与控制台实际发送不符，
+现改量 tool factory 真正生成的 pydantic args 模型（TinyFish example 一项就虚报 ~500 token）。
+**注**：这是"压缩"，不是"裁剪工具集"；§10 更彻底的"只发 shortlist、用时展开 schema"仍待做。
+
+**R20 §10 第二步：工具分层披露（`ef804bb`）**：压缩只把描述截短，工具数一多固定成本照样线性涨。
+这一步直接解决：**冷工具（默认 MCP）只广告「名字 + 一句摘要」的 stub，真正调用时才注入完整
+schema**。靠在真实框架上验证过的性质——**执行集 > 广告集**：所有工具仍注册进图（任何调用都能
+解析），中间件只控制"这一轮告诉模型哪些"。因为 provider 只允许模型调用被广告的工具，冷工具
+必须仍被广告（以 stub 形式），否则不可达。
+
+流程（`runtime/tool_tiering.py`）：stub 广告 → 模型调冷工具 → `awrap_tool_call` 在真实 schema
+校验前拦截 → 标记激活 + 合成 ToolMessage 让模型重试 → 下一轮带全量 schema → 执行。**触发点是
+"调用"而不是"先 load_tools"**，所以不依赖模型主动加载——调工具本来就是模型的自然行为，只需
+一次额外往返、且只在真用到冷工具时付出。
+
+三步实测广告成本：**5262（原始）→ 4282（压缩）→ 2844（分层；MCP 2284 → 96）**。
+生产验证：真实 TinyFish 任务在 checkpoint 里留下激活 ToolMessage，模型共 3 轮（stub→激活→执行）
+并完成。`AGENT_CORE_TOOL_TIERING_ENABLED` / `_COLD_TOOLS`。
+*排查坑*：checkpoint 表是 lz4 压缩的二进制列，`grep` 文本会假阴性；明文在 `writes` 表里。
+
+
+**回归修复：host 模式又把 skill 说没了（`69778c2`）**：用户反映"又找不到 skill 了"。
+真实 `创建一个ppt` 任务里 agent 自述"txt2img 技能在当前环境也未挂载"，探针确认
+`ls /skills` 在宿主机上失败——但 skill 注册表里 txt2img 是 enabled、路径也在磁盘上。
+根因是 `environment_note` **写死了"技能挂载在 /skills/<id>"**：这句只在 podman 下成立
+（`build_sandbox_command` 把每个源挂到 `/skills/<id>`），host 模式 `run_code` 就是宿主
+shell，根本没有 `/skills`——提示词在对模型说谎。**与上一轮 skill-in-sandbox 回归同型
+镜像**：podman 专用修法被无条件下沉到提示词。
+
+修：`environment_note(root, settings, skill_mounts)` 按后端渲染 skill 位置——podman 给
+`/skills/<id>`（并列可用 id），host 给**磁盘真实源目录**并显式声明"没有 /skills 挂载点"，
+无技能则不出这一段；builder 解析 `(skill_id, source_dir)` 传入。真实复验：询问路径 → 正确
+答出 `.skills-upload/txt2img/scripts/txt2img.py` 且 stat 存在；生成任务 → 产出
+`outputs/skill_check.png` 180887B 有效 PNG。
+
+**教训（第三次同型）**：凡"某路径在哪"的断言，必须按**执行后端**分支；把某后端的布局
+写成全局事实，另一个后端上就会变成谎言。改路径相关文案时要问："这句话在 host 下也成立吗？"
+
+
+**Backlog（R25/R26 及剩余）**：① 6 个固定 Scenario ×5 重复性验收；② Release Gate
+报告（`release-gate-<version>.md`）；③ podman 下 `--cap-drop`/`--security-opt`/只读
+根文件系统；④ 把能力集写入每个 Run 记录（审计/回放）；⑤ MCP schema 的按需加载
+（当前最大固定上下文成本）。
+
+
+**回归修复：技能清单根本没进 prompt（`50cfdce`）**：做工具分层时顺带发现——框架的
+skill 发现会**先列父目录 `/skills/`** 再读每个 `/skills/<id>/SKILL.md`，但
+`CompositeBackend` 只路由 `/skills/<id>/`（带斜杠），裸父目录无路由 → 落到任务根
+→ `path_not_found`。DeepAgents 只当 warning 吞掉并继续，于是 `skills_metadata`
+恒为空，**所有技能 manifest 从未进入系统提示**；agent 之所以还"知道"有技能，只是
+因为 `runtime/paths.py` 在环境说明里点了名——框架自己的发现逻辑一直是死的。
+修：`workspace/skills_index.py` 的 `SkillsIndexBackend` 只回答那一次父目录列举
+（不复制、不读文件，I-03 不破），其余一律转交 composite。复验：发现返回全部 4 个
+技能、零错误；真实任务里模型**不读文件**就答出了完整技能清单与 txt2img 用途。

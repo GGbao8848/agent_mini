@@ -9,7 +9,11 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from agent_core.api.deps import ServiceDep
-from agent_core.api.schemas import AgentOut, AgentUpdateRequest
+from agent_core.api.schemas import (
+    AgentCapabilitiesOut,
+    AgentOut,
+    AgentUpdateRequest,
+)
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -22,6 +26,18 @@ def list_agents(service: ServiceDep) -> list[AgentOut]:
 @router.get("/{agent_id}", response_model=AgentOut)
 def get_agent(agent_id: str, service: ServiceDep) -> AgentOut:
     return AgentOut.of(service.runtime.agents.get(agent_id))
+
+
+@router.get("/{agent_id}/capabilities", response_model=AgentCapabilitiesOut)
+def agent_capabilities(agent_id: str, service: ServiceDep) -> AgentCapabilitiesOut:
+    """The agent's effective capabilities (R22).
+
+    This is the SAME computation the builder and the action gate use, so what
+    this endpoint reports is exactly what the runtime enforces — the console no
+    longer guesses from a separate code path.
+    """
+    spec = service.runtime.agents.get(agent_id)
+    return AgentCapabilitiesOut.of(service.runtime.capabilities.effective(spec))
 
 
 @router.put("/{agent_id}", response_model=AgentOut)

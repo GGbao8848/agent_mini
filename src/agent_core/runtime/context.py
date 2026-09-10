@@ -10,8 +10,12 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agent_core.domain.task import Run
+
+if TYPE_CHECKING:
+    from agent_core.context.model import RuntimeContext
 
 current_run: ContextVar[Run | None] = ContextVar("current_run", default=None)
 current_task_id: ContextVar[str | None] = ContextVar("current_task_id", default=None)
@@ -80,6 +84,44 @@ builder cannot await, and retrieval needs to.
 def get_current_memory_block() -> str:
     """The retrieved-memory prompt block for the in-flight run (empty if none)."""
     return current_memory_block.get()
+
+
+current_task_state_block: ContextVar[str] = ContextVar(
+    "current_task_state_block", default=""
+)
+"""Pre-rendered task-progress block (R21) for the in-flight run.
+
+Filled by the runtime from the persisted :class:`TaskState` before the graph is
+built, read synchronously by the builder. Keeps the model's view of "where are
+we" anchored to the recorded state rather than its own recollection of history.
+"""
+
+
+def get_current_task_state_block() -> str:
+    """The task-state prompt block for the in-flight run (empty if none)."""
+    return current_task_state_block.get()
+
+
+current_context: ContextVar[RuntimeContext | None] = ContextVar(
+    "current_context", default=None
+)
+"""The assembled :class:`RuntimeContext` of the most recent build in this task.
+
+Set synchronously by the builder during :meth:`AgentBuilder.build` and read by
+the runtime straight after, so the run can record *why* each prompt section is
+present (R20). Per-async-task, so concurrent runs never see each other's.
+"""
+
+
+def get_current_context() -> RuntimeContext | None:
+    """The context assembled by the last build in this async task, if any."""
+    return current_context.get()
+
+
+def get_current_run() -> Run | None:
+    """The run executing in the current async context, or None outside a run."""
+    return current_run.get()
+
 
 
 def get_current_model_override() -> str | None:

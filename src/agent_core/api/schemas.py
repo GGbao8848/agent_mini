@@ -9,12 +9,13 @@ application layer.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent_core.capabilities.model import EffectiveCapabilitySet
 from agent_core.domain.action import ApprovalRequest
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
@@ -27,6 +28,8 @@ from agent_core.domain.task import Run, Task, Turn
 from agent_core.domain.tool import ToolDefinition
 from agent_core.domain.trace import TraceEvent
 from agent_core.errors.exceptions import SkillError
+from agent_core.execution.policy import ExecutionPolicy
+from agent_core.task_state.domain import TaskState
 
 if TYPE_CHECKING:
     from agent_core.config.model_config import CustomModel as CustomModelSpec
@@ -160,6 +163,184 @@ class TaskOut(BaseModel):
             pinned=task.pinned,
             has_unread=task.has_unread,
             metadata=task.metadata,
+        )
+
+
+class ExecutionPolicyOut(BaseModel):
+    """The code-execution envelope (R24), shown to operators."""
+
+    mode: str
+    sandbox_image: str | None = None
+    filesystem_isolated: bool
+    filesystem: dict[str, Any]
+    network_mode: str
+    network_allow: list[str]
+    network_enforced: bool
+    network_note: str
+    env_forwarded: list[str]
+    env_host_secrets_visible: bool
+    memory_mb: int
+    cpus: float
+    pids_limit: int
+    timeout_seconds: float
+    timeout_max_seconds: float
+    summary: dict[str, str]
+
+    @classmethod
+    def of(cls, policy: ExecutionPolicy) -> ExecutionPolicyOut:
+        return cls(
+            mode=policy.mode.value,
+            sandbox_image=policy.sandbox_image,
+            filesystem_isolated=policy.filesystem.isolated,
+            filesystem=policy.filesystem.model_dump(),
+            network_mode=policy.network.mode.value,
+            network_allow=list(policy.network.allow),
+            network_enforced=policy.network.enforced,
+            network_note=policy.network.note,
+            env_forwarded=list(policy.env.forwarded),
+            env_host_secrets_visible=policy.env.host_secrets_visible,
+            memory_mb=policy.resources.memory_mb,
+            cpus=policy.resources.cpus,
+            pids_limit=policy.resources.pids_limit,
+            timeout_seconds=policy.resources.timeout_seconds,
+            timeout_max_seconds=policy.resources.timeout_max_seconds,
+            summary=policy.summary(),
+        )
+
+
+class CapabilityEntryOut(BaseModel):
+    """One tool's effective state for an agent (R22)."""
+
+    name: str
+    description: str = ""
+    source: str = "python"
+    risk_level: str
+    exposed: bool
+    decision: str
+    state: str
+    reason: str = ""
+
+
+class AgentCapabilitiesOut(BaseModel):
+    """An agent's computed capabilities — the same set the runtime enforces."""
+
+    agent_id: str
+    notes: list[str] = Field(default_factory=list)
+    entries: list[CapabilityEntryOut]
+    exposed: list[str]
+    """Names that become model-visible tools."""
+
+    @classmethod
+    def of(cls, capabilities: EffectiveCapabilitySet) -> AgentCapabilitiesOut:
+        return cls(
+            agent_id=capabilities.agent_id,
+            notes=list(capabilities.notes),
+            entries=[
+                CapabilityEntryOut(
+                    name=e.name,
+                    description=e.description,
+                    source=e.source,
+                    risk_level=e.risk_level.value,
+                    exposed=e.exposed,
+                    decision=e.decision.value,
+                    state=e.state.value,
+                    reason=e.reason,
+                )
+                for e in capabilities.entries
+            ],
+            exposed=capabilities.exposed_names(),
+        )
+
+
+class TaskStepOut(BaseModel):
+    id: str
+    description: str
+    status: str
+    tool: str | None = None
+    detail: str = ""
+
+
+class ActivityOut(BaseModel):
+    tool: str
+    count: int
+    failed: bool
+    detail: str = ""
+
+
+class ArtifactRefOut(BaseModel):
+    path: str
+    name: str = ""
+    run_id: str | None = None
+
+
+class TaskStateOut(BaseModel):
+    """Recorded progress of a conversation (R21), for the console / API."""
+
+    task_id: str
+    goal: str
+    status: str
+    steps: list[TaskStepOut]
+    decisions: list[str]
+    artifacts: list[ArtifactRefOut]
+    failures: list[str]
+    activity: list[ActivityOut]
+    current_step_id: str | None
+    next_action: str | None
+    run_count: int
+    plan_revision: int
+    updated_at: datetime
+    exists: bool = True
+    """False when nothing has been recorded yet (empty default shape)."""
+
+    @classmethod
+    def of(cls, state: TaskState | None, *, task_id: str) -> TaskStateOut:
+        if state is None:
+            return cls(
+                task_id=task_id,
+                goal="",
+                status="created",
+                steps=[],
+                decisions=[],
+                artifacts=[],
+                failures=[],
+                activity=[],
+                current_step_id=None,
+                next_action=None,
+                run_count=0,
+                plan_revision=0,
+                updated_at=datetime.now(UTC),
+                exists=False,
+            )
+        return cls(
+            task_id=state.task_id,
+            goal=state.goal,
+            status=state.status,
+            steps=[
+                TaskStepOut(
+                    id=s.id,
+                    description=s.description,
+                    status=s.status.value,
+                    tool=s.tool,
+                    detail=s.detail,
+                )
+                for s in state.steps
+            ],
+            decisions=list(state.decisions),
+            artifacts=[
+                ArtifactRefOut(path=a.path, name=a.name, run_id=a.run_id)
+                for a in state.artifacts
+            ],
+            failures=list(state.failures),
+            activity=[
+                ActivityOut(tool=a.tool, count=a.count, failed=a.failed, detail=a.detail)
+                for a in state.activity
+            ],
+            current_step_id=state.current_step_id,
+            next_action=state.next_action,
+            run_count=state.run_count,
+            plan_revision=state.plan_revision,
+            updated_at=state.updated_at,
+            exists=True,
         )
 
 
@@ -636,14 +817,18 @@ class MemoryOut(BaseModel):
 
     id: str
     scope: str
+    scope_id: str | None = None
     type: str
     content: str
     source: str
     task_id: str | None
+    source_run_id: str | None = None
+    created_by: str = "human"
     confidence: float
     importance: int
     active: bool
     superseded_by: str | None
+    expires_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -655,6 +840,10 @@ class MemoryOut(BaseModel):
 class MemoryCreateRequest(BaseModel):
     content: str = Field(min_length=1)
     scope: str = "user"
+    scope_id: str | None = Field(
+        default=None,
+        description="Owner within the scope (project id / agent id); unused for user/org",
+    )
     type: str = "fact"
 
 
@@ -663,4 +852,5 @@ class MemoryUpdateRequest(BaseModel):
 
     content: str | None = None
     scope: str | None = None
+    scope_id: str | None = None
     type: str | None = None

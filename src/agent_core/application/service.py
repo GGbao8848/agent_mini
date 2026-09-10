@@ -183,6 +183,11 @@ class AgentCoreService:
         """All artifacts produced across a conversation's runs."""
         return self.runtime.task_artifacts(task_id)
 
+    def task_state(self, task_id: str) -> Any:
+        """The recorded progress (R21) of a conversation, if any."""
+        self.runtime.get_task(task_id)  # 404 on unknown ids
+        return self.runtime.task_state(task_id)
+
     # -------------------------------------------------------------- approvals
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:

@@ -40,7 +40,6 @@ def make_title(text: str, max_chars: int = 24) -> str:
 
 class RunStatus(StrEnum):
     CREATED = "created"
-    PLANNING = "planning"
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"
     NEEDS_INPUT = "needs_input"
@@ -59,8 +58,7 @@ _TERMINAL_STATUSES = frozenset(
 )
 
 _ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
-    RunStatus.CREATED: frozenset({RunStatus.PLANNING, RunStatus.RUNNING, RunStatus.CANCELLED}),
-    RunStatus.PLANNING: frozenset({RunStatus.RUNNING, RunStatus.FAILED, RunStatus.CANCELLED}),
+    RunStatus.CREATED: frozenset({RunStatus.RUNNING, RunStatus.CANCELLED}),
     RunStatus.RUNNING: frozenset(
         {
             RunStatus.WAITING_APPROVAL,

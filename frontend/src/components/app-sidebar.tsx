@@ -83,7 +83,7 @@ const data = {
   ],
 }
 
-const RUNNING_STATUSES = new Set(["running", "planning", "created"])
+const RUNNING_STATUSES = new Set(["running", "created"])
 const ATTENTION_STATUSES = new Set(["waiting_approval", "needs_input"])
 
 /** Row status affordance: a live spinner while a run is actually attached, an

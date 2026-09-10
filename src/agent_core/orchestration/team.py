@@ -19,7 +19,8 @@ COORDINATOR_PROMPT = """You are the lead coordinator of an agent team.
 Working method, in order:
 1. ANALYZE the user's task. Decide whether it is best solved by one worker,
    several workers in parallel, or direct action by yourself.
-2. PLAN: record the decomposition with the todo tool before delegating.
+2. PLAN: record the decomposition with the ``update_plan`` tool before
+   delegating, so the task's progress stays explicit for later turns.
 3. DELEGATE: for every independent subtask, issue the ``task`` tool calls in
    the SAME assistant turn — several calls in one turn run in parallel, which
    is the fastest way to finish. Give each call a self-contained description

@@ -12,6 +12,7 @@ are restored before the service is returned.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from agent_core.application.scheduler import ScheduleManager
@@ -22,15 +23,17 @@ from agent_core.builtins.memory import (
     make_recall_memories,
     make_remember,
 )
+from agent_core.builtins.plan import make_update_plan
 from agent_core.builtins.schedules import make_create_schedule
 from agent_core.builtins.skills import make_install_skill
 from agent_core.config.model_config import load_model_config
 from agent_core.config.settings import Settings, apply_proxy, get_settings
 from agent_core.domain.mcp import MCPServerStatus
+from agent_core.domain.tool import ToolDefinition, compact_definition
 from agent_core.mcp.credentials import EnvCredentialResolver
+from agent_core.mcp.manager import MCPManager
 from agent_core.memory import MemoryRepository, MemoryService
 from agent_core.memory.embedding import EmbeddingClient
-from agent_core.mcp.manager import MCPManager
 from agent_core.observability.stream import EventStreamBroker
 from agent_core.observability.trace import InMemoryTracer
 from agent_core.permissions.approval import ApprovalManager
@@ -44,6 +47,7 @@ from agent_core.registries import (
     ToolRegistry,
 )
 from agent_core.runtime.runtime import AgentRuntime
+from agent_core.task_state import TaskStateRepository, TaskStateService
 
 
 def default_service(settings: Settings | None = None) -> AgentCoreService:
@@ -62,7 +66,10 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     agents = AgentRegistry(store)
     tools = ToolRegistry(store)
     skills = SkillRegistry(store)
-    register_builtin_tools(tools, resolved)
+    # Tool-schema compaction (R20 §10): bound the per-request fixed cost by
+    # trimming tool/param prose before registration. A no-op when disabled.
+    compact = tool_schema_compactor(resolved)
+    register_builtin_tools(tools, resolved, compact=compact)
     if resolved.sandbox != "podman":
         # Host backend: run_code driving a system package manager touches the
         # host itself, so those commands need a human even though run_code is
@@ -91,6 +98,7 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
         semantic_weight=resolved.memory_semantic_weight,
         semantic_threshold=resolved.memory_semantic_threshold,
     )
+    task_states = TaskStateService(TaskStateRepository(store))
     memory_tracer = InMemoryTracer()
     tracer: InMemoryTracer | PersistingTracer = memory_tracer
     if store is not None:
@@ -101,10 +109,14 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
         memories.hydrate()
         tracer = PersistingTracer(memory_tracer, store)
         tracer.restore()  # re-seed event history so run outputs stay queryable
+    # Normalize restored definitions too: rows written before compaction (or by
+    # an older build) still carry the full MCP prose, and they would otherwise
+    # reach the model uncompacted. Idempotent for already-compact definitions.
+    _normalize_tool_schemas(tools, compact)
 
     runtime = AgentRuntime(
         agents, tools, skills, tracer=tracer, approvals=approvals, store=store,
-        projects=projects, memories=memories,
+        projects=projects, memories=memories, task_states=task_states,
     )
     if store is not None:
         runtime.hydrate()
@@ -115,7 +127,12 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
         for server in mcp_registry.list():
             if server.status is MCPServerStatus.HEALTHY:
                 mcp_registry.set_status(server.id, MCPServerStatus.UNKNOWN)
-    mcp = MCPManager(mcp_registry, tools, credentials=EnvCredentialResolver())
+    mcp = MCPManager(
+        mcp_registry,
+        tools,
+        credentials=EnvCredentialResolver(),
+        compact=compact,
+    )
     broker = EventStreamBroker(runtime.bus)
     service = AgentCoreService(
         runtime=runtime, mcp=mcp, mcp_registry=mcp_registry, broker=broker, store=store
@@ -133,21 +150,59 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     if store is not None:
         schedules.restore()
     service.schedules = schedules
-    # Register service-bound tools (schedule + skill creation + memory) against
-    # the fully built service.
+    # Register service-bound tools (schedule + skill creation + memory + plan)
+    # against the fully built service.
     for definition, handler in (
         make_create_schedule(service),
         make_install_skill(service),
-        make_remember(memories),
+        make_remember(memories, context_provider=runtime.memory_write_context),
         make_recall_memories(memories),
         make_forget_memories(memories),
+        make_update_plan(runtime.fanout),
     ):
+        definition = compact(definition)
         try:
             tools.register(definition, handler)
         except Exception:
             # Definition persisted from a previous boot: re-attach the executable.
             tools.replace_with_handler(definition, handler)
     return service
+
+
+def tool_schema_compactor(settings: Settings) -> Callable[[ToolDefinition], ToolDefinition]:
+    """Bound a tool definition's model-facing prose (R20 §10).
+
+    Returns a no-op when ``tool_schema_compaction`` is off, so callers can
+    apply it unconditionally at every registration site.
+    """
+    if not settings.tool_schema_compaction:
+        return lambda definition: definition
+
+    def _compact(definition: ToolDefinition) -> ToolDefinition:
+        return compact_definition(
+            definition,
+            tool_description_limit=settings.tool_description_max_chars,
+            param_description_limit=settings.tool_param_description_max_chars,
+        )
+
+    return _compact
+
+
+def _normalize_tool_schemas(
+    tools: ToolRegistry,
+    compact: Callable[[ToolDefinition], ToolDefinition],
+) -> None:
+    """Re-save every registered definition in its compacted form.
+
+    Covers definitions restored from persistence (written before compaction or
+    by an older build), which would otherwise reach the model with the full MCP
+    prose. Handlers live in a separate map, so ``replace`` refreshes the
+    metadata and persisted row without detaching executables.
+    """
+    for definition in tools.list():
+        compacted = compact(definition)
+        if compacted is not definition:
+            tools.replace(compacted)
 
 
 def _restore(

@@ -30,7 +30,7 @@ import asyncio
 import os
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -67,9 +67,33 @@ def is_system_install(command: str) -> bool:
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy")
 
 
-def _proxy_env() -> dict[str, str]:
-    """Proxy env vars worth passing through to the container (pip etc.)."""
-    return {var: value for var in _PROXY_ENV_VARS if (value := os.environ.get(var))}
+def _sandbox_env(settings: Settings) -> dict[str, str]:
+    """Environment variables to pass into the container (R24).
+
+    Defaults to the proxy variables (pip needs them); ``sandbox_env_allow``
+    adds named variables, but only those actually present in the host
+    environment are forwarded, and never implicitly — a secret must be named
+    explicitly to cross the boundary.
+    """
+    names = list(_PROXY_ENV_VARS)
+    for extra in (settings.sandbox_env_allow or "").split(","):
+        name = extra.strip()
+        if name and name not in names:
+            names.append(name)
+    return {var: value for var in names if (value := os.environ.get(var))}
+
+
+def _network_args(settings: Settings) -> list[str]:
+    """podman network flags for the configured network mode (R24)."""
+    mode = settings.sandbox_network
+    if mode == "private":
+        # Rootless podman: a private netns with outbound NAT. slirp4netns is the
+        # portable choice (pasta is faster where available); podman picks the
+        # available one when the mode is named explicitly.
+        return ["--network", "slirp4netns"]
+    if mode == "none":
+        return ["--network", "none"]
+    return ["--network", "host"]
 
 
 def build_sandbox_command(
@@ -100,20 +124,18 @@ def build_sandbox_command(
         "--cpus", str(settings.sandbox_cpus),
         "--pids-limit", str(settings.sandbox_pids_limit),
         "--pull", "never",
-        # Host networking: the sandbox runs on the same LAN as the local model
-        # / TTS services (10.10.10.146, 10.10.10.169), and a default bridge
-        # container cannot route back to the host's own LAN IP — the agent's
-        # curl to those services failed with connection refused. Security is
-        # enforced by the filesystem (only workspace mounted), so sharing the
-        # host netstack restores those reachable endpoints without widening
-        # what the agent can read or write.
-        "--network", "host",
     ]
+    # Network mode is policy, not a hard-coded constant (R24). The default
+    # "host" is what lets the sandbox reach the LAN model/TTS services — a
+    # default bridge container cannot route back to the host's own LAN IP.
+    # Set AGENT_CORE_SANDBOX_NETWORK=private to give the container its own
+    # netns (outbound only), or =none to remove networking.
+    argv.extend(_network_args(settings))
     for skill_id, source in skill_mounts:
         # Read-only: the agent runs skill scripts but must never rewrite the
         # capability source (invariant I-02).
         argv.extend(["--volume", f"{source}:/skills/{skill_id}:ro"])
-    for var, value in _proxy_env().items():
+    for var, value in _sandbox_env(settings).items():
         argv.extend(["--env", f"{var}={value}"])
     argv.extend([settings.sandbox_image, "bash", "-lc", command])
     return argv
@@ -253,9 +275,22 @@ def make_run_code(settings: Settings) -> tuple[ToolDefinition, Any]:
     return definition, run_code
 
 
-def register_builtin_tools(registry: ToolRegistry, settings: Settings) -> list[str]:
-    """Register ``run_code`` (and, on the host backend, ``ensure_packages``)."""
+def register_builtin_tools(
+    registry: ToolRegistry,
+    settings: Settings,
+    *,
+    compact: Callable[[ToolDefinition], ToolDefinition] | None = None,
+) -> list[str]:
+    """Register ``run_code`` (and, on the host backend, ``ensure_packages``).
+
+    ``compact`` bounds each definition's model-facing prose before registration
+    (R20 §10); None registers the definition as-is.
+    """
+    if compact is None:
+        compact = lambda definition: definition  # noqa: E731 - trivial identity
+
     definition, handler = make_run_code(settings)
+    definition = compact(definition)
     try:
         registry.register(definition, handler)
     except RegistryError:
@@ -264,6 +299,7 @@ def register_builtin_tools(registry: ToolRegistry, settings: Settings) -> list[s
 
     if settings.sandbox != "podman":
         pkg_definition, pkg_handler = make_ensure_packages(settings)
+        pkg_definition = compact(pkg_definition)
         try:
             registry.register(pkg_definition, pkg_handler)
         except RegistryError:

@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils"
 
 /** Tiny colored circle summarizing a run status (sidebar list). */
 export function StatusDot({ status, className }: { status: string; className?: string }) {
-  const live = status === "running" || status === "planning"
+  const live = status === "running"
   return (
     <span
       className={cn(

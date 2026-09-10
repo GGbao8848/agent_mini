@@ -24,6 +24,7 @@ def make_builder(
     tools: ToolRegistry | None = None,
     skills: SkillRegistry | None = None,
     workspace: Path | None = None,
+    memory_enabled: bool = False,
 ) -> AgentBuilder:
     settings = None
     if workspace is not None:
@@ -36,6 +37,7 @@ def make_builder(
         skills or SkillRegistry(),
         model_factory=stub_model_factory,
         settings=settings,
+        memory_enabled=memory_enabled,
     )
 
 
@@ -112,6 +114,43 @@ class TestBuild:
         graph = builder.build(agents.get("orchestrator"))
 
         assert hasattr(graph, "ainvoke")
+
+    def test_build_publishes_runtime_context(self) -> None:
+        """R20: a real build assembles and publishes the sectioned context."""
+        from agent_core.runtime.context import current_context
+
+        builder = make_builder()
+        try:
+            builder.build(base_spec(system_prompt="你是助手"))
+            context = current_context.get()
+            assert context is not None
+            kinds = {s.kind.value for s in context.sections}
+            assert "system" in kinds
+            assert "environment" in kinds
+        finally:
+            current_context.set(None)
+
+    def test_build_includes_task_state_and_memory_blocks(self) -> None:
+        """R20/R21: the injected task-state and memory blocks reach the prompt."""
+        from agent_core.runtime.context import (
+            current_context,
+            current_memory_block,
+            current_task_state_block,
+        )
+
+        builder = make_builder(memory_enabled=True)
+        mem = current_memory_block.set("## 长期记忆\n- 用户偏好简洁")
+        state = current_task_state_block.set("## 任务状态\n- 目标：写报告")
+        try:
+            builder.build(base_spec(system_prompt="你是助手"))
+            context = current_context.get()
+            assert context is not None
+            assert "任务状态" in context.prompt
+            assert "长期记忆" in context.prompt
+        finally:
+            current_context.set(None)
+            current_memory_block.reset(mem)
+            current_task_state_block.reset(state)
 
     def test_empty_tools_expands_to_all_available(self) -> None:
         tools = ToolRegistry()

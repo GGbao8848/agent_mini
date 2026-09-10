@@ -22,7 +22,9 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from agent_core.domain.memory import Memory, MemoryScope, MemoryType
+from agent_core.errors.exceptions import PermissionDeniedError
 from agent_core.memory.embedding import EmbeddingClient
+from agent_core.memory.policy import MemoryOrigin, MemoryPolicy, ScopeRef, WriteDecision
 from agent_core.memory.repository import MemoryRepository
 from agent_core.memory.retriever import (
     DEFAULT_LIMIT,
@@ -55,11 +57,13 @@ class MemoryService:
         embedding: EmbeddingClient | None = None,
         semantic_weight: float = 0.7,
         semantic_threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
+        policy: MemoryPolicy | None = None,
     ) -> None:
         self._repository = repository
         self._embedding = embedding
         self._semantic_weight = semantic_weight
         self._semantic_threshold = semantic_threshold
+        self.policy = policy or MemoryPolicy()
 
     async def _embed_into_index(self, memory: Memory) -> None:
         """Best-effort: embed ``memory`` and store its vector (never raises)."""
@@ -98,6 +102,9 @@ class MemoryService:
         task_id: str | None = None,
         importance: int = 0,
         confidence: float = 1.0,
+        scope_id: str | None = None,
+        source_run_id: str | None = None,
+        created_by: str = "human",
     ) -> Memory:
         """Store a memory, deduplicating by normalized content.
 
@@ -114,16 +121,58 @@ class MemoryService:
             return existing
         memory = Memory(
             scope=scope,
+            scope_id=scope_id,
             type=type,
             content=content.strip(),
             source=source,
             task_id=task_id,
+            source_run_id=source_run_id,
+            created_by=created_by,
             importance=importance,
             confidence=confidence,
         )
         self._repository.register(memory)
         self._schedule_embed(memory)
         return memory
+
+    def add_governed(
+        self,
+        content: str,
+        *,
+        scope: MemoryScope,
+        type: MemoryType,
+        origin: MemoryOrigin,
+        scope_id: str | None = None,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        task_id: str | None = None,
+        source_run_id: str | None = None,
+        created_by: str = "human",
+    ) -> Memory:
+        """Policy-checked write (R23): an agent may not write out of its scope.
+
+        Raises :class:`PermissionDeniedError` when the policy refuses, so an
+        agent's ``remember`` cannot create an ORG fact or a project fact in a
+        conversation that has no bound project.
+        """
+        decision = self.policy.can_write(
+            scope=scope, origin=origin, agent_id=agent_id, project_id=project_id
+        )
+        if decision is WriteDecision.DENY:
+            raise PermissionDeniedError(
+                agent_id or origin.value,
+                f"remember:{scope.value}",
+            )
+        return self.add(
+            content,
+            scope=scope,
+            scope_id=scope_id,
+            type=type,
+            source="agent" if origin is MemoryOrigin.AGENT else "manual",
+            task_id=task_id,
+            source_run_id=source_run_id,
+            created_by=created_by or (agent_id or "human"),
+        )
 
     def upsert(self, memory: Memory) -> Memory:
         """Persist an edited entry (console edit path)."""
@@ -193,10 +242,13 @@ class MemoryService:
         new_content: str,
         *,
         scope: MemoryScope | None = None,
+        scope_id: str | None = None,
         type: MemoryType | None = None,
         importance: int = 0,
         confidence: float = 1.0,
         source: str = "manual",
+        source_run_id: str | None = None,
+        created_by: str | None = None,
     ) -> Memory:
         """Create one replacement and retire every memory in ``old_ids``.
 
@@ -209,9 +261,16 @@ class MemoryService:
         base = olds[0] if olds else None
         replacement = Memory(
             scope=scope or (base.scope if base else MemoryScope.USER),
+            scope_id=(
+                scope_id
+                if scope_id is not None
+                else (base.scope_id if base else None)
+            ),
             type=type or (base.type if base else MemoryType.FACT),
             content=new_content.strip(),
             source=source,
+            source_run_id=source_run_id,
+            created_by=created_by or (base.created_by if base else "human"),
             importance=max([importance, *(o.importance for o in olds)]),
             confidence=confidence,
         )
@@ -241,6 +300,7 @@ class MemoryService:
         query: str,
         *,
         scopes: Sequence[MemoryScope] | None = None,
+        scope_refs: Sequence[ScopeRef] | None = None,
         limit: int = DEFAULT_LIMIT,
         token_budget: int = DEFAULT_TOKEN_BUDGET,
     ) -> Sequence[Memory]:
@@ -253,6 +313,7 @@ class MemoryService:
             self._repository.list(),
             query,
             scopes=scopes,
+            scope_refs=scope_refs,
             limit=limit,
             token_budget=token_budget,
         )
@@ -262,6 +323,7 @@ class MemoryService:
         query: str,
         *,
         scopes: Sequence[MemoryScope] | None = None,
+        scope_refs: Sequence[ScopeRef] | None = None,
         limit: int = DEFAULT_LIMIT,
         token_budget: int = DEFAULT_TOKEN_BUDGET,
     ) -> Sequence[Memory]:
@@ -279,6 +341,7 @@ class MemoryService:
             self._repository.list(),
             query,
             scopes=scopes,
+            scope_refs=scope_refs,
             limit=limit,
             token_budget=token_budget,
             query_vector=query_vector,

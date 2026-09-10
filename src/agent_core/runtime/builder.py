@@ -17,7 +17,9 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
+from agent_core.capabilities import CapabilityResolver
 from agent_core.config.settings import Settings, get_settings
+from agent_core.context.builder import ContextBuilder
 from agent_core.domain.agent import AgentSpec, SubAgentRef
 from agent_core.domain.metrics import RunUsage
 from agent_core.errors.exceptions import ConfigurationError, SkillError
@@ -49,6 +51,7 @@ class AgentBuilder:
         help_tool: BaseTool | None = None,
         checkpointer_provider: Callable[[], Any] | None = None,
         memory_enabled: bool = False,
+        capabilities: CapabilityResolver | None = None,
     ) -> None:
         self._agents = agents
         self._tools = tools
@@ -60,6 +63,12 @@ class AgentBuilder:
         self._help_tool = help_tool
         self._checkpointer_provider = checkpointer_provider
         self._memory_enabled = memory_enabled
+        # R22: the single capability source of truth. Falls back to a local
+        # resolver so standalone builders (tests) behave identically.
+        self._capabilities = capabilities or CapabilityResolver(
+            lambda: self._tools.list(),
+            has_handler=self._tools.has_handler,
+        )
 
     def _default_model_factory(self, model_spec: str | None) -> BaseChatModel:
         from agent_core.runtime.context import get_current_model_override
@@ -80,40 +89,76 @@ class AgentBuilder:
             )
         tools = self._resolve_available_tools(spec)
         system_prompt = spec.system_prompt or None
+        autonomy_text = ""
         if spec.autonomy is not None:
             # Autonomy adds the escape hatch (request_help) and the rules that
             # keep the agent from spinning or guessing instead of asking.
             tools = tools + ([self._help_tool] if self._help_tool is not None else [])
-            system_prompt = (system_prompt or "") + autonomy_prompt_addendum()
+            autonomy_text = autonomy_prompt_addendum()
         # Environment note regenerated per build: it reflects the ACTUAL
         # working root (project dir when bound, sandbox mapping otherwise) so
         # agents never chase stale hard-coded paths like /work, and it carries
         # the hygiene rules (no full-disk find, ensure_packages first).
         settings = self._settings or get_settings()
-        system_prompt = (system_prompt or "") + environment_note(
-            current_task_dir(Path(settings.workspace_dir)), settings
+        environment_text = environment_note(
+            current_task_dir(Path(settings.workspace_dir)),
+            settings,
+            self._skill_mounts(),
         )
         # Retrieved long-term memory: only the few entries relevant to this
         # request (see agent_core.memory), never the whole store (MEM-005).
         # The runtime precomputes the block asynchronously (hybrid retrieval);
         # this sync build just reads it.
+        memory_text = ""
+        lesson_text = ""
         if self._memory_enabled:
             from agent_core.runtime.context import get_current_memory_block, get_current_query
 
             query = get_current_query() or ""
-            system_prompt = (system_prompt or "") + get_current_memory_block()
+            memory_text = get_current_memory_block()
             # Deterministic correction nudge (R11): only on turns that read like
             # a correction, so ordinary turns pay nothing and record nothing.
             from agent_core.memory.lesson import lesson_hint
 
-            system_prompt += lesson_hint(query)
+            lesson_text = lesson_hint(query)
+        # Explicit task progress (R21): a compact record of the plan/status/
+        # failures so a long conversation does not have to be re-read to answer
+        # "where are we". Empty for a fresh, trivial task.
+        from agent_core.runtime.context import (
+            current_context,
+            get_current_task_state_block,
+        )
+
+        task_state_text = get_current_task_state_block()
+        # Assemble the prompt as ordered, budgeted sections (R20) — the single
+        # place that decides what the model sees and in what order.
+        context = self._context_builder().build(
+            system_prompt=system_prompt or "",
+            autonomy=autonomy_text,
+            environment=environment_text,
+            task_state=task_state_text,
+            memory=memory_text,
+            lesson=lesson_text,
+        )
+        current_context.set(context)
+        # Cold tools are advertised as cheap stubs (full schema on first use),
+        # so the fixed per-request tool cost does not scale with tool count.
+        from agent_core.runtime.tool_tiering import cold_tool_names
+
+        cold = cold_tool_names(
+            [self._tools.get(name) for name in self._agent_tool_names(spec)],
+            enabled=settings.tool_tiering_enabled,
+            explicit=settings.tool_tiering_cold_tools,
+        )
         return create_deep_agent(
             model=self._model_factory(spec.model),
             tools=tools,
-            system_prompt=system_prompt,
+            system_prompt=context.prompt,
             subagents=[self._resolve_subagent(ref, parent_id=spec.id) for ref in spec.subagents]
             or None,
-            middleware=build_middleware(spec, self._model_factory, self._usage_provider),
+            middleware=build_middleware(
+                spec, self._model_factory, self._usage_provider, cold_tools=cold
+            ),
             # Read-only mounts and write-path rules: inputs/skills are immutable
             # to the agent (runtime invariant I-01/I-02).
             permissions=filesystem_permissions(),
@@ -123,32 +168,53 @@ class AgentBuilder:
             **self._backend_kwargs(spec),
         )
 
+    def _context_builder(self) -> ContextBuilder:
+        """The prompt assembler for this run (budget from settings)."""
+        settings = self._settings or get_settings()
+        return ContextBuilder(injected_budget=settings.context_injected_budget)
+
     def context_breakdown(self, spec: AgentSpec) -> dict[str, int]:
         """Estimate the static prompt parts for ``spec``: tool schemas and
         skill manifests (see :mod:`agent_core.runtime.context_breakdown`).
         Message-history tokens are dynamic and counted per model call."""
         from agent_core.runtime.context_breakdown import static_breakdown
+        from agent_core.runtime.tool_tiering import cold_tool_names
 
+        settings = self._settings or get_settings()
         names = self._agent_tool_names(spec)
         definitions = [self._tools.get(name) for name in names]
-        return static_breakdown(definitions, self._skills.list())
+        # Cold tools are advertised as stubs, so count them as such — otherwise
+        # the breakdown would report a cost that is not actually sent.
+        cold = cold_tool_names(
+            definitions,
+            enabled=settings.tool_tiering_enabled,
+            explicit=settings.tool_tiering_cold_tools,
+        )
+        return static_breakdown(definitions, self._skills.list(), cold_names=cold)
+
+    def _skill_mounts(self) -> list[tuple[str, Path]]:
+        """Enabled ``(skill_id, source_dir)`` pairs for the environment note.
+
+        Mirrors the backend's skill exposure (see ``_backend_kwargs``): only
+        enabled skills with a real on-disk directory. The note renders these as
+        ``/skills/<id>`` under podman and as the real path on the host.
+        """
+        mounts: list[tuple[str, Path]] = []
+        for manifest in self._skills.list():
+            if not manifest.enabled or manifest.path is None or not manifest.path.is_dir():
+                continue
+            mounts.append((manifest.id, manifest.path))
+        return mounts
 
     def _agent_tool_names(self, spec: AgentSpec) -> list[str]:
-        """The tool names an agent is bound to.
+        """The tool names an agent is bound to (R22: via the resolver).
 
-        An empty ``spec.tools`` means "everything available" — the default for
-        agents that don't opt into a capability list. Unavailable tools
-        (``metadata["available"] is False``) are excluded from the implicit
-        set; an explicit binding still resolves so the call-time error is
-        precise about what is missing.
+        The resolver is the single place that decides which tools an agent may
+        use; the builder only turns those names into runnable tools. An empty
+        ``spec.tools`` still means "everything available", but that rule now
+        lives in one object the console can query too.
         """
-        if spec.tools:
-            return list(spec.tools)
-        return [
-            definition.name
-            for definition in self._tools.list()
-            if definition.metadata.get("available", True)
-        ]
+        return self._capabilities.buildable_names(spec)
 
     def _backend_kwargs(self, spec: AgentSpec) -> dict[str, Any]:
         """Build the agent's filesystem backend and skill mount.
@@ -165,6 +231,7 @@ class AgentBuilder:
         from deepagents.backends import CompositeBackend
 
         from agent_core.workspace.backend import BoundaryBackend
+        from agent_core.workspace.skills_index import SkillsIndexBackend
 
         settings = self._settings or get_settings()
         workspace = Path(settings.workspace_dir)
@@ -172,6 +239,7 @@ class AgentBuilder:
         WorkspaceLayout.ensure(backend_root)
         backend: Any = FilesystemBackend(root_dir=backend_root)
         routes: dict[str, Any] = {}
+        skill_ids: list[str] = []
         for manifest in self._skills.list():
             if not manifest.enabled:
                 continue
@@ -179,8 +247,17 @@ class AgentBuilder:
             routes[f"/skills/{manifest.id}/"] = FilesystemBackend(
                 root_dir=source, virtual_mode=True
             )
+            skill_ids.append(manifest.id)
         if routes:
-            backend = CompositeBackend(default=backend, routes=routes)
+            # The parent /skills/ must be listable for the framework's skill
+            # discovery, which lists it before reading each /skills/<id>/SKILL.md.
+            # CompositeBackend routes by longest prefix, so the bare parent has
+            # no route and would fall through to the task root; the index
+            # answers exactly that one listing (see workspace.skills_index).
+            backend = SkillsIndexBackend(
+                skill_ids,
+                fallback=CompositeBackend(default=backend, routes=routes),
+            )
         # Data-layer enforcement of the read-only mounts (I-01/I-02): the
         # middleware checks the tool wrappers, this also guards direct calls.
         backend = BoundaryBackend(backend)

@@ -17,5 +17,12 @@ Phase R2/R3.
 from agent_core.workspace.backend import BoundaryBackend
 from agent_core.workspace.layout import READ_ONLY_DIRS, WorkspaceLayout
 from agent_core.workspace.permissions import filesystem_permissions
+from agent_core.workspace.skills_index import SkillsIndexBackend
 
-__all__ = ["READ_ONLY_DIRS", "BoundaryBackend", "WorkspaceLayout", "filesystem_permissions"]
+__all__ = [
+    "READ_ONLY_DIRS",
+    "BoundaryBackend",
+    "SkillsIndexBackend",
+    "WorkspaceLayout",
+    "filesystem_permissions",
+]

@@ -67,3 +67,75 @@ def adapt_handler_arguments(definition: ToolDefinition, handler: Any) -> Any:
         return handler(**drop(kwargs))
 
     return sync_wrapper
+
+
+# ---------------------------------------------------------------------------
+# Schema compaction (R20 §10: keep the fixed per-request tool cost bounded).
+#
+# Tool schemas enter EVERY model call, so a verbose description is not a
+# one-time cost — it is paid on every reasoning step. Real MCP servers ship
+# tool descriptions in the thousands of characters and property docs in the
+# hundreds (one TinyFish parameter carried a 1080-char description), which is
+# pure fixed overhead the model wades through before it starts working.
+#
+# These helpers trim the *presentation* only. Types, required lists, enums,
+# defaults and nested structure are preserved exactly, so how a tool is called
+# never changes — only how much prose describes it.
+# ---------------------------------------------------------------------------
+
+_DECORATION_KEYS = frozenset({"example", "examples", "$schema", "$id", "title", "$comment"})
+"""JSON-schema keys that cost tokens but carry no calling information."""
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Trim ``text`` to ``limit`` chars, marking the cut so it is not silent."""
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
+def compact_json_schema(schema: Any, *, description_limit: int) -> Any:
+    """Recursively drop schema decorations and trim long descriptions.
+
+    Preserves every key that affects how a tool is called (``type``,
+    ``properties``, ``required``, ``enum``, ``default``, ``items``, …); only
+    removals are ``_DECORATION_KEYS`` and over-long description strings.
+    """
+    if isinstance(schema, dict):
+        out: dict[str, Any] = {}
+        for key, value in schema.items():
+            if key in _DECORATION_KEYS:
+                continue
+            if key == "description" and isinstance(value, str):
+                out[key] = _truncate(value, description_limit)
+            else:
+                out[key] = compact_json_schema(value, description_limit=description_limit)
+        return out
+    if isinstance(schema, list):
+        return [compact_json_schema(item, description_limit=description_limit) for item in schema]
+    return schema
+
+
+def compact_definition(
+    definition: ToolDefinition,
+    *,
+    tool_description_limit: int = 0,
+    param_description_limit: int = 0,
+) -> ToolDefinition:
+    """Return ``definition`` with its model-facing prose trimmed.
+
+    A limit of ``0`` leaves that dimension untouched. Name, risk level, source
+    and metadata are copied through unchanged — this only bounds the text the
+    model reads.
+    """
+    if tool_description_limit <= 0 and param_description_limit <= 0:
+        return definition
+    return definition.model_copy(
+        update={
+            "description": _truncate(definition.description, tool_description_limit),
+            "input_schema": compact_json_schema(
+                definition.input_schema, description_limit=param_description_limit
+            ),
+        }
+    )
+

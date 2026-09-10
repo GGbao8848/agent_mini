@@ -9,6 +9,7 @@ from agent_core.api.routes import (
     attachments,
     dirs,
     events,
+    execution,
     mcp,
     memories,
     model_config,
@@ -36,5 +37,6 @@ api_router.include_router(runs.router)
 api_router.include_router(approvals.router)
 api_router.include_router(artifacts.router)
 api_router.include_router(events.router)
+api_router.include_router(execution.router)
 
 __all__ = ["api_router"]
