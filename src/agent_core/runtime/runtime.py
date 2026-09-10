@@ -756,7 +756,17 @@ class AgentRuntime:
                 merged.setdefault(str(a["path"]), a)
         clear_claims(run.task_id)
         if merged:
-            run.metadata["artifacts"] = list(merged.values())
+            # Every artifact gets the explicit contract (id/mime/sha256) even
+            # when it was discovered by the directory scan, not an explicit
+            # claim — nothing in production calls register_artifact, so this is
+            # the only place the manifest can be completed (ART-001).
+            from agent_core.artifacts import enrich_artifact
+
+            base = root or (workspace / "tasks" / run.task_id)
+            run.metadata["artifacts"] = [
+                enrich_artifact(record, base, task_id=run.task_id, run_id=run.id)
+                for record in merged.values()
+            ]
             self._save_run(run)
 
     async def _self_verify(

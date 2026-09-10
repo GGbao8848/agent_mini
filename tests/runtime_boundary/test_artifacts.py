@@ -67,3 +67,22 @@ def test_scan_does_not_overwrite_explicit_claim(tmp_path: Path) -> None:
     assert merged["outputs/result.txt"]["sha256"] == claimed["outputs/result.txt"]["sha256"]
     assert "sha256" in merged["outputs/result.txt"]
     artifacts.clear_claims(task_id)
+
+
+def test_enrich_artifact_fills_contract_from_a_scan_record(tmp_path: Path) -> None:
+    """A bare scan record becomes a full-contract artifact (ART-001)."""
+    root = tmp_path / "task"
+    (root / "outputs").mkdir(parents=True)
+    target = root / "outputs" / "data.csv"
+    target.write_text("n,square\n1,1\n")
+
+    # What a directory scan returns: path/size/mtime only.
+    bare = {"path": "outputs/data.csv", "size": 13, "mtime": "2026-01-01T00:00:00Z"}
+
+    enriched = artifacts.enrich_artifact(bare, root, task_id="t1", run_id="r1")
+
+    assert enriched["artifact_id"] == "t1:outputs/data.csv"
+    assert enriched["mime_type"] == "text/csv"
+    assert enriched["sha256"]
+    assert enriched["task_id"] == "t1"
+    assert enriched["run_id"] == "r1"

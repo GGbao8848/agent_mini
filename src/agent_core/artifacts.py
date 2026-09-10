@@ -152,6 +152,31 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def enrich_artifact(
+    record: dict[str, Any], root: Path, *, task_id: str, run_id: str | None = None
+) -> dict[str, Any]:
+    """Complete an artifact record so it satisfies the explicit contract (R8).
+
+    Directory scans produce only ``{path,size,mtime}``; nothing in production
+    calls :func:`register_artifact`, so every artifact used to reach the console
+    without an id/mime/hash. This fills the missing fields in place from the
+    on-disk file, giving every artifact the same contract regardless of how it
+    was discovered.
+    """
+    record.setdefault("task_id", task_id)
+    if run_id is not None:
+        record.setdefault("run_id", run_id)
+    path = root / str(record["path"])
+    if not path.is_file():
+        return record
+    stat = path.stat()
+    record.setdefault("artifact_id", f"{task_id}:{record['path']}")
+    record.setdefault("size", stat.st_size)
+    record.setdefault("mime_type", guess_media_type(path))
+    record.setdefault("sha256", _sha256(path))
+    return record
+
+
 def claimed_artifacts(task_id: str) -> list[dict[str, Any]]:
     """The explicitly claimed (not yet persisted) artifacts for ``task_id``."""
     return list(_CLAIMS.get(task_id, []))
