@@ -260,6 +260,18 @@ Context + State + Capabilities + Execution Policy + Persistence + Recovery + Obs
 **运维（本次）**：`.env` 不再导出代理（`AGENT_CORE_PROXY_URL` 注释掉）——代理改由
 任务按需显式使用 `http://10.10.10.214:7890`（已存为 project 记忆）；sandbox 保持 host。
 
+**R20 残留补齐：工具 schema 压缩（`84c9186`）**：工具 schema **每次模型调用都发**，
+所以冗长描述不是一次性成本而是逐步附加税。实测注册表固定成本 5262 token，大头是 MCP——
+工具描述 1882/2027 字符、单个参数描述最长 1080 字符（TinyFish 还塞了一堆模型根本用不到的
+`example`）。`domain/tool.py` 加 `compact_definition`：丢纯装饰键（example/examples/$schema/
+$id/title/$comment）+ 按上限截断描述（默认工具 500 / 参数 400 字符，带省略号），
+**类型/required/enum/default/嵌套全部原样保留——调用方式不变**。在三个注册点接入
+（builtin / service 工具 / MCP 发现）并**归一化水合数据**（旧行也压）。实测模型可见工具
+token **5262 → 4282（−18.6%）**，MCP 一家 −28%；`AGENT_CORE_TOOL_SCHEMA_COMPACTION` 默认开。
+顺带修 `context_breakdown`：它此前量的是 raw schema（含 example），与控制台实际发送不符，
+现改量 tool factory 真正生成的 pydantic args 模型（TinyFish example 一项就虚报 ~500 token）。
+**注**：这是"压缩"，不是"裁剪工具集"；§10 更彻底的"只发 shortlist、用时展开 schema"仍待做。
+
 **回归修复：host 模式又把 skill 说没了（`69778c2`）**：用户反映"又找不到 skill 了"。
 真实 `创建一个ppt` 任务里 agent 自述"txt2img 技能在当前环境也未挂载"，探针确认
 `ls /skills` 在宿主机上失败——但 skill 注册表里 txt2img 是 enabled、路径也在磁盘上。

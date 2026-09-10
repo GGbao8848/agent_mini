@@ -14,7 +14,7 @@
 |---|---|---|
 | 有序/有预算/可解释的 Context（§8/§9） | ✅ | `src/agent_core/context/`，每次 run 记 `context_sections` |
 | Context 不再以"聊天历史"为唯一来源（§7） | 🟡 | 已有 task_state/memory 段；但历史仍是消息主体（见 R25 长任务） |
-| **Tool Schema 治理（§10，PR-03）** | ⬜ | **最大固定成本**：实测 MCP schema 3208 token / builtin 1914 / skills 595，且每次请求都带。目标是"Capability Discovery → shortlist → 用时展开 schema"，使"工具变多 ≠ Context 线性变贵"。**这是 R20 里最该先做的残留。** |
+| **Tool Schema 治理（§10，PR-03）** | ✅ | `compact_definition` + 注册点/水合归一：丢掉纯装饰 schema 键（example/$schema/title…）并按上限截断工具/参数描述（默认 500/400 字符），**调用方式不变**。实测模型可见工具 token **5262 → 4282（−18.6%）**，MCP 一家 −28%。`AGENT_CORE_TOOL_SCHEMA_COMPACTION`（默认开）。**更进一步的"按需展开 schema"（只发 shortlist、用到再展开）仍未做**——当前是"压缩"，不是"裁剪工具集"。 |
 | 30–50 turn 仍 context bounded（§47 验收） | ⬜ | 未跑；依赖 R25 长任务 |
 | 硬性 context-window 闸门 | ⬜ | 目前只有 token/调用次数预算（`BudgetMiddleware`）+ 可选摘要，没有"接近窗口前强制裁剪" |
 
@@ -81,7 +81,7 @@
 
 ## 建议的收尾顺序（按 §46 + 性价比）
 
-1. **PR-03 Tool Schema 治理（R20 残留）** —— 直接砍每轮固定成本，收益最大且不依赖别的。
+1. ~~**PR-03 Tool Schema 治理（R20 残留）**~~ ✅ `84c9186`（压缩，−18.6%）；**剩下的"按需展开 schema"是更彻底的一步**。
 2. **R22 每次 Run 记录能力集** —— 小改动，补齐 §23/§49 的审计闭环。
 3. **R24 podman 加固** —— 你若会切回 podman，优先；当前 host 下价值低。
 4. **R23 补 creation reason + 显式 reader/writer 字段** —— 单租户非紧急，多用户前必做。
