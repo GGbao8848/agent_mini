@@ -17,7 +17,11 @@ from typing import Any
 from agent_core.application.scheduler import ScheduleManager
 from agent_core.application.service import AgentCoreService
 from agent_core.builtins import register_builtin_tools
-from agent_core.builtins.memory import make_remember
+from agent_core.builtins.memory import (
+    make_forget_memories,
+    make_recall_memories,
+    make_remember,
+)
 from agent_core.builtins.schedules import make_create_schedule
 from agent_core.builtins.skills import make_install_skill
 from agent_core.config.model_config import load_model_config
@@ -135,6 +139,8 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
         make_create_schedule(service),
         make_install_skill(service),
         make_remember(memories),
+        make_recall_memories(memories),
+        make_forget_memories(memories),
     ):
         try:
             tools.register(definition, handler)

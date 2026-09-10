@@ -149,6 +149,22 @@ class MemoryService:
             return
         loop.create_task(self._embed_into_index(memory))
 
+    def resolve_id(self, token: str) -> str | None:
+        """Resolve a full memory id or a unique short prefix; ``None`` if unknown.
+
+        Retrieval shows short ``#abcd1234`` references so the agent can act on a
+        memory without carrying 32-char ids around; this maps that token (or a
+        full id) back to the stored id. An ambiguous prefix resolves to
+        ``None`` rather than guessing, so a wrong delete cannot happen.
+        """
+        cleaned = token.strip().lstrip("#")
+        if not cleaned:
+            return None
+        if cleaned in self._repository:
+            return cleaned
+        matches = [m.id for m in self._repository.list() if m.id.startswith(cleaned)]
+        return matches[0] if len(matches) == 1 else None
+
     def supersede(
         self,
         old_id: str,
@@ -160,21 +176,52 @@ class MemoryService:
         confidence: float = 1.0,
         source: str = "manual",
     ) -> Memory:
-        """Replace ``old_id`` with a new entry, marking the old one superseded."""
-        old = self._repository.get(old_id)
+        """Replace one memory with a new entry, retiring the old one."""
+        return self.supersede_many(
+            [old_id],
+            new_content,
+            scope=scope,
+            type=type,
+            importance=importance,
+            confidence=confidence,
+            source=source,
+        )
+
+    def supersede_many(
+        self,
+        old_ids: Sequence[str],
+        new_content: str,
+        *,
+        scope: MemoryScope | None = None,
+        type: MemoryType | None = None,
+        importance: int = 0,
+        confidence: float = 1.0,
+        source: str = "manual",
+    ) -> Memory:
+        """Create one replacement and retire every memory in ``old_ids``.
+
+        Used when a fact changes: the new statement is stored once and the
+        superseded entries are deactivated and linked, so retrieval never
+        surfaces two contradictory rows (MEM-007). Inherits scope/type from the
+        first retired entry unless explicitly overridden.
+        """
+        olds = [self._repository.get(memory_id) for memory_id in old_ids]
+        base = olds[0] if olds else None
         replacement = Memory(
-            scope=scope or old.scope,
-            type=type or old.type,
+            scope=scope or (base.scope if base else MemoryScope.USER),
+            type=type or (base.type if base else MemoryType.FACT),
             content=new_content.strip(),
             source=source,
-            importance=max(importance, old.importance),
+            importance=max([importance, *(o.importance for o in olds)]),
             confidence=confidence,
         )
         self._repository.register(replacement)
-        old.superseded_by = replacement.id
-        old.active = False
-        old.updated_at = datetime.now(UTC)
-        self._repository.replace(old)
+        self._schedule_embed(replacement)
+        for old in olds:
+            old.superseded_by = replacement.id
+            old.active = False
+            old.updated_at = datetime.now(UTC)
+            self._repository.replace(old)
         return replacement
 
     def forget(self, memory_id: str) -> Memory:
@@ -264,14 +311,25 @@ class MemoryService:
 
 
 def memory_prompt(memories: Sequence[Memory]) -> str:
-    """Render retrieved memories as a system-prompt block (empty when none)."""
+    """Render retrieved memories as a system-prompt block (empty when none).
+
+    Each entry carries a short ``#id`` so the agent can *maintain* memory in
+    conversation — supersede a fact the user just corrected, or forget one on
+    request — instead of only appending. The rules are stated here (not only in
+    the tool descriptions) so the model sees them alongside the entries they
+    apply to.
+    """
     if not memories:
         return ""
-    lines = "\n".join(f"- {m.content}" for m in memories)
+    lines = "\n".join(f"- [#{m.id[:8]}] {m.content}" for m in memories)
     return (
         "\n\n# 长期记忆（与本轮请求相关）\n"
-        "以下是与当前请求相关的长期事实，作为背景参考；仅当用户明确表示情况"
-        "变化时才推翻它们。\n"
+        "以下是与当前请求相关的长期事实，作为背景参考。每条开头的 #id 供你维护记忆：\n"
+        "- 用户纠正或更新了某条事实：用 remember 记录新事实，并把旧事实的 #id 填入 "
+        "supersedes——旧条会退役，不要留下互相矛盾的两条。\n"
+        "- 用户要求忘掉某条：用 forget_memories 删除对应 #id。\n"
+        "- 想确认已有记忆：用 recall_memories 列出或搜索。\n"
+        "- 只有确实长期有效的事实才记录；一次性要求不要记。\n"
         f"{lines}\n"
     )
 
