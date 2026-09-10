@@ -499,8 +499,10 @@ export function useCustomModelManage() {
       base_url: string
       api_format: string
       api_key?: string
-      models: string[]
+      models?: string[]
+      catalog?: { id: string; context_window?: number | null; enabled?: boolean }[]
       context_window?: number | null
+      enabled?: boolean
     }
   >({
     mutationFn: ({ name, ...payload }) => api.put(`/v1/model-config/custom/${encodeURIComponent(name)}`, payload),
@@ -510,7 +512,46 @@ export function useCustomModelManage() {
     mutationFn: (name) => api.del(`/v1/model-config/custom/${encodeURIComponent(name)}`),
     onSuccess: invalidate,
   })
-  return { upsert, remove }
+  /** Partial edit of one provider: enable/disable, rename, endpoint fields. */
+  const patch = useToastMutation<
+    ModelConfig,
+    {
+      name: string
+      newName?: string
+      base_url?: string
+      api_format?: string
+      api_key?: string
+      enabled?: boolean
+      context_window?: number | null
+    }
+  >({
+    mutationFn: ({ name, newName, ...payload }) =>
+      api.patch<ModelConfig>(
+        `/v1/model-config/custom/${encodeURIComponent(name)}`,
+        newName ? { ...payload, name: newName } : payload,
+      ),
+    onSuccess: invalidate,
+  })
+  /** Add or update one model under a provider. */
+  const upsertModel = useToastMutation<
+    ModelConfig,
+    { provider: string; modelId: string; context_window?: number | null; enabled?: boolean }
+  >({
+    mutationFn: ({ provider, modelId, ...payload }) =>
+      api.put<ModelConfig>(
+        `/v1/model-config/custom/${encodeURIComponent(provider)}/models/${encodeURIComponent(modelId)}`,
+        payload,
+      ),
+    onSuccess: invalidate,
+  })
+  const removeModel = useToastMutation<ModelConfig, { provider: string; modelId: string }>({
+    mutationFn: ({ provider, modelId }) =>
+      api.del<ModelConfig>(
+        `/v1/model-config/custom/${encodeURIComponent(provider)}/models/${encodeURIComponent(modelId)}`,
+      ),
+    onSuccess: invalidate,
+  })
+  return { upsert, remove, patch, upsertModel, removeModel }
 }
 
 

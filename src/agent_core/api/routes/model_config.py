@@ -24,13 +24,19 @@ from agent_core.api.schemas import (
     ModelConfigUpdate,
     ModelDiscoverOut,
     ModelDiscoverRequest,
+    ModelEntryIn,
+    ModelEntryOut,
+    ModelOptionOut,
     ModelVerifyOut,
     ModelVerifyRequest,
     ProviderKeyOut,
+    ProviderUpdateRequest,
 )
 from agent_core.config.model_config import (
     CustomModel,
     ModelConfig,
+    ModelEntry,
+    catalog_from_models,
     get_model_config,
     mask_secret,
     save_model_config,
@@ -66,7 +72,7 @@ _BUILTIN_BASE_URLS: dict[str, str] = {
 
 
 def _endpoint_cards(overrides: ModelConfig) -> list[CustomModelOut]:
-    """Unified endpoint view: stored overrides plus synthesized built-ins.
+    """Unified provider view: stored overrides plus synthesized built-ins.
 
     Every provider — built-in or user-added — shows up as the same card shape
     so the page stays uniform. A stored entry replaces its built-in card.
@@ -76,17 +82,10 @@ def _endpoint_cards(overrides: ModelConfig) -> list[CustomModelOut]:
     for stored in overrides.custom_models:
         env_var = PROVIDER_ENV_VARS.get(stored.name)
         key = stored.api_key or (os.environ.get(env_var) if env_var else None)
-        cards.append(
-            CustomModelOut(
-                name=stored.name,
-                base_url=stored.base_url,
-                api_format=stored.api_format,
-                models=list(stored.models),
-                key_hint=mask_secret(key) if key else None,
-                builtin=stored.name in PROVIDER_ENV_VARS,
-                context_window=stored.context_window,
-            )
-        )
+        card = CustomModelOut.of(stored)
+        card.key_hint = mask_secret(key) if key else None
+        card.builtin = stored.name in PROVIDER_ENV_VARS
+        cards.append(card)
         seen.add(stored.name)
     for provider in PROVIDER_ENV_VARS:
         if provider in seen:
@@ -103,27 +102,55 @@ def _endpoint_cards(overrides: ModelConfig) -> list[CustomModelOut]:
                 base_url=base,
                 api_format="openai",
                 models=[],
+                catalog=[],
                 key_hint=mask_secret(key) if key else None,
                 builtin=True,
+                enabled=True,
             )
         )
     return cards
 
 
+def _available_models(cards: list[CustomModelOut]) -> list[ModelOptionOut]:
+    """Every enabled model of every enabled provider, for the chat picker."""
+    options: list[ModelOptionOut] = []
+    for card in cards:
+        if not card.enabled:
+            continue
+        entries = card.catalog or [
+            ModelEntryOut(id=model_id) for model_id in card.models
+        ]
+        for entry in entries:
+            if not entry.enabled:
+                continue
+            options.append(
+                ModelOptionOut(
+                    spec=f"{card.name}:{entry.id}",
+                    label=f"{card.name} · {entry.id}",
+                    provider=card.name,
+                    model=entry.id,
+                    context_window=entry.context_window or card.context_window,
+                )
+            )
+    return options
+
+
 def _config_out(overrides: ModelConfig) -> ModelConfigOut:
     settings = get_settings()
     effective = overrides.model or settings.model
+    cards = _endpoint_cards(overrides)
     return ModelConfigOut(
         model=overrides.model,
         model_source="page" if overrides.model else "env",
         effective_model=effective,
         local_base_url=next(
-            (c.base_url or None for c in _endpoint_cards(overrides) if c.name == "local"),
+            (c.base_url or None for c in cards if c.name == "local"),
             None,
         ),
         local_base_url_source="page" if overrides.local_base_url else "env",
         api_keys=[_key_status(provider, overrides) for provider in PROVIDER_ENV_VARS],
-        custom_models=_endpoint_cards(overrides),
+        custom_models=cards,
+        available_models=_available_models(cards),
     )
 
 
@@ -209,34 +236,172 @@ async def discover_models(payload: ModelDiscoverRequest) -> ModelDiscoverOut:
     return ModelDiscoverOut(ok=True, models=sorted(models))
 
 
+_API_FORMATS = frozenset({"openai", "responses", "anthropic"})
+
+
 @router.put("/custom/{name}", response_model=ModelConfigOut)
 def upsert_custom_model(name: str, payload: CustomModelUpsertRequest) -> ModelConfigOut:
-    """Create or replace a custom endpoint registration (matched by name)."""
-    if payload.api_format != "openai":
+    """Create or replace a provider registration (matched by name)."""
+    if payload.api_format not in _API_FORMATS:
         raise HTTPException(
-            status_code=422, detail=f"unsupported api_format '{payload.api_format}'"
+            status_code=422,
+            detail=f"unsupported api_format '{payload.api_format}'; "
+            f"expected one of {sorted(_API_FORMATS)}",
         )
     current = get_model_config()
     existing = next((m for m in current.custom_models if m.name == name), None)
     # Blank key = "keep what's stored" so editing a card without retyping the
     # secret never wipes it (the dialog shows the masked hint in that case).
+    catalog = (
+        [ModelEntry(id=e.id, context_window=e.context_window, enabled=e.enabled)
+         for e in payload.catalog]
+        if payload.catalog is not None
+        else catalog_from_models(
+            payload.models,
+            existing=existing.catalog if existing else None,
+            default_window=payload.context_window,
+        )
+    )
     entry = CustomModel(
         name=name,
         base_url=payload.base_url,
         api_format=payload.api_format,
         api_key=payload.api_key or (existing.api_key if existing else None),
-        models=payload.models,
+        models=[e.id for e in catalog],
+        catalog=catalog,
         context_window=payload.context_window
         or (existing.context_window if existing else None),
+        enabled=payload.enabled,
+        builtin=name in PROVIDER_ENV_VARS,
     )
     others = [m for m in current.custom_models if m.name != name]
     updated = current.model_copy(update={"custom_models": [*others, entry]})
     return _config_out(save_model_config(updated))
 
 
+@router.patch("/custom/{name}", response_model=ModelConfigOut)
+def update_provider(name: str, payload: ProviderUpdateRequest) -> ModelConfigOut:
+    """Partial edit of one provider: rename, enable/disable, endpoint fields.
+
+    Renaming a built-in provider is refused (the name doubles as the provider
+    id and the key's env var); custom providers may be renamed freely.
+    """
+    current = get_model_config()
+    index = next(
+        (i for i, m in enumerate(current.custom_models) if m.name == name), None
+    )
+    if index is None:
+        # No stored row yet (e.g. a built-in shown from .env): materialize one
+        # from the synthesized card so the edit has something to persist.
+        card = next((c for c in _endpoint_cards(current) if c.name == name), None)
+        if card is None:
+            raise HTTPException(status_code=404, detail=f"provider '{name}' not found")
+        base = CustomModel(
+            name=name,
+            base_url=card.base_url or "",
+            api_format=card.api_format,
+            models=[],
+            catalog=[],
+            enabled=True,
+            builtin=name in PROVIDER_ENV_VARS,
+        )
+        current = current.model_copy(
+            update={"custom_models": [*current.custom_models, base]}
+        )
+        index = len(current.custom_models) - 1
+
+    entry = current.custom_models[index]
+    if payload.name is not None and payload.name != entry.name:
+        if entry.name in PROVIDER_ENV_VARS:
+            raise HTTPException(
+                status_code=422, detail=f"built-in provider '{entry.name}' cannot be renamed"
+            )
+        if any(m.name == payload.name for m in current.custom_models):
+            raise HTTPException(
+                status_code=409, detail=f"provider '{payload.name}' already exists"
+            )
+    if payload.api_format is not None and payload.api_format not in _API_FORMATS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unsupported api_format '{payload.api_format}'; "
+            f"expected one of {sorted(_API_FORMATS)}",
+        )
+
+    def _apply(model: CustomModel) -> CustomModel:
+        update: dict[str, object] = {}
+        if payload.name is not None:
+            update["name"] = payload.name
+        if payload.base_url is not None:
+            update["base_url"] = payload.base_url
+        if payload.api_format is not None:
+            update["api_format"] = payload.api_format
+        if payload.api_key is not None:
+            # Blank clears the stored key (falls back to the env var).
+            update["api_key"] = payload.api_key or None
+        if payload.enabled is not None:
+            update["enabled"] = payload.enabled
+        if payload.context_window is not None:
+            update["context_window"] = payload.context_window or None
+        return model.model_copy(update=update)
+
+    models = [
+        _apply(m) if i == index else m for i, m in enumerate(current.custom_models)
+    ]
+    updated = current.model_copy(update={"custom_models": models})
+    return _config_out(save_model_config(updated))
+
+
+@router.put("/custom/{name}/models/{model_id:path}", response_model=ModelConfigOut)
+def upsert_provider_model(
+    name: str, model_id: str, payload: ModelEntryIn
+) -> ModelConfigOut:
+    """Add or update one model under a provider (id, window, enabled)."""
+    current = get_model_config()
+    index = next(
+        (i for i, m in enumerate(current.custom_models) if m.name == name), None
+    )
+    if index is None:
+        raise HTTPException(status_code=404, detail=f"provider '{name}' not found")
+    entry = current.custom_models[index]
+    others = [e for e in entry.catalog if e.id != model_id]
+    catalog = [
+        *others,
+        ModelEntry(id=model_id, context_window=payload.context_window, enabled=payload.enabled),
+    ]
+    updated_entry = entry.model_copy(
+        update={"catalog": catalog, "models": [e.id for e in catalog]}
+    )
+    models = [
+        updated_entry if i == index else m for i, m in enumerate(current.custom_models)
+    ]
+    updated = current.model_copy(update={"custom_models": models})
+    return _config_out(save_model_config(updated))
+
+
+@router.delete("/custom/{name}/models/{model_id:path}", response_model=ModelConfigOut)
+def delete_provider_model(name: str, model_id: str) -> ModelConfigOut:
+    """Remove one model from a provider."""
+    current = get_model_config()
+    index = next(
+        (i for i, m in enumerate(current.custom_models) if m.name == name), None
+    )
+    if index is None:
+        raise HTTPException(status_code=404, detail=f"provider '{name}' not found")
+    entry = current.custom_models[index]
+    catalog = [e for e in entry.catalog if e.id != model_id]
+    updated_entry = entry.model_copy(
+        update={"catalog": catalog, "models": [e.id for e in catalog]}
+    )
+    models = [
+        updated_entry if i == index else m for i, m in enumerate(current.custom_models)
+    ]
+    updated = current.model_copy(update={"custom_models": models})
+    return _config_out(save_model_config(updated))
+
+
 @router.delete("/custom/{name}", response_model=ModelConfigOut)
 def delete_custom_model(name: str) -> ModelConfigOut:
-    """Remove a custom endpoint registration."""
+    """Remove a custom provider registration."""
     current = get_model_config()
     if not any(m.name == name for m in current.custom_models):
         raise HTTPException(status_code=404, detail=f"custom model '{name}' not found")

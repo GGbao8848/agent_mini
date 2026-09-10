@@ -679,6 +679,17 @@ class ProviderKeyOut(BaseModel):
     hint: str | None = Field(default=None, description="Masked tail of the active key")
 
 
+class ModelOptionOut(BaseModel):
+    """One selectable model spec for the chat picker."""
+
+    spec: str
+    """``provider:model`` — what the composer sends."""
+    label: str
+    provider: str
+    model: str
+    context_window: int | None = None
+
+
 class ModelConfigOut(BaseModel):
     model: str | None = None
     """Console-set default model spec (None = not overridden from the page)."""
@@ -689,6 +700,9 @@ class ModelConfigOut(BaseModel):
     local_base_url_source: ConfigSource | None = None
     api_keys: list[ProviderKeyOut]
     custom_models: list[CustomModelOut] = Field(default_factory=list)
+    available_models: list[ModelOptionOut] = Field(default_factory=list)
+    """Enabled models across enabled providers — the single list the chat picker
+    reads, so the page and the picker can never disagree."""
 
 
 class ModelConfigUpdate(BaseModel):
@@ -739,20 +753,38 @@ class ModelDiscoverOut(BaseModel):
     error: str | None = None
 
 
+class ModelEntryOut(BaseModel):
+    """One model within a provider (id + context window + enabled)."""
+
+    id: str
+    context_window: int | None = None
+    enabled: bool = True
+
+
+class ModelEntryIn(BaseModel):
+    """Per-model upsert payload; the id comes from the path."""
+
+    context_window: int | None = Field(default=None, gt=0)
+    enabled: bool = True
+
+
 class CustomModelOut(BaseModel):
-    """A user-added endpoint; the API key never crosses the wire."""
+    """A provider endpoint; the API key never crosses the wire."""
 
     name: str
     base_url: str
     api_format: str
     models: list[str]
+    catalog: list[ModelEntryOut] = Field(default_factory=list)
     key_hint: str | None = None
     """Masked tail of the stored key (None when no key)."""
     builtin: bool = False
-    """True for the built-in providers (openai/openrouter/local) — the card
-    can be overridden/edited but not removed from the list."""
+    """True for the built-in providers (openai/openrouter/local) — they can be
+    overridden/edited but not removed from the list."""
     context_window: int | None = None
-    """Configured max input tokens; drives the console's context gauge."""
+    """Provider-level default max input tokens (per-model values override)."""
+    enabled: bool = True
+    """Whether the provider is offered in the chat picker."""
 
     @classmethod
     def of(cls, m: CustomModelSpec) -> CustomModelOut:
@@ -762,23 +794,47 @@ class CustomModelOut(BaseModel):
             name=m.name,
             base_url=m.base_url,
             api_format=m.api_format,
-            models=list(m.models),
+            models=m.model_ids(),
+            catalog=[
+                ModelEntryOut(
+                    id=e.id, context_window=e.context_window, enabled=e.enabled
+                )
+                for e in m.catalog
+            ],
             key_hint=mask_secret(m.api_key) if m.api_key else None,
             context_window=m.context_window,
+            enabled=m.enabled,
+            builtin=m.builtin,
         )
 
 
 class CustomModelUpsertRequest(BaseModel):
-    """Create or replace one custom endpoint; the name comes from the path."""
+    """Create or replace one provider endpoint; the name comes from the path."""
 
     base_url: str = Field(min_length=1)
     api_format: str = "openai"
     api_key: str | None = None
     models: list[str] = Field(default_factory=list)
+    catalog: list[ModelEntryOut] | None = Field(
+        default=None,
+        description="Per-model entries; when omitted, built from `models`.",
+    )
     context_window: int | None = Field(
         default=None,
-        description="Max input tokens the endpoint accepts (for context accounting)",
+        description="Provider-level default max input tokens (for context accounting)",
     )
+    enabled: bool = True
+
+
+class ProviderUpdateRequest(BaseModel):
+    """A partial edit of one provider (undefined fields are left unchanged)."""
+
+    name: str | None = Field(default=None, min_length=1, description="Rename")
+    base_url: str | None = None
+    api_format: str | None = None
+    api_key: str | None = None
+    enabled: bool | None = None
+    context_window: int | None = None
 
 
 # ------------------------------------------------------------------ projects

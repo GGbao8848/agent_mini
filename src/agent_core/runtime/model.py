@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
@@ -61,7 +62,7 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
 
     # Endpoints registered (or overridden) on the model-config page win over
     # the built-in provider wiring: "<name>:<model>" builds against the stored
-    # base_url, with the key falling back to the built-in env var.
+    # base_url / api_format, with the key falling back to the built-in env var.
     custom = next((m for m in overrides.custom_models if m.name == provider), None)
     if custom is not None:
         fallback_var = PROVIDER_ENV_VARS.get(provider)
@@ -70,12 +71,11 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
             or (os.environ.get(fallback_var) if fallback_var else None)
             or "local"
         )
-        return _chat_model(
+        return _build_custom(
             model,
-            custom_key,
-            base_url=custom.base_url,
+            custom,
+            api_key=custom_key,
             streaming=resolved.model_streaming,
-            context_window=custom.context_window,
         )
 
     if provider == "local":
@@ -112,6 +112,71 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
     )
 
 
+def _build_custom(
+    model: str,
+    endpoint: Any,
+    *,
+    api_key: str,
+    streaming: bool = True,
+) -> BaseChatModel:
+    """Build the client for a console-registered endpoint.
+
+    Honors the endpoint's ``api_format`` (openai-compatible, OpenAI Responses,
+    Anthropic Messages) and the per-model context window, so an endpoint that
+    speaks a non-default protocol actually works instead of silently using the
+    Chat Completions shape.
+    """
+    window = endpoint.window_for(model)
+    fmt = (endpoint.api_format or "openai").lower()
+    if fmt == "anthropic":
+        return _anthropic_model(
+            model, api_key, base_url=endpoint.base_url, context_window=window
+        )
+    return _chat_model(
+        model,
+        api_key,
+        base_url=endpoint.base_url,
+        streaming=streaming,
+        context_window=window,
+        # "responses" targets OpenAI's Responses API; the default stays the
+        # broadly-compatible chat-completions shape (vLLM/Ollama/OpenRouter).
+        use_responses_api=fmt == "responses",
+    )
+
+
+def _anthropic_model(
+    model: str,
+    api_key: str,
+    *,
+    base_url: str | None = None,
+    context_window: int | None = None,
+) -> BaseChatModel:
+    """ChatAnthropic client for an Anthropic-Messages endpoint.
+
+    langchain-anthropic is an optional dependency: a deployment that never uses
+    an Anthropic endpoint should not have to install it, so the import is local
+    and a missing package produces a clear configuration error.
+    """
+    try:
+        from langchain_anthropic import ChatAnthropic
+    except ImportError as exc:  # pragma: no cover - depends on install extras
+        raise ConfigurationError(
+            "api_format 'anthropic' requires the langchain-anthropic package; "
+            "install it (uv add langchain-anthropic) to use this endpoint",
+            details={"provider": "anthropic"},
+        ) from exc
+    instance = ChatAnthropic(
+        model=model,
+        api_key=SecretStr(api_key),
+        base_url=base_url,
+        temperature=0,
+        max_tokens=4096,
+    )
+    if context_window is not None:
+        instance.profile = {"max_input_tokens": context_window}
+    return instance
+
+
 def _chat_model(
     model: str,
     api_key: str,
@@ -119,6 +184,7 @@ def _chat_model(
     base_url: str | None = None,
     streaming: bool = True,
     context_window: int | None = None,
+    use_responses_api: bool = False,
 ) -> ChatOpenAI:
     """Chat model for self-hosted / OpenAI-compatible endpoints.
 
@@ -141,6 +207,7 @@ def _chat_model(
         temperature=0,
         streaming=streaming,
         stream_usage=True,
+        use_responses_api=use_responses_api,
     )
     if context_window is not None:
         instance.profile = {"max_input_tokens": context_window}

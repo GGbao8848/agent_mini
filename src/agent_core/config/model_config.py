@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import threading
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from agent_core.persistence.store import SqliteStore
 
@@ -23,28 +23,100 @@ _KEY = "default"
 _MASK_TAIL = 4
 
 
+class ModelEntry(BaseModel):
+    """One model id within a provider, with its own context window.
+
+    The window is per-model (not per-provider) because a single endpoint often
+    serves models with very different windows — the console's context gauge and
+    the summarization trigger both key off it.
+    """
+
+    id: str = Field(min_length=1)
+    context_window: int | None = Field(default=None, gt=0)
+    enabled: bool = True
+    """Disabled models stay registered but are not offered in the chat picker."""
+
+
 class CustomModel(BaseModel):
-    """A user-added provider endpoint registered from the console."""
+    """A provider endpoint registered from the console (built-in or custom)."""
 
     name: str = Field(min_length=1)
     """Display name; doubles as the provider id in ``provider:model`` specs."""
     base_url: str = Field(min_length=1)
-    """OpenAI-compatible endpoint root, e.g. ``http://host:8000/v1``."""
+    """Endpoint root, e.g. ``http://host:8000/v1``."""
     api_format: str = "openai"
-    """Wire format; ``openai`` (compatible) is the only one today."""
+    """Wire format: ``openai`` | ``responses`` | ``anthropic``."""
     api_key: str | None = None
     """Write-only secret; never returned by the API (masked hint only)."""
     models: list[str] = Field(default_factory=list)
-    """Model ids the user picked from the endpoint's discovered list."""
+    """Model ids kept for backward compatibility (see :attr:`catalog`)."""
+    catalog: list[ModelEntry] = Field(default_factory=list)
+    """Per-model entries (id + context window + enabled)."""
     context_window: int | None = None
-    """Max input tokens the endpoint's models accept (optional).
+    """Provider-level default window, used for models without their own."""
+    enabled: bool = True
+    """The whole provider is on/off (disabled ⇒ its models leave the picker)."""
+    builtin: bool = False
+    """True for the built-in providers (openai/openrouter/local)."""
 
-    Injected as the model profile's ``max_input_tokens`` so the summarization
-    middleware triggers at a real-window fraction instead of the 170k flat
-    default. Self-hosted servers expose this as ``max_model_len`` on
-    ``/v1/models``; openrouter model ids vary wildly, so an explicit value is
-    the only reliable source for either.
+    def window_for(self, model_id: str) -> int | None:
+        """The configured context window for ``model_id`` (model → provider)."""
+        for entry in self.catalog:
+            if entry.id == model_id and entry.context_window is not None:
+                return entry.context_window
+        return self.context_window
+
+    def enabled_models(self) -> list[str]:
+        """Model ids offered to the picker (respecting per-model + provider flags)."""
+        if not self.enabled:
+            return []
+        if self.catalog:
+            return [m.id for m in self.catalog if m.enabled]
+        return list(self.models)
+
+    def model_ids(self) -> list[str]:
+        """All model ids, enabled or not (catalog when present, else ``models``)."""
+        return [m.id for m in self.catalog] if self.catalog else list(self.models)
+
+    @model_validator(mode="after")
+    def _backfill_catalog(self) -> CustomModel:
+        """Give configs stored before the catalog existed a per-model view.
+
+        Older rows (and older API clients) only carry ``models`` and a
+        provider-level ``context_window``; lift them into ``catalog`` so the
+        page has one consistent shape to render.
+        """
+        if not self.catalog and self.models:
+            self.catalog = [
+                ModelEntry(id=model_id, context_window=self.context_window)
+                for model_id in self.models
+            ]
+        if self.catalog and not self.models:
+            # Keep the flat list in step for any caller still reading it.
+            self.models = [m.id for m in self.catalog]
+        return self
+
+
+def catalog_from_models(
+    model_ids: list[str],
+    *,
+    existing: list[ModelEntry] | None = None,
+    default_window: int | None = None,
+) -> list[ModelEntry]:
+    """Build a catalog from a flat id list, preserving existing per-model values.
+
+    Used when an older client (or the discover flow) sends ``models: [id, ...]``
+    without per-model metadata: known ids keep their window/enabled, new ids get
+    ``default_window``.
     """
+    prior = {entry.id: entry for entry in (existing or [])}
+    catalog: list[ModelEntry] = []
+    for model_id in model_ids:
+        if model_id in prior:
+            catalog.append(prior[model_id])
+        else:
+            catalog.append(ModelEntry(id=model_id, context_window=default_window))
+    return catalog
 
 
 class ModelConfig(BaseModel):

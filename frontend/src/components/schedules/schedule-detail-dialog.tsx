@@ -43,7 +43,11 @@ export function ScheduleModelSelect({
   onChange: (spec: string | null) => void
 }) {
   const config = useModelConfig()
-  const endpoints = config.data?.custom_models ?? []
+  const options = config.data?.available_models ?? []
+  const groups = options.reduce<Record<string, typeof options>>((acc, option) => {
+    ;(acc[option.provider] ??= []).push(option)
+    return acc
+  }, {})
   return (
     <Select
       value={value ?? "__default"}
@@ -56,18 +60,16 @@ export function ScheduleModelSelect({
         <SelectItem value="__default">
           默认模型{config.data?.effective_model ? `（${config.data.effective_model}）` : ""}
         </SelectItem>
-        {endpoints.map((endpoint) =>
-          endpoint.models.length ? (
-            <SelectGroup key={endpoint.name}>
-              <SelectLabel className="font-mono text-xs">{endpoint.name}</SelectLabel>
-              {endpoint.models.map((m) => (
-                <SelectItem key={m} value={`${endpoint.name}:${m}`} className="font-mono text-xs">
-                  {m}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          ) : null,
-        )}
+        {Object.entries(groups).map(([provider, models]) => (
+          <SelectGroup key={provider}>
+            <SelectLabel className="font-mono text-xs">{provider}</SelectLabel>
+            {models.map((option) => (
+              <SelectItem key={option.spec} value={option.spec} className="font-mono text-xs">
+                {option.model}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
       </SelectContent>
     </Select>
   )

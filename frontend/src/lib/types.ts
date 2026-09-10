@@ -217,13 +217,29 @@ export interface ProviderKey {
   hint: string | null
 }
 
+export interface ModelEntry {
+  id: string
+  context_window?: number | null
+  enabled: boolean
+}
+
 export interface CustomModel {
   name: string
   base_url: string
   api_format: string
   models: string[]
+  catalog: ModelEntry[]
   key_hint: string | null
   builtin?: boolean
+  context_window?: number | null
+  enabled: boolean
+}
+
+export interface ModelOption {
+  spec: string
+  label: string
+  provider: string
+  model: string
   context_window?: number | null
 }
 
@@ -235,6 +251,7 @@ export interface ModelConfig {
   local_base_url_source: ConfigSource | null
   api_keys: ProviderKey[]
   custom_models: CustomModel[]
+  available_models: ModelOption[]
 }
 
 export type ModelConfigUpdate = {

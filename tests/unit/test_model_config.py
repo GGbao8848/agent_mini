@@ -159,3 +159,114 @@ class TestApi:
             body = response.json()
             assert body["ok"] is False
             assert body["error"]
+
+
+class TestProviderAndModelApi:
+    """The provider + per-model catalog endpoints (R27)."""
+
+    async def test_upsert_provider_with_catalog(self, tmp_path, monkeypatch) -> None:
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            response = await client.put(
+                "/v1/model-config/custom/mine",
+                json={
+                    "base_url": "http://10.0.0.9:8000/v1",
+                    "api_format": "openai",
+                    "api_key": "sk-secret-8888",
+                    "catalog": [
+                        {"id": "m1", "context_window": 32768, "enabled": True},
+                        {"id": "m2", "enabled": False},
+                    ],
+                },
+            )
+            assert response.status_code == 200
+            body = response.json()
+            card = next(c for c in body["custom_models"] if c["name"] == "mine")
+            assert [e["id"] for e in card["catalog"]] == ["m1", "m2"]
+            assert card["key_hint"] == "••••8888"
+            assert "sk-secret-8888" not in response.text
+            # Only the enabled model is offered to the picker.
+            assert [m["spec"] for m in body["available_models"] if m["provider"] == "mine"] == [
+                "mine:m1"
+            ]
+            assert body["available_models"][0]["context_window"] == 32768
+
+    async def test_disable_provider_removes_its_models_from_picker(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            await client.put(
+                "/v1/model-config/custom/mine",
+                json={"base_url": "http://h/v1", "models": ["m1"]},
+            )
+            patched = await client.patch(
+                "/v1/model-config/custom/mine", json={"enabled": False}
+            )
+            assert patched.status_code == 200
+            card = next(c for c in patched.json()["custom_models"] if c["name"] == "mine")
+            assert card["enabled"] is False
+            assert all(m["provider"] != "mine" for m in patched.json()["available_models"])
+
+    async def test_patch_adds_and_removes_models(self, tmp_path, monkeypatch) -> None:
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            await client.put(
+                "/v1/model-config/custom/p",
+                json={"base_url": "http://h/v1", "models": []},
+            )
+            added = await client.put(
+                "/v1/model-config/custom/p/models/alpha", json={"context_window": 4096}
+            )
+            assert added.status_code == 200
+            card = next(c for c in added.json()["custom_models"] if c["name"] == "p")
+            assert [e["id"] for e in card["catalog"]] == ["alpha"]
+
+            removed = await client.delete("/v1/model-config/custom/p/models/alpha")
+            assert removed.status_code == 200
+            card = next(c for c in removed.json()["custom_models"] if c["name"] == "p")
+            assert card["catalog"] == []
+
+    async def test_builtin_provider_cannot_be_renamed(self, tmp_path, monkeypatch) -> None:
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            response = await client.patch(
+                "/v1/model-config/custom/openai", json={"name": "renamed"}
+            )
+            assert response.status_code == 422
+
+    async def test_unsupported_api_format_rejected(self, tmp_path, monkeypatch) -> None:
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            response = await client.put(
+                "/v1/model-config/custom/x",
+                json={"base_url": "http://h/v1", "api_format": "gemini", "models": []},
+            )
+            assert response.status_code == 422
+
+    async def test_anthropic_format_accepted(self, tmp_path, monkeypatch) -> None:
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            response = await client.put(
+                "/v1/model-config/custom/anth",
+                json={
+                    "base_url": "https://api.anthropic.com",
+                    "api_format": "anthropic",
+                    "catalog": [{"id": "claude-x"}],
+                },
+            )
+            assert response.status_code == 200
+            card = next(c for c in response.json()["custom_models"] if c["name"] == "anth")
+            assert card["api_format"] == "anthropic"

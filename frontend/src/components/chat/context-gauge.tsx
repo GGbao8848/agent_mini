@@ -31,11 +31,13 @@ function currentWindow(custom: ReturnType<typeof useModelConfig>["data"]): {
   estimated: boolean
 } {
   const spec = getSelectedModel()
-  const provider = spec ? spec.split(":")[0] : null
-  const endpoint = provider
-    ? custom?.custom_models?.find((m) => m.name === provider)
-    : null
-  if (endpoint?.context_window) return { window: endpoint.context_window, estimated: false }
+  // Prefer the picked model's own window; fall back to the effective default
+  // model's window from the same `available_models` list.
+  const target = spec ?? custom?.effective_model ?? null
+  const option = target
+    ? custom?.available_models?.find((m) => m.spec === target)
+    : undefined
+  if (option?.context_window) return { window: option.context_window, estimated: false }
   return { window: FALLBACK_WINDOW, estimated: true }
 }
 
