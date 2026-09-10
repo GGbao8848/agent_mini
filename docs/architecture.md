@@ -1,6 +1,7 @@
 # Agent Core 架构
 
-> 状态：全部核心 Phase 已落地（Domain / Registry / Runtime / Gate / 事件流 / MCP / HTTP API / CLI）。
+> 状态：全部核心 Phase 已落地（Domain / Registry / Runtime / Gate / 事件流 / MCP / HTTP API / CLI），
+> 并完成 Runtime Hardening 1.0（边界）与 2.0（R20–R24，见下方"新增层"）。
 
 ## 分层
 
@@ -95,11 +96,47 @@ flowchart LR
 ## 统一 Run 生命周期
 
 ```text
-CREATED → PLANNING → RUNNING ⇄ WAITING_APPROVAL → COMPLETED
+CREATED → RUNNING ⇄ WAITING_APPROVAL → COMPLETED
                  ↘ FAILED / CANCELLED / TIMEOUT（终态）
 ```
 
 状态机在 `domain/task.py` 中用显式转移表实现，非法转移抛 `StateError`。
+（`PLANNING` 曾定义但无人进入，已删除——计划改由 R21 的 Task State 显式表达。）
+
+## Runtime Hardening 2.0 新增层（R20–R24）
+
+```mermaid
+flowchart TB
+    CTRL[Control Plane<br/>Agent / Skill / MCP Binding] --> RES[Capability Resolver<br/>R22：工具可调用性唯一来源]
+    RES --> RT[Agent Runtime]
+    RT --> CTX[Context Builder<br/>R20：有序/有预算/可解释]
+    RT --> TS[Task State<br/>R21：事件投影的显式进度]
+    RT --> EXEC[Execution Policy<br/>R24：文件/网络/环境/资源]
+    RT --> MEM[Memory + Governance<br/>R23：(scope, owner) 读写策略]
+    CTX --> LLM[LLM]
+    TS -.回注.-> CTX
+    MEM -.检索.-> CTX
+    STUB[工具分层披露<br/>R20§10：冷工具 stub 广告] -.-> LLM
+```
+
+- **R20 Context（`src/agent_core/context/`）**：system prompt 不再字符串拼接，而是
+  **有序、有预算、可解释**的 section 列表（base/autonomy/environment/task_state/
+  memory/lesson）；每次 run 记 `metadata.context_sections`。
+  **工具 schema 治理**（§10）：先按上限**压缩**描述，再把**冷工具**（默认 MCP）以
+  「名字 + 一句摘要」的 stub 广告，**调用时**在 `awrap_tool_call` 里拦截（真实 schema
+  校验前）→ 激活 → 合成 ToolMessage 让模型重试 → 下一轮带全量 schema 执行。广告成本
+  实测 5262 → 2844 token。依据是"**执行集 > 广告集**"：工具全部注册进图，中间件只控制广告集。
+- **R21 Task State（`src/agent_core/task_state/`）**：把"任务到哪了"从聊天历史里拆出来，
+  由 trace 事件**投影**（纯 reducer）出 status/failures/artifacts/activity，plan 由
+  agent 用 `update_plan` 声明；落 `registry_items(kind=task_state)`，重启修正；`GET /tasks/{id}/state`。
+- **R22 Capability Resolver（`src/agent_core/capabilities/`）**：`ActionPolicy`、builder、
+  控制台三方读同一个 `EffectiveCapabilitySet`（绑定 ∩ 技能 allowed_tools ∩ 有 handler ∩
+  权限规则 ∩ 风险阈值），展示与强制不再可能分叉。
+- **R23 Memory Governance（`memory/policy.py`）**：记忆身份 = `(scope, scope_id)`；
+  agent 可写 USER/PROJECT/AGENT，**不能写 ORG**，写 PROJECT 必须绑定项目；读只含本轮语境。
+- **R24 Execution / Network Policy（`src/agent_core/execution/`）**：显式
+  `ExecutionPolicy`（文件/网络/环境/超时/资源），host 模式下网络 `enforced=false` **如实标注**；
+  `AGENT_CORE_SANDBOX_NETWORK=host|private|none`、`_NETWORK_ALLOW`、`_ENV_ALLOW`。
 
 ## 关键决策记录
 

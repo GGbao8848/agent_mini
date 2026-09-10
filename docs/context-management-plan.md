@@ -194,7 +194,10 @@ LOW-risk 工具：
 **教训**：改变"某路径在哪"的重构（R4 把 skill 从可写任务根移到虚拟挂载）必须检查
 **所有**消费该路径的命名空间——文件工具看到了，`run_code` 的容器视图没有。
 
-## 下一步（Backlog，按价值排序）
+## 下一步（Backlog：上下文工程 + Hardening 1.0 阶段的收尾）
+
+> 2.0 之后的待办见文末「Runtime Hardening 2.0」一节的 Backlog 与
+> [runtime-hardening-2-gap.md](runtime-hardening-2-gap.md)。
 
 1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
 2. ~~启动时孤儿 checkpoint GC~~ ✅ `ff15198`（生产首次启动回收 33 线程）
@@ -204,7 +207,7 @@ LOW-risk 工具：
 5. ~~长期记忆分层~~ ✅ 见上「Runtime 边界加固专项」（检索式重建，行为改变已验证）。
 6. 远期：历史筛选/压缩策略（#10）。
 7. ~~`refactor/runtime-boundaries` 合入 main~~ ✅ `e9a1f5e`（no-ff 合并；完整验收书
-   Round 1–4 证据矩阵见 `acceptance/reports/full-rounds-1-4.md`，PASS / P0=0）。
+   Round 1–4 证据矩阵见 `acceptance/reports/archive/full-rounds-1-4.md`，PASS / P0=0）。
    验收中发现并修了 4 个 P2：前端只渲染 thinking+tool（丢弃审批/循环/预算/子代理/
    技能/失败事件）、空白思考框（模型吐 `\n\n` 分片新开空框）、SSE 未禁反代缓冲、
    产物契约字段生产恒缺失（`register_artifact` 无调用方，全靠目录扫描 → 改在
@@ -215,7 +218,7 @@ LOW-risk 工具：
    实际只跑几分钟却标 90 分钟超时；现在只有 wait_for 自身 deadline 映射为
    `RunTimeoutError`，内层超时算单步失败。重启后非终态 run 已由 `hydrate` 标 FAILED。
 
-## Runtime Hardening 2.0（2026-09-10，分支 `feat/runtime-hardening-2`）
+## Runtime Hardening 2.0（2026-09-10，已合入 `main` —— merge `6f0e665`）
 
 来源：《agent_mini Runtime Hardening 2.0 实施指南》。R20–R24 已落地并阶段验收
 （`acceptance/reports/stage-3.md`，PASS / P0=0）。核心心智：Runtime =
@@ -309,8 +312,9 @@ shell，根本没有 `/skills`——提示词在对模型说谎。**与上一轮
 
 **Backlog（R25/R26 及剩余）**：① 6 个固定 Scenario ×5 重复性验收；② Release Gate
 报告（`release-gate-<version>.md`）；③ podman 下 `--cap-drop`/`--security-opt`/只读
-根文件系统；④ 把能力集写入每个 Run 记录（审计/回放）；⑤ MCP schema 的按需加载
-（当前最大固定上下文成本）。
+根文件系统；④ 把能力集写入每个 Run 记录（审计/回放）；⑤ ~~MCP schema 按需加载~~
+✅ 压缩 + 冷工具分层（`84c9186`/`ef804bb`），5262→2844；⑥ R20 §10 的 **L1 预选层**
+（按任务/技能收窄常驻集）仍未做——当前是"压缩 + 冷热分层"，没有按相关性预选。
 
 
 **回归修复：技能清单根本没进 prompt（`50cfdce`）**：做工具分层时顺带发现——框架的

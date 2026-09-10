@@ -2,12 +2,13 @@
 
 > 本文件在每次验收开始时冻结；验收过程中不得随意改变环境。
 > 首次冻结：2026-09-10（refactor/runtime-boundaries 起点）
+> 最近更新：2026-09-10（Runtime Hardening 2.0 合入 main）
 
 ## 版本
 
 | 项 | 值 |
 |---|---|
-| Git commit | `7463cb9`（分支 `refactor/runtime-boundaries` 起点，基于 main） |
+| Git commit | Hardening 1.0 基线 `7463cb9`；Hardening 2.0 合入 `6f0e665`（`main`，no-ff 合并 `feat/runtime-hardening-2`） |
 | Python | 3.14.4 |
 | Node | v24.19.0 |
 | deepagents | 0.7.10 |
@@ -28,6 +29,8 @@
 | Skill registry root | `workspace/skill-maker/` 及登记目录 |
 | MCP endpoint | tinyfish（stdio + mcp-remote）、bip-work-hour-reporting（stdio） |
 | Sandbox | `host`（AGENT_CORE_SANDBOX=host） |
+| Tool schema 治理 | 压缩开启（工具描述 ≤500 / 参数 ≤400 字符）；冷工具分层开启（默认 MCP 为冷集） |
+| 代理 | 环境变量不注入代理；外网按需显式用 `http://10.10.10.214:7890` |
 
 ## 已知环境性失败（非本次改动引入，基线即存在）
 
@@ -35,6 +38,12 @@
   依赖真实 `OPENROUTER_API_KEY`，hermetic settings 下必然失败。
 - mypy strict 基线：11 errors / 7 files。
 - 7 个既有环境性测试失败（历史记录）。
+
+## 回归基线（Hardening 2.0 合入时）
+
+- `uv run pytest`：625 passed / 1 known env failure。
+- `uv run mypy`：11 errors / 7 files（= 基线）。
+- `uv run ruff check`：36 errors（既有，无新增）。
 
 ## 验收节奏（本次约定）
 

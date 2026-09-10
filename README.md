@@ -49,6 +49,24 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 23 | 多轮对话：LangGraph checkpointer + thread_id，**任意 run 可续聊**（AsyncSqliteSaver 持久化，跨重启保留上下文） | ✅ |
 | 24 | Console 工具箱：Skills/MCP 安装与管理 UI（MCP 以 JSON 录入为主 + 表单备选，兼容标准 mcpServers 格式），MCP 连接生命周期修复（owner-task），Agent 工具/技能绑定（PUT /v1/agents/{id} + 工具箱面板） | ✅ |
 | 25 | Console 前端重构：React 19 + shadcn/ui 官方组件（Base UI 内核）+ Tailwind v4 + Vite，任务台改对话式布局（Runs 进侧边栏、聊天输入框沉底、线程气泡流、审批内联、运行详情弹窗），构建产物直出挂载目录，后端零改动 | ✅ |
+| 26 | Runtime Hardening 1.0：Workspace 只读挂载 / Skill 零复制隔离 / 能力强制 / Artifact 契约 / Memory 重建+语义检索 / 纠错闭环 / 长任务心跳 | ✅ |
+| 27 | Runtime Hardening 2.0（R20–R24）：Context 分层装配 / Task State 事件投影 / Capability Resolver 唯一事实源 / Memory 治理（scope+owner）/ Execution·Network Policy；外加**工具 schema 治理**（压缩 + 冷工具分层披露，固定成本 5262→2844 token） | ✅ |
+
+### Runtime Hardening 2.0 明细（已合入 main）
+
+| 编号 | 主题 | 状态 |
+|---|---|---|
+| R20 | Context Architecture：有序/有预算/可解释的 system prompt（`src/agent_core/context/`） | ✅ |
+| R20§10 | 工具 schema 治理：压缩 + 冷工具 stub 广告、调用时展开（`runtime/tool_tiering.py`） | ✅ |
+| R21 | Task State：事件投影的显式进度 + `update_plan` 工具 + `GET /tasks/{id}/state`（`src/agent_core/task_state/`） | ✅ |
+| R22 | Capability Resolver：工具可调用性的唯一来源（`src/agent_core/capabilities/`） | ✅ |
+| R23 | Memory Governance：`(scope, scope_id)` 身份 + 读写策略 + 溯源（`memory/policy.py`） | ✅ |
+| R24 | Execution / Network Policy：显式执行信封 + 可配网络模式（`src/agent_core/execution/`） | ✅ |
+| R25 | Scenario-Level Reliability：6 个固定 Scenario ×5 重复性验收 | ⬜ |
+| R26 | Production Release Gate：`release-gate-<version>.md` | ⬜ |
+
+> 剩余工作与逐项对照见 [docs/runtime-hardening-2-gap.md](docs/runtime-hardening-2-gap.md)；
+> 阶段验收报告见 [acceptance/reports/](acceptance/reports/)。
 
 ## 快速开始
 
@@ -373,20 +391,28 @@ src/agent_core/
 ├── api/             # FastAPI 传输层：路由、DTO、错误映射、SSE 事件流（/v1）
 ├── application/     # 用例层：AgentCoreService（API/CLI 共用的唯一入口）、组装根
 ├── bench/           # 评测基准：任务集、执行模式（single/team/fanout）、报告渲染
+├── capabilities/    # R22 能力解析：EffectiveCapabilitySet（工具可调用性的唯一来源）
 ├── config/          # 环境变量配置（AGENT_CORE_ 前缀）
+├── context/         # R20 上下文装配：有序/有预算/可解释的 system prompt 分段
 ├── domain/          # 领域模型：Agent / Task / Run / Action / Tool / Skill / MCP / Trace / Team / Metrics
 ├── errors/          # 统一异常体系（带 retryable 标记）
 ├── eval/            # 真实任务评估：任务集、确定性校验器、执行器
+├── execution/       # R24 执行策略：文件/网络/环境/资源信封（ExecutionPolicy）
 ├── mcp/             # MCP 适配：凭证解析、SDK 会话、连接生命周期、工具注册
+├── memory/          # 长期记忆：域模型、写路径（去重/supersede）、语义+关键词检索、治理策略
 ├── observability/   # 日志、Tracer、EventBus、事件扇出、Run 级事件流（SSE 数据源）
 ├── orchestration/   # 编排：compose_team（模型驱动团队）、run_parallel（代码驱动并发）
 ├── permissions/     # ActionPolicy、ActionGate、ApprovalManager（工具执行必经闸门）
 ├── persistence/     # 可选 SQLite 写穿透：注册中心/Run/审批/事件 + 重启恢复
 ├── registries/      # Agent / Tool / Skill / MCP / Team 注册中心（内存实现）
-└── runtime/         # 模型工厂、AgentBuilder、AgentExecutor、AgentRuntime（DeepAgents）、native middleware 映射
+├── task_state/      # R21 任务状态：事件投影的显式进度（reducer/service/repository）
+├── text/            # 领域无关的工具：token 估算等
+├── workspace/       # 逻辑挂载与只读边界（BoundaryBackend / 技能索引 / 权限）
+└── runtime/         # 模型工厂、AgentBuilder、AgentExecutor、AgentRuntime（DeepAgents）、native middleware 映射、工具分层披露
 
 cli.py               # agent-core 命令行（serve / demo / API 客户端）
 tests/unit/          # 单元测试
+tests/runtime_boundary/ # 运行时不变量与边界测试（I-01…I-26）
 docs/architecture.md # 架构文档（含 Mermaid 图）
 ```
 

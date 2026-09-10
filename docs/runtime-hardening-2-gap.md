@@ -1,7 +1,7 @@
 # Runtime Hardening 2.0 —— 已做 / 未做对照表
 
 对照对象：《agent_mini Agent Runtime Hardening 2.0 实施指南》（R20–R26）。
-更新：2026-09-10（分支 `feat/runtime-hardening-2`）。
+更新：2026-09-10（已合入 `main`，merge `6f0e665`）。
 结论：**R20–R24 主体已落地并阶段验收（PASS，P0=0）；R25、R26 未开始；R20/R22/R23/R24 各有小项残留。**
 
 图例：✅ 完成 / 🟡 部分完成 / ⬜ 未开始
@@ -74,7 +74,7 @@
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| `acceptance/reports/release-gate-<version>.md`（§53） | ⬜ | 无。**已有素材**：`stage-1/2/3.md` + `full-rounds-1-4.md`（可整合） |
+| `acceptance/reports/release-gate-<version>.md`（§53） | ⬜ | 无。**已有素材**：`reports/stage-3.md` + `reports/archive/`（stage-1/2、full-rounds-1-4）（可整合） |
 | 最低标准矩阵（§43：P0=0 / 核心E2E 100% / Security 100% / Restart 100% / 重复成功≥95% …） | 🟡 | 部分项在阶段验收里覆盖；"重复成功率≥95%"依赖 R25 |
 
 ---
