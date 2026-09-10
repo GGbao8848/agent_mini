@@ -61,7 +61,7 @@ function text(value: unknown): string {
 
 interface ActivityItem {
   key: string
-  kind: "think" | "tool"
+  kind: "think" | "tool" | "notice"
   label: string
   running: boolean
   error: string | null
@@ -72,14 +72,17 @@ interface ActivityItem {
    *  思考 / 运行 steps each carry their own duration. */
 }
 
-/** Turn a run's event stream into ZCode-style collapsible steps: thinking
- *  chunks merge into per-segment "思考" groups (re-opened after each tool
- *  call, interleaved with them); every tool call becomes a step whose state
- *  follows its result event (running → ok/error). Timestamps are kept so
- *  each step can show its own duration. */
+/** Turn a run's event stream into collapsible steps: thinking chunks merge into
+ *  per-segment "思考" groups (re-opened after each tool call, interleaved with
+ *  them); every tool call becomes a step whose state follows its result event
+ *  (running → ok/error). Approval waits, loop-guard nudges, budget warnings,
+ *  delegated sub-agents and terminal failures surface as "notice" steps so the
+ *  chain never silently drops what the runtime did. Timestamps are kept so each
+ *  step can show its own duration. */
 function buildItems(events: RunEvent[]): ActivityItem[] {
   const items: ActivityItem[] = []
   const openTools = new Map<string, ActivityItem>()
+  const openNotices = new Map<string, ActivityItem>()
   let thinking: ActivityItem | null = null
 
   const closeThinking = (atTs: number | null) => {
@@ -89,12 +92,49 @@ function buildItems(events: RunEvent[]): ActivityItem[] {
     thinking = null
   }
 
+  const notice = (
+    key: string,
+    label: string,
+    detail: string,
+    ts: number | null,
+    bucket?: string,
+  ): ActivityItem => {
+    const item: ActivityItem = {
+      key,
+      kind: "notice",
+      label,
+      running: true,
+      error: null,
+      detail,
+      startTs: ts,
+      endTs: ts,
+    }
+    items.push(item)
+    if (bucket) openNotices.set(bucket, item)
+    return item
+  }
+
+  const settleNotice = (bucket: string, ts: number | null, detail?: string, error?: string) => {
+    const item = openNotices.get(bucket)
+    if (!item) return
+    item.running = false
+    if (ts != null) item.endTs = ts
+    if (error) item.error = error
+    else if (detail) item.detail = item.detail ? `${item.detail}\n→ ${detail}` : detail
+    openNotices.delete(bucket)
+  }
+
   for (const event of events) {
     const key = event.id || `${event.timestamp}-${event.event_type}`
     const ts = parseTs(event.timestamp)
     if (event.event_type === "agent_thinking") {
       const chunk = text(event.output) || text(event.input)
-      if (!chunk) continue
+      // Whitespace-only chunks (the model emits bare "\n\n" between sections)
+      // must not open an empty-looking 思考 box; they only extend an open one.
+      if (!chunk.trim()) {
+        if (thinking && chunk) thinking.detail += chunk
+        continue
+      }
       if (thinking == null) {
         thinking = {
           key: `think-${key}`,
@@ -147,6 +187,86 @@ function buildItems(events: RunEvent[]): ActivityItem[] {
       }
       continue
     }
+    // -------- runtime events that used to be dropped from the chain --------
+    if (event.event_type === "action_pending") {
+      // The gate is waiting on the human (approval or a task-help question).
+      closeThinking(ts)
+      const help = event.metadata?.kind === "task_help"
+      notice(
+        key,
+        help ? "等待你的回答" : "等待审批",
+        text(event.input) || text(event.metadata?.reason),
+        ts,
+        "approval",
+      )
+      continue
+    }
+    if (event.event_type === "action_approved" || event.event_type === "action_rejected") {
+      const rejected = event.event_type === "action_rejected"
+      settleNotice(
+        "approval",
+        ts,
+        text(event.output) || (rejected ? "已拒绝" : "已批准"),
+        rejected ? text(event.error) || "已拒绝" : undefined,
+      )
+      continue
+    }
+    if (event.event_type === "loop_detected") {
+      // Loop guard noticed a repeating call; surface it so a spinning agent is
+      // visible rather than looking like a frozen 思考.
+      closeThinking(ts)
+      notice(
+        key,
+        "检测到重复调用",
+        `${event.tool ?? ""} · ${text(event.metadata?.detail) || text(event.metadata?.verdict)}`,
+        ts,
+      )
+      const item = items[items.length - 1]
+      item.running = false
+      continue
+    }
+    if (event.event_type === "budget_warning") {
+      notice(key, "预算提示", text(event.metadata?.detail) || text(event.output), ts)
+      const item = items[items.length - 1]
+      item.running = false
+      continue
+    }
+    if (event.event_type === "skill_loaded") {
+      // A skill was pulled into the run (progressive disclosure); show it so
+      // "what did the agent load" is visible rather than implied.
+      const name = String(event.metadata?.skill ?? event.output ?? event.input ?? "技能")
+      notice(key, `加载技能：${name}`, "", ts)
+      const item = items[items.length - 1]
+      item.running = false
+      continue
+    }
+    if (event.event_type === "subagent_started") {
+      closeThinking(ts)
+      const name = String(event.metadata?.subagent ?? "子代理")
+      notice(`sub-${name}-${key}`, `分身：${name}`, "", ts, `subagent:${name}`)
+      continue
+    }
+    if (event.event_type === "subagent_finished") {
+      const name = String(event.metadata?.subagent ?? "子代理")
+      settleNotice(`subagent:${name}`, ts, text(event.output))
+      continue
+    }
+    if (event.event_type === "run_failed" || event.event_type === "run_cancelled") {
+      closeThinking(ts)
+      for (const item of [...openTools.values(), ...openNotices.values()]) {
+        item.running = false
+        if (ts != null) item.endTs = ts
+      }
+      openTools.clear()
+      openNotices.clear()
+      if (event.event_type === "run_failed") {
+        notice(key, "运行失败", text(event.error) || "执行失败", ts)
+        const item = items[items.length - 1]
+        item.running = false
+        item.error = text(event.error) || "执行失败"
+      }
+      continue
+    }
   }
   // A still-running run's last thinking block is genuinely "in progress";
   // everything trailing a finished run is settled.
@@ -175,18 +295,21 @@ function ActivityStep({
         : item.endTs != null
           ? Math.max(0, item.endTs - item.startTs)
           : null
+  const hasBody = Boolean(item.error || item.detail)
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="animate-fade-slide-up">
       <CollapsibleTrigger
         className={cn(
           "group flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs transition-colors hover:bg-muted/60",
           item.error && "text-destructive",
+          item.kind === "notice" && !item.error && "text-amber-600 dark:text-amber-400",
         )}
       >
         <ChevronRightIcon
           className={cn(
             "size-3.5 shrink-0 text-muted-foreground transition-transform",
             open && "rotate-90",
+            !hasBody && "opacity-30",
           )}
         />
         <span className={cn("min-w-0 truncate font-medium", item.error && "text-destructive")}>
@@ -205,16 +328,18 @@ function ActivityStep({
           </span>
         )}
       </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div
-          className={cn(
-            "ml-6 mr-1 mt-0.5 mb-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 px-2 py-1.5 font-mono text-[11px] leading-snug",
-            item.error && "bg-destructive/10 text-destructive",
-          )}
-        >
-          {(item.error || item.detail || "（无输出）").slice(0, MAX_DETAIL)}
-        </div>
-      </CollapsibleContent>
+      {hasBody && (
+        <CollapsibleContent>
+          <div
+            className={cn(
+              "ml-6 mr-1 mt-0.5 mb-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 px-2 py-1.5 font-mono text-[11px] leading-snug",
+              item.error && "bg-destructive/10 text-destructive",
+            )}
+          >
+            {(item.error || item.detail).slice(0, MAX_DETAIL)}
+          </div>
+        </CollapsibleContent>
+      )}
     </Collapsible>
   )
 }
