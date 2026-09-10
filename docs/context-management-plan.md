@@ -161,6 +161,20 @@ memory↔runtime 循环导入。
 **未移植**（按需再议）：素材提炼入库（我们走显式 `remember`）、facts/entities 二次抽取、
 MCP 服务化、多租户/Keycloak、FTS5 trigram 关键词通道（我们用字符重叠已够）。
 
+## Memory 自动维护：对话内去重/更新/删除（`1981d23`）
+
+此前 agent 只能**追加**记忆，清理要去控制台。现在维护闭环全在对话内自动完成，三个
+LOW-risk 工具：
+
+- `remember`：写入不变，新增 `supersedes`（一组 #id）——用户纠正事实时把旧条退役，
+  不留互相矛盾的两条（`supersede_many` 标记每条旧行为 inactive 并链接替代条）。
+- `recall_memories`：列出/搜索，让 agent 能找到要操作的 #id。
+- `forget_memories`：按 #id 删除（用户要求"忘掉"时）。
+- 检索注入的每条记忆现在带短 `#id`，且维护规则写在记忆块里（就在条目旁边，模型更容易照做）。
+- `resolve_id` 支持全 id 或唯一短前缀；**前缀有歧义返回 None 而非猜测**——不会误删。
+  去重本就在 `add()`（归一化内容）。8 个新测试；真实对话验证：写入→纠正（旧值消失）→
+  忘记（彻底删除）全程自动。
+
 ## 下一步（Backlog，按价值排序）
 
 1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
