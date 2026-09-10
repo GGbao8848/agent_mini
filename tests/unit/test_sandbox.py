@@ -71,6 +71,27 @@ class TestSandboxArgv:
         assert argv[-2] == "-lc"
         assert argv[-1] == "echo hi"
 
+    def test_skill_sources_mount_read_only_at_skills(self, tmp_path: Path) -> None:
+        """run_code must see the same /skills/<id> view the file tools do.
+
+        Otherwise a skill script the SKILL.md tells the agent to run is
+        invisible inside the sandbox (it only mounts the task root at /work) —
+        the bug behind an agent reporting a skill 'not installed'.
+        """
+        settings = code_settings(tmp_path, sandbox="podman")
+        workspace = tmp_path / "workspace"
+
+        argv = build_sandbox_command(
+            workspace,
+            settings,
+            "echo hi",
+            timeout=60.0,
+            skill_mounts=(("txt2img", "/opt/skills/txt2img"),),
+        )
+
+        volumes = [argv[i + 1] for i, item in enumerate(argv) if item == "--volume"]
+        assert "/opt/skills/txt2img:/skills/txt2img:ro" in volumes
+
     def test_proxy_env_passthrough(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HTTPS_PROXY", "http://10.10.10.214:7890")
         monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,10.10.10.146")

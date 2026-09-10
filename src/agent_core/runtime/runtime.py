@@ -56,6 +56,7 @@ from agent_core.registries import AgentRegistry, ProjectRegistry, SkillRegistry,
 from agent_core.runtime.builder import AgentBuilder
 from agent_core.runtime.context import (
     current_memory_block,
+    current_skill_mounts,
     current_model_override,
     current_query,
     current_run,
@@ -168,6 +169,21 @@ class AgentRuntime:
             return None
         collector = self._collectors.get(active.id)
         return collector.usage if collector else None
+
+    def _skill_mounts(self) -> tuple[tuple[str, str], ...]:
+        """``(skill_id, source_dir)`` for every enabled skill, resolvable path only.
+
+        Shared by the file-tool backend (virtual ``/skills/<id>``) and run_code
+        (sandbox ``/skills/<id>``) so both namespaces agree on where a skill
+        lives. Skips skills with no on-disk path rather than failing the run.
+        """
+        mounts: list[tuple[str, str]] = []
+        for manifest in self.skills.list():
+            if not manifest.enabled or manifest.path is None:
+                continue
+            if manifest.path.is_dir():
+                mounts.append((manifest.id, str(manifest.path)))
+        return tuple(mounts)
 
     async def _heartbeat(self, run: Run) -> None:
         """Emit a periodic liveness event while ``run`` executes.
@@ -651,8 +667,13 @@ class AgentRuntime:
         self._collectors[run.id] = collector
         heartbeat = asyncio.create_task(self._heartbeat(run))
         memory_token = None
+        skills_token = None
         try:
             await self._ensure_checkpointer_ready()
+            # Enabled skill sources, so run_code can mount the same read-only
+            # /skills/<id> view the file tools see (otherwise a skill script the
+            # SKILL.md tells the agent to run is invisible inside the sandbox).
+            skills_token = current_skill_mounts.set(self._skill_mounts())
             # Retrieve relevant long-term memory before building the graph: the
             # build is synchronous but semantic retrieval is async, so compute
             # the block here and publish it via a context var.
@@ -702,6 +723,8 @@ class AgentRuntime:
             current_query.reset(query_token)
             if memory_token is not None:
                 current_memory_block.reset(memory_token)
+            if skills_token is not None:
+                current_skill_mounts.reset(skills_token)
             if model_token is not None:
                 current_model_override.reset(model_token)
         return run
