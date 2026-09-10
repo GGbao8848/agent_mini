@@ -27,6 +27,7 @@ from agent_core.artifacts import (
     scan_task_artifacts,
     scan_workspace_artifacts,
 )
+from agent_core.capabilities import CapabilityResolver
 from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
@@ -142,9 +143,16 @@ class AgentRuntime:
         self.tracer = tracer or InMemoryTracer()
         self.bus = bus or EventBus()
         self.fanout = EventFanout(self.tracer, self.bus)
-        # Skill capability binding: the policy resolves each bound skill's
-        # allowed_tools so the gate can deny out-of-scope tool calls (I-11).
-        self.policy = policy or ActionPolicy(skill_allowed_tools=self._skill_allowed_tools)
+        # Capability resolver (R22): ONE object computes what each agent may
+        # call — agent binding ∩ skill allowed_tools ∩ availability ∩ rules ∩
+        # risk floor. The gate (via ActionPolicy), the builder and the console
+        # all read it, so displayed and enforced capabilities cannot diverge.
+        self.capabilities = CapabilityResolver(
+            lambda: self.tools.list(),
+            has_handler=self.tools.has_handler,
+            skill_allowed_tools=self._skill_allowed_tools,
+        )
+        self.policy = policy or ActionPolicy(resolver=self.capabilities)
         self.approvals = approvals or ApprovalManager()
         self.loop_guard = LoopGuard()
         self.tool_executor = ToolExecutor()
@@ -169,6 +177,7 @@ class AgentRuntime:
             help_tool=make_help_tool(self.gate),
             checkpointer_provider=lambda: self.checkpointer,
             memory_enabled=self.memories is not None,
+            capabilities=self.capabilities,
         )
         self.executor = AgentExecutor(self.fanout)
         self._runs: dict[str, Run] = {}

@@ -138,6 +138,15 @@ class TestRegistryRoutes:
         assert body["code"] == "RegistryError"
         assert body["retryable"] is False
 
+    async def test_agent_capabilities_reflect_the_runtime(self, client: Any) -> None:
+        """R22: the console's capability view is the runtime's own computation."""
+        response = await client.get("/v1/agents/helper/capabilities")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["agent_id"] == "helper"
+        assert "exposed" in body and "entries" in body
+        assert "未显式绑定工具" in " ".join(body["notes"])
+
     async def test_list_skills(self, client: Any) -> None:
         response = await client.get("/v1/skills")
         assert response.status_code == 200

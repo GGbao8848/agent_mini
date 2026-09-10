@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent_core.capabilities.model import EffectiveCapabilitySet
 from agent_core.domain.action import ApprovalRequest
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
@@ -161,6 +162,50 @@ class TaskOut(BaseModel):
             pinned=task.pinned,
             has_unread=task.has_unread,
             metadata=task.metadata,
+        )
+
+
+class CapabilityEntryOut(BaseModel):
+    """One tool's effective state for an agent (R22)."""
+
+    name: str
+    description: str = ""
+    source: str = "python"
+    risk_level: str
+    exposed: bool
+    decision: str
+    state: str
+    reason: str = ""
+
+
+class AgentCapabilitiesOut(BaseModel):
+    """An agent's computed capabilities — the same set the runtime enforces."""
+
+    agent_id: str
+    notes: list[str] = Field(default_factory=list)
+    entries: list[CapabilityEntryOut]
+    exposed: list[str]
+    """Names that become model-visible tools."""
+
+    @classmethod
+    def of(cls, capabilities: EffectiveCapabilitySet) -> AgentCapabilitiesOut:
+        return cls(
+            agent_id=capabilities.agent_id,
+            notes=list(capabilities.notes),
+            entries=[
+                CapabilityEntryOut(
+                    name=e.name,
+                    description=e.description,
+                    source=e.source,
+                    risk_level=e.risk_level.value,
+                    exposed=e.exposed,
+                    decision=e.decision.value,
+                    state=e.state.value,
+                    reason=e.reason,
+                )
+                for e in capabilities.entries
+            ],
+            exposed=capabilities.exposed_names(),
         )
 
 

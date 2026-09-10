@@ -17,6 +17,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
+from agent_core.capabilities import CapabilityResolver
 from agent_core.config.settings import Settings, get_settings
 from agent_core.context.builder import ContextBuilder
 from agent_core.domain.agent import AgentSpec, SubAgentRef
@@ -50,6 +51,7 @@ class AgentBuilder:
         help_tool: BaseTool | None = None,
         checkpointer_provider: Callable[[], Any] | None = None,
         memory_enabled: bool = False,
+        capabilities: CapabilityResolver | None = None,
     ) -> None:
         self._agents = agents
         self._tools = tools
@@ -61,6 +63,12 @@ class AgentBuilder:
         self._help_tool = help_tool
         self._checkpointer_provider = checkpointer_provider
         self._memory_enabled = memory_enabled
+        # R22: the single capability source of truth. Falls back to a local
+        # resolver so standalone builders (tests) behave identically.
+        self._capabilities = capabilities or CapabilityResolver(
+            lambda: self._tools.list(),
+            has_handler=self._tools.has_handler,
+        )
 
     def _default_model_factory(self, model_spec: str | None) -> BaseChatModel:
         from agent_core.runtime.context import get_current_model_override
@@ -163,21 +171,14 @@ class AgentBuilder:
         return static_breakdown(definitions, self._skills.list())
 
     def _agent_tool_names(self, spec: AgentSpec) -> list[str]:
-        """The tool names an agent is bound to.
+        """The tool names an agent is bound to (R22: via the resolver).
 
-        An empty ``spec.tools`` means "everything available" — the default for
-        agents that don't opt into a capability list. Unavailable tools
-        (``metadata["available"] is False``) are excluded from the implicit
-        set; an explicit binding still resolves so the call-time error is
-        precise about what is missing.
+        The resolver is the single place that decides which tools an agent may
+        use; the builder only turns those names into runnable tools. An empty
+        ``spec.tools`` still means "everything available", but that rule now
+        lives in one object the console can query too.
         """
-        if spec.tools:
-            return list(spec.tools)
-        return [
-            definition.name
-            for definition in self._tools.list()
-            if definition.metadata.get("available", True)
-        ]
+        return self._capabilities.buildable_names(spec)
 
     def _backend_kwargs(self, spec: AgentSpec) -> dict[str, Any]:
         """Build the agent's filesystem backend and skill mount.
