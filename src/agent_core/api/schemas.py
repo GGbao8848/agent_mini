@@ -837,6 +837,15 @@ class ProviderUpdateRequest(BaseModel):
     context_window: int | None = None
 
 
+class ProviderKeyRevealOut(BaseModel):
+    """The plaintext key, returned only by the explicit reveal endpoint."""
+
+    name: str
+    api_key: str | None = None
+    source: ConfigSource | None = None
+    """``page`` (stored override) or ``env`` (from the environment)."""
+
+
 # ------------------------------------------------------------------ projects
 
 

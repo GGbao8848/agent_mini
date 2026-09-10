@@ -270,3 +270,33 @@ class TestProviderAndModelApi:
             assert response.status_code == 200
             card = next(c for c in response.json()["custom_models"] if c["name"] == "anth")
             assert card["api_format"] == "anthropic"
+
+    async def test_reveal_key_returns_plaintext_on_demand(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The key is not in the list payload but IS available explicitly."""
+        from tests.unit.test_console import make_client, make_service
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            await client.put(
+                "/v1/model-config/custom/rev",
+                json={"base_url": "http://h/v1", "api_key": "sk-reveal-7777", "models": ["m"]},
+            )
+            listing = await client.get("/v1/model-config")
+            # The list payload must not carry the plaintext.
+            assert "sk-reveal-7777" not in listing.text
+
+            revealed = await client.get("/v1/model-config/custom/rev/key")
+            assert revealed.status_code == 200
+            assert revealed.json()["api_key"] == "sk-reveal-7777"
+            assert revealed.json()["source"] == "page"
+
+    async def test_reveal_key_unknown_provider_404(self, tmp_path, monkeypatch) -> None:
+        from tests.unit.test_console import make_client, make_service
+
+        service = make_service(tmp_path, monkeypatch)
+        async with make_client(service) as client:
+            response = await client.get("/v1/model-config/custom/nope/key")
+            assert response.status_code == 404

@@ -72,12 +72,16 @@ export function AddProviderDialog({
       {
         onSuccess: (data) => {
           if (!data.ok) return
-          // Fill empty rows first, then append the rest.
+          // Fill blank rows first, then append the rest — never clobber a row
+          // the user already filled in. Rows stay editable afterwards, and the
+          // discovered list also feeds each row's dropdown.
           setModels((prev) => {
             const next = [...prev]
-            const empty = next.findIndex((m) => !m.id.trim())
-            if (empty >= 0) next[empty] = { ...next[empty], id: data.models[0] ?? "" }
-            for (const id of data.models.slice(empty >= 0 ? 1 : 0)) {
+            const pending = [...data.models]
+            for (let i = 0; i < next.length && pending.length; i += 1) {
+              if (!next[i].id.trim()) next[i] = { ...next[i], id: pending.shift() as string }
+            }
+            for (const id of pending) {
               if (!next.some((m) => m.id === id)) next.push({ id, context_window: null })
             }
             return next
@@ -87,6 +91,7 @@ export function AddProviderDialog({
     )
   }
 
+  const discovered = discover.data?.ok ? discover.data.models : []
   const named = models.filter((m) => m.id.trim())
   const canSave = name.trim().length > 0 && baseUrl.trim().length > 0 && named.length > 0
 
@@ -172,39 +177,7 @@ export function AddProviderDialog({
           </div>
 
           <div className="grid gap-1.5">
-            <div className="flex items-center justify-between">
-              <Label>模型列表</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                disabled={!baseUrl.trim() || discover.isPending}
-                onClick={probe}
-              >
-                {discover.isPending ? (
-                  <Loader2Icon className="size-3.5 animate-spin" data-icon="inline-start" />
-                ) : (
-                  <SearchIcon data-icon="inline-start" />
-                )}
-                探测模型
-              </Button>
-            </div>
-
-            {discover.data && !discover.isPending && (
-              <span className="flex items-center gap-1.5 text-xs">
-                {discover.data.ok ? (
-                  <>
-                    <CircleCheckIcon className="size-3.5 text-emerald-600" />
-                    发现 {discover.data.models.length} 个模型
-                  </>
-                ) : (
-                  <>
-                    <CircleXIcon className="size-3.5 text-destructive" />
-                    {discover.data.error || "探测失败"}
-                  </>
-                )}
-              </span>
-            )}
+            <Label>模型列表</Label>
 
             {models.length === 0 ? (
               <div className="rounded-lg border border-dashed px-3 py-3 text-xs text-muted-foreground">
@@ -214,12 +187,29 @@ export function AddProviderDialog({
               <div className="flex flex-col gap-2 rounded-lg border p-2">
                 {models.map((m, i) => (
                   <div key={i} className="flex items-center gap-2">
-                    <Input
-                      value={m.id}
-                      onChange={(e) => setModelAt(i, { id: e.target.value })}
-                      placeholder="模型 id，如 glm-4-plus"
-                      className="h-8 min-w-0 flex-1 font-mono text-xs"
-                    />
+                    {discovered.length > 0 ? (
+                      // Once the endpoint's models are known, offer them as a
+                      // dropdown (the earlier list may have included the id).
+                      <Select value={m.id || undefined} onValueChange={(v) => setModelAt(i, { id: v ?? "" })}>
+                        <SelectTrigger className="h-8 min-w-0 flex-1 font-mono text-xs">
+                          <SelectValue placeholder="选择模型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[...new Set([...discovered, ...(m.id ? [m.id] : [])])].map((id) => (
+                            <SelectItem key={id} value={id} className="font-mono text-xs">
+                              {id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        value={m.id}
+                        onChange={(e) => setModelAt(i, { id: e.target.value })}
+                        placeholder="模型 id，如 glm-4-plus"
+                        className="h-8 min-w-0 flex-1 font-mono text-xs"
+                      />
+                    )}
                     <Input
                       type="number"
                       min={0}
@@ -245,10 +235,42 @@ export function AddProviderDialog({
                 ))}
               </div>
             )}
-            <Button type="button" variant="outline" size="sm" className="self-start" onClick={addModel}>
-              <PlusIcon data-icon="inline-start" />
-              添加模型
-            </Button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!baseUrl.trim() || discover.isPending}
+                onClick={probe}
+              >
+                {discover.isPending ? (
+                  <Loader2Icon className="size-3.5 animate-spin" data-icon="inline-start" />
+                ) : (
+                  <SearchIcon data-icon="inline-start" />
+                )}
+                探测模型列表
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={addModel}>
+                <PlusIcon data-icon="inline-start" />
+                添加模型
+              </Button>
+              {discover.data && !discover.isPending && (
+                <span className="flex items-center gap-1.5 text-xs">
+                  {discover.data.ok ? (
+                    <>
+                      <CircleCheckIcon className="size-3.5 text-emerald-600" />
+                      发现 {discover.data.models.length} 个模型
+                    </>
+                  ) : (
+                    <>
+                      <CircleXIcon className="size-3.5 text-destructive" />
+                      {discover.data.error || "探测失败"}
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
           </div>
 
           {!canSave && (

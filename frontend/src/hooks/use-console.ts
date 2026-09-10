@@ -617,3 +617,13 @@ export function useMarkTaskRead() {
     },
   })
 }
+
+/** Fetch a provider's plaintext key on demand (explicit 显示 action only). */
+export function useRevealProviderKey() {
+  return useToastMutation<
+    { name: string; api_key: string | null; source: "page" | "env" | null },
+    string
+  >({
+    mutationFn: (name) => api.get(`/v1/model-config/custom/${encodeURIComponent(name)}/key`),
+  })
+}

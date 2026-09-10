@@ -30,6 +30,7 @@ from agent_core.api.schemas import (
     ModelVerifyOut,
     ModelVerifyRequest,
     ProviderKeyOut,
+    ProviderKeyRevealOut,
     ProviderUpdateRequest,
 )
 from agent_core.config.model_config import (
@@ -237,6 +238,27 @@ async def discover_models(payload: ModelDiscoverRequest) -> ModelDiscoverOut:
 
 
 _API_FORMATS = frozenset({"openai", "responses", "anthropic"})
+
+
+@router.get("/custom/{name}/key", response_model=ProviderKeyRevealOut)
+def reveal_provider_key(name: str) -> ProviderKeyRevealOut:
+    """Reveal a provider's stored/effective API key on explicit request.
+
+    The key is deliberately kept OUT of the model-config payload (only a masked
+    hint is returned there), so the page cannot accidentally leak it. Viewing a
+    key is an explicit operator action, so it gets its own endpoint instead of
+    being included in every list response.
+    """
+    if not any(c.name == name for c in _endpoint_cards(get_model_config())):
+        raise HTTPException(status_code=404, detail=f"provider '{name}' not found")
+    stored = next((m for m in get_model_config().custom_models if m.name == name), None)
+    env_var = PROVIDER_ENV_VARS.get(name)
+    env_key = os.environ.get(env_var) if env_var else None
+    key = (stored.api_key if stored else None) or env_key
+    if not key:
+        return ProviderKeyRevealOut(name=name, api_key=None, source=None)
+    source = "page" if (stored and stored.api_key) else "env"
+    return ProviderKeyRevealOut(name=name, api_key=key, source=source)
 
 
 @router.put("/custom/{name}", response_model=ModelConfigOut)

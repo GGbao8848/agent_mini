@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useCustomModelManage, useModelConfig } from "@/hooks/use-console"
+import { useCustomModelManage, useModelConfig, useRevealProviderKey } from "@/hooks/use-console"
 import type { CustomModel } from "@/lib/types"
 import {
   BoxesIcon,
@@ -105,7 +105,7 @@ export function ModelPanel() {
   const customs = providers.filter((p) => !p.builtin)
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
+    <div className="flex h-full w-full min-w-0 flex-1 flex-col gap-3 p-4">
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold">模型设置</h2>
         <p className="text-xs text-muted-foreground">
@@ -116,9 +116,9 @@ export function ModelPanel() {
       {config.isLoading || !config.data ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
       ) : (
-        <div className="flex min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border">
+        <div className="flex min-h-0 w-full flex-1 gap-0 overflow-hidden rounded-xl border">
           {/* ------------------------------------------------ left: providers */}
-          <div className="flex w-60 shrink-0 flex-col border-r bg-muted/20">
+          <div className="flex w-64 shrink-0 flex-col border-r bg-muted/20">
             <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2">
               {builtins.length > 0 && (
                 <div className="flex flex-col gap-0.5">
@@ -207,6 +207,7 @@ function ProviderDetail({
   onModelRow: (modelId?: string) => void
 }) {
   const manage = useCustomModelManage()
+  const reveal = useRevealProviderKey()
   const [baseUrl, setBaseUrl] = React.useState(provider.base_url)
   const [apiFormat, setApiFormat] = React.useState(provider.api_format)
   const [apiKey, setApiKey] = React.useState("")
@@ -324,13 +325,37 @@ function ProviderDetail({
             autoComplete="off"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder={provider.key_hint ? `已配置（${provider.key_hint}），留空保持不变` : "输入 API Key"}
+            placeholder={
+              provider.key_hint ? `已配置（${provider.key_hint}），留空保持不变` : "输入 API Key"
+            }
             className="font-mono"
           />
-          <Button size="xs" variant="outline" onClick={() => setShowKey((v) => !v)}>
-            {showKey ? "隐藏" : "显示"}
+          <Button
+            size="xs"
+            variant="outline"
+            title={apiKey ? "隐藏" : "显示已保存的 Key（明文，仅用于核对）"}
+            disabled={reveal.isPending}
+            onClick={async () => {
+              if (apiKey) {
+                setApiKey("")
+                setShowKey(false)
+                return
+              }
+              // The list payload only carries a masked hint, so revealing is an
+              // explicit fetch of the plaintext key.
+              const res = await reveal.mutateAsync(provider.name)
+              if (res.api_key) {
+                setApiKey(res.api_key)
+                setShowKey(true)
+              }
+            }}
+          >
+            {reveal.isPending ? <Loader2Icon className="size-3.5 animate-spin" /> : apiKey ? "隐藏" : "显示"}
           </Button>
         </div>
+        {reveal.data?.api_key === null && !reveal.isPending && (
+          <p className="text-xs text-muted-foreground">该供应商尚未配置 API Key。</p>
+        )}
       </div>
 
       {/* model list */}
