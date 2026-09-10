@@ -29,6 +29,24 @@ the anonymous ``workspace/tasks/<task_id>/`` directory; a path means the task
 works directly inside that (project) directory.
 """
 
+current_skill_mounts: ContextVar[tuple[tuple[str, str], ...]] = ContextVar(
+    "current_skill_mounts", default=()
+)
+"""``(skill_id, source_dir)`` pairs for the in-flight run's enabled skills.
+
+Set by the runtime before execution so ``run_code`` can mount the same skill
+sources read-only into the sandbox at ``/skills/<id>`` — the file tools see
+them as ``/skills/<id>`` too, so a skill's documented script path works in
+both namespaces. Without this, a skill script the SKILL.md tells the agent to
+run is invisible to ``bash`` (the sandbox only mounts the task root at
+``/work``).
+"""
+
+
+def get_current_skill_mounts() -> tuple[tuple[str, str], ...]:
+    """Enabled ``(skill_id, source_dir)`` pairs for the in-flight run."""
+    return current_skill_mounts.get()
+
 
 current_model_override: ContextVar[str | None] = ContextVar(
     "current_model_override", default=None

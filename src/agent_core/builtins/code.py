@@ -30,6 +30,7 @@ import asyncio
 import os
 import re
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -72,9 +73,21 @@ def _proxy_env() -> dict[str, str]:
 
 
 def build_sandbox_command(
-    workspace: Path, settings: Settings, command: str, timeout: float
+    workspace: Path,
+    settings: Settings,
+    command: str,
+    timeout: float,
+    skill_mounts: Sequence[tuple[str, str]] = (),
 ) -> list[str]:
-    """Assemble the ``podman run`` argv for one command (pure, unit-testable)."""
+    """Assemble the ``podman run`` argv for one command (pure, unit-testable).
+
+    ``skill_mounts`` are ``(skill_id, source_dir)`` pairs mounted read-only at
+    ``/skills/<id>``. The file tools already expose skills at that virtual path;
+    mounting the same sources here means a skill's documented script path (e.g.
+    ``/skills/txt2img/scripts/txt2img.py``) is runnable from ``run_code`` too —
+    otherwise the sandbox, which only mounts the task root at ``/work``, cannot
+    see them at all.
+    """
     del timeout  # the host-side subprocess timeout is applied by the caller
     argv = [
         "podman", "run", "--rm",
@@ -96,6 +109,10 @@ def build_sandbox_command(
         # what the agent can read or write.
         "--network", "host",
     ]
+    for skill_id, source in skill_mounts:
+        # Read-only: the agent runs skill scripts but must never rewrite the
+        # capability source (invariant I-02).
+        argv.extend(["--volume", f"{source}:/skills/{skill_id}:ro"])
     for var, value in _proxy_env().items():
         argv.extend(["--env", f"{var}={value}"])
     argv.extend([settings.sandbox_image, "bash", "-lc", command])
@@ -124,7 +141,11 @@ def _run_host(command: str, workspace: Path, timeout: float) -> str:
 
 def _run_podman(workspace: Path, settings: Settings, command: str, timeout: float) -> str:
     """Sandbox backend: run inside the rootless container."""
-    argv = build_sandbox_command(workspace, settings, command, timeout)
+    from agent_core.runtime.context import get_current_skill_mounts
+
+    argv = build_sandbox_command(
+        workspace, settings, command, timeout, get_current_skill_mounts()
+    )
     try:
         process = subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout,

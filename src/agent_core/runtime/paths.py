@@ -52,6 +52,10 @@ def environment_note(root: Path, settings: Settings) -> str:
     return (
         "\n\n## 运行环境\n"
         f"- {detail}\n"
+        "- 已安装的技能挂载在 /skills/<技能名>（只读）。技能自带脚本请用**绝对路径**调用，"
+        "例如 `python /skills/txt2img/scripts/txt2img.py --prompt ...`——"
+        "不要用 `ls /skills` 去找（工作目录在 /work，两者不是同一棵树），"
+        "技能清单已由系统提示给出。\n"
         "- 你写的文件不会丢：它们都在工作目录里，不要用 find / 全盘搜索找文件。\n"
         "- 需要第三方库时优先调用 ensure_packages 声明，不要直接 pip install。\n"
         "- 交付前用相对路径验证文件确实存在。\n"
