@@ -30,7 +30,7 @@ import asyncio
 import os
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -275,9 +275,22 @@ def make_run_code(settings: Settings) -> tuple[ToolDefinition, Any]:
     return definition, run_code
 
 
-def register_builtin_tools(registry: ToolRegistry, settings: Settings) -> list[str]:
-    """Register ``run_code`` (and, on the host backend, ``ensure_packages``)."""
+def register_builtin_tools(
+    registry: ToolRegistry,
+    settings: Settings,
+    *,
+    compact: Callable[[ToolDefinition], ToolDefinition] | None = None,
+) -> list[str]:
+    """Register ``run_code`` (and, on the host backend, ``ensure_packages``).
+
+    ``compact`` bounds each definition's model-facing prose before registration
+    (R20 §10); None registers the definition as-is.
+    """
+    if compact is None:
+        compact = lambda definition: definition  # noqa: E731 - trivial identity
+
     definition, handler = make_run_code(settings)
+    definition = compact(definition)
     try:
         registry.register(definition, handler)
     except RegistryError:
@@ -286,6 +299,7 @@ def register_builtin_tools(registry: ToolRegistry, settings: Settings) -> list[s
 
     if settings.sandbox != "podman":
         pkg_definition, pkg_handler = make_ensure_packages(settings)
+        pkg_definition = compact(pkg_definition)
         try:
             registry.register(pkg_definition, pkg_handler)
         except RegistryError:

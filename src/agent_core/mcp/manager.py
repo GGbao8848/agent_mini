@@ -7,6 +7,7 @@ session — so they pass through the same Action Gate as every other tool.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from agent_core.domain.mcp import MCPServerStatus
@@ -28,11 +29,16 @@ class MCPManager:
         *,
         credentials: CredentialResolver | None = None,
         opener: SessionOpener = open_sdk_session,
+        compact: Callable[[ToolDefinition], ToolDefinition] | None = None,
     ) -> None:
         self._registry = registry
         self._tools = tools
         self._credentials = credentials
         self._opener = opener
+        # Bounds MCP-provided prose before registration (R20 §10). MCP servers
+        # ship the most verbose schemas of all, so this is where compaction pays
+        # the most; None registers definitions as discovered.
+        self._compact = compact or (lambda definition: definition)
         self._connections: dict[str, MCPConnection] = {}
         self._registered: dict[str, list[str]] = {}
 
@@ -84,6 +90,7 @@ class MCPManager:
             if allowed is not None and tool_definition.name not in allowed:
                 continue
             handler = self._make_handler(server_id, tool_definition)
+            tool_definition = self._compact(tool_definition)
             if tool_definition.name in self._tools:
                 # Reconnect after restart: the definition was restored from
                 # persistence without a live handler — refresh it in place.

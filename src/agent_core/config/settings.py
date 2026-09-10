@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     # around 0.4-0.5, so this gates paraphrase-only noise.
     memory_semantic_threshold: float = 0.55
 
+    # Tool-schema compaction (R20 §10): every tool schema is sent on EVERY
+    # model call, so unbounded descriptions are a per-step tax. When enabled,
+    # tool descriptions and JSON-schema property descriptions are trimmed to
+    # these character limits before registration (calling convention is
+    # unchanged — only prose is bounded). 0 on a limit leaves it untouched.
+    tool_schema_compaction: bool = True
+    tool_description_max_chars: int = 500
+    tool_param_description_max_chars: int = 400
+
     # Token ceiling for the *droppable* system-prompt sections (retrieved
     # memory + correction hint). Unset disables trimming. The agent's own
     # instructions are never trimmed — see agent_core.context.
