@@ -175,6 +175,25 @@ LOW-risk 工具：
   去重本就在 `add()`（归一化内容）。8 个新测试；真实对话验证：写入→纠正（旧值消失）→
   忘记（彻底删除）全程自动。
 
+## 回归修复：skill 脚本在沙箱里跑不了（`4dc327c`）
+
+现象：用户跑 PPT 配图任务，agent 报"txt2img 技能未安装（/skills 目录不存在）"。
+
+根因：**R4 技能隔离重构引入的回归**。R4 把 skill 从"复制进任务根 `.skills/`"改成
+"只在文件工具虚拟路径 `/skills/<id>` 只读挂载"。但 `run_code` 在 podman 里只挂载
+任务根到 `/work`——skill 源在任务根之外（`workspace/.skills-upload/`），容器里看不到。
+于是 SKILL.md 里让 agent 跑的脚本路径失效，agent 去 `ls /skills` 找不到就以为没装。
+（磁盘上 190 个旧任务根仍留着重构前的 `.skills/` 副本，所以旧任务还能跑，新任务不能——
+这掩盖了问题。）
+
+修复：runtime 把已启用 skill 源解析进 context var，`build_sandbox_command` 逐个只读
+挂载到 `/skills/<id>:ro`，使文件工具与 run_code 对"技能在哪"达成一致（`:ro` 保住 I-02
+源不可变）。环境说明也补上挂载点，并明确"技能脚本用绝对路径调用，不要 `ls /skills` 找"。
+沙箱内实测 `ls -d /skills/*/` 与 `txt2img.py --help` 均通过；真实对话生成 182KB PNG。
+
+**教训**：改变"某路径在哪"的重构（R4 把 skill 从可写任务根移到虚拟挂载）必须检查
+**所有**消费该路径的命名空间——文件工具看到了，`run_code` 的容器视图没有。
+
 ## 下一步（Backlog，按价值排序）
 
 1. ~~模型配置页 context_window 输入框~~ ✅ `ff15198`
