@@ -48,7 +48,7 @@ class AgentBuilder:
         usage_provider: Callable[[], RunUsage | None] | None = None,
         help_tool: BaseTool | None = None,
         checkpointer_provider: Callable[[], Any] | None = None,
-        memory_provider: Callable[[str], str] | None = None,
+        memory_enabled: bool = False,
     ) -> None:
         self._agents = agents
         self._tools = tools
@@ -59,7 +59,7 @@ class AgentBuilder:
         self._usage_provider = usage_provider
         self._help_tool = help_tool
         self._checkpointer_provider = checkpointer_provider
-        self._memory_provider = memory_provider
+        self._memory_enabled = memory_enabled
 
     def _default_model_factory(self, model_spec: str | None) -> BaseChatModel:
         from agent_core.runtime.context import get_current_model_override
@@ -95,11 +95,13 @@ class AgentBuilder:
         )
         # Retrieved long-term memory: only the few entries relevant to this
         # request (see agent_core.memory), never the whole store (MEM-005).
-        if self._memory_provider is not None:
-            from agent_core.runtime.context import get_current_query
+        # The runtime precomputes the block asynchronously (hybrid retrieval);
+        # this sync build just reads it.
+        if self._memory_enabled:
+            from agent_core.runtime.context import get_current_memory_block, get_current_query
 
             query = get_current_query() or ""
-            system_prompt = (system_prompt or "") + self._memory_provider(query)
+            system_prompt = (system_prompt or "") + get_current_memory_block()
             # Deterministic correction nudge (R11): only on turns that read like
             # a correction, so ordinary turns pay nothing and record nothing.
             from agent_core.memory.lesson import lesson_hint

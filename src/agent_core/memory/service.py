@@ -22,8 +22,14 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from agent_core.domain.memory import Memory, MemoryScope, MemoryType
+from agent_core.memory.embedding import EmbeddingClient
 from agent_core.memory.repository import MemoryRepository
-from agent_core.memory.retriever import DEFAULT_LIMIT, DEFAULT_TOKEN_BUDGET, retrieve
+from agent_core.memory.retriever import (
+    DEFAULT_LIMIT,
+    DEFAULT_SEMANTIC_THRESHOLD,
+    DEFAULT_TOKEN_BUDGET,
+    retrieve,
+)
 
 _WS_RE = re.compile(r"\s+")
 _PUNCT_RE = re.compile(r"[\s，。、；：！？,.;:!?\"'`()（）\[\]【】]+")
@@ -35,10 +41,33 @@ def normalize(content: str) -> str:
 
 
 class MemoryService:
-    """Read/write façade over a :class:`MemoryRepository`."""
+    """Read/write façade over a :class:`MemoryRepository`.
 
-    def __init__(self, repository: MemoryRepository) -> None:
+    Writes keep the embedding sidecar in step: a stored memory is embedded
+    (best-effort, in the background) so semantic retrieval can find it. When no
+    embedding endpoint is configured everything degrades to keyword retrieval.
+    """
+
+    def __init__(
+        self,
+        repository: MemoryRepository,
+        *,
+        embedding: EmbeddingClient | None = None,
+        semantic_weight: float = 0.7,
+        semantic_threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
+    ) -> None:
         self._repository = repository
+        self._embedding = embedding
+        self._semantic_weight = semantic_weight
+        self._semantic_threshold = semantic_threshold
+
+    async def _embed_into_index(self, memory: Memory) -> None:
+        """Best-effort: embed ``memory`` and store its vector (never raises)."""
+        if self._embedding is None or not self._embedding.enabled:
+            return
+        vector = await self._embedding.embed(memory.content)
+        if vector is not None:
+            self._repository.store_vector(memory.id, vector)
 
     def list(self, *, live_only: bool = False) -> list[Memory]:
         items = self._repository.list()
@@ -93,13 +122,32 @@ class MemoryService:
             confidence=confidence,
         )
         self._repository.register(memory)
+        self._schedule_embed(memory)
         return memory
 
     def upsert(self, memory: Memory) -> Memory:
         """Persist an edited entry (console edit path)."""
         memory.updated_at = datetime.now(UTC)
         self._repository.replace(memory)
+        self._schedule_embed(memory)  # text may have changed → refresh vector
         return memory
+
+    def _schedule_embed(self, memory: Memory) -> None:
+        """Fire-and-forget embedding so writes stay synchronous.
+
+        Runs on the current event loop when there is one (the API/tool paths
+        always have one); with no loop — e.g. pure sync tests — the memory is
+        simply keyword-retrievable until the next embed pass.
+        """
+        if self._embedding is None or not self._embedding.enabled:
+            return
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._embed_into_index(memory))
 
     def supersede(
         self,
@@ -149,7 +197,11 @@ class MemoryService:
         limit: int = DEFAULT_LIMIT,
         token_budget: int = DEFAULT_TOKEN_BUDGET,
     ) -> Sequence[Memory]:
-        """Relevant live memories for ``query`` (see :mod:`retriever`)."""
+        """Keyword-only retrieval (sync). Use :meth:`aretrieve` for semantics.
+
+        Kept for synchronous callers/tests; it ignores embeddings, so it never
+        blocks on the network.
+        """
         return retrieve(
             self._repository.list(),
             query,
@@ -158,8 +210,57 @@ class MemoryService:
             token_budget=token_budget,
         )
 
+    async def aretrieve(
+        self,
+        query: str,
+        *,
+        scopes: Sequence[MemoryScope] | None = None,
+        limit: int = DEFAULT_LIMIT,
+        token_budget: int = DEFAULT_TOKEN_BUDGET,
+    ) -> Sequence[Memory]:
+        """Hybrid retrieval: semantic (when available) blended with keyword.
+
+        Embeds the query, then ranks with cosine similarity plus keyword
+        overlap. If the embedding endpoint is off/unreachable the query vector
+        is ``None`` and this degrades to exactly the keyword path — retrieval
+        never fails because of embeddings.
+        """
+        query_vector = None
+        if self._embedding is not None and self._embedding.enabled:
+            query_vector = await self._embedding.embed(query)
+        return retrieve(
+            self._repository.list(),
+            query,
+            scopes=scopes,
+            limit=limit,
+            token_budget=token_budget,
+            query_vector=query_vector,
+            vectors=dict(self._repository.vectors()) if query_vector is not None else None,
+            semantic_weight=self._semantic_weight,
+            semantic_threshold=self._semantic_threshold,
+        )
+
+    async def embed_missing(self) -> int:
+        """Backfill vectors for memories that lack one; returns how many added.
+
+        Used on startup so existing memories (written before embeddings were
+        enabled) become semantically searchable without a manual migration.
+        """
+        if self._embedding is None or not self._embedding.enabled:
+            return 0
+        added = 0
+        for memory in self._repository.list():
+            if not memory.is_live() or self._repository.vector(memory.id) is not None:
+                continue
+            vector = await self._embedding.embed(memory.content)
+            if vector is not None:
+                self._repository.store_vector(memory.id, vector)
+                added += 1
+        return added
+
     def hydrate(self) -> None:
         self._repository.hydrate()
+        self._repository.hydrate_vectors()
 
 
 def memory_prompt(memories: Sequence[Memory]) -> str:

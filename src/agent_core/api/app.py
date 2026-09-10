@@ -48,6 +48,10 @@ def create_app(service: AgentCoreService | None = None) -> FastAPI:
         # delete-fix; best-effort, the API must come up regardless.
         with contextlib.suppress(Exception):
             await core.runtime.cleanup_orphan_checkpoints()
+        # Backfill embeddings for memories written before semantic retrieval was
+        # enabled; best-effort and never fatal (degrading to keyword is fine).
+        with contextlib.suppress(Exception):
+            await core.runtime.memories.embed_missing()
         try:
             yield
         finally:

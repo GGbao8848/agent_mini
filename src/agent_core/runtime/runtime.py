@@ -55,6 +55,7 @@ from agent_core.persistence.store import SqliteStore
 from agent_core.registries import AgentRegistry, ProjectRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.builder import AgentBuilder
 from agent_core.runtime.context import (
+    current_memory_block,
     current_model_override,
     current_query,
     current_run,
@@ -143,7 +144,7 @@ class AgentRuntime:
             usage_provider=self._live_usage,
             help_tool=make_help_tool(self.gate),
             checkpointer_provider=lambda: self.checkpointer,
-            memory_provider=self._memory_block,
+            memory_enabled=self.memories is not None,
         )
         self.executor = AgentExecutor(self.fanout)
         self._runs: dict[str, Run] = {}
@@ -201,17 +202,18 @@ class AgentRuntime:
         except RegistryError:
             return None
 
-    def _memory_block(self, query: str) -> str:
+    async def _memory_block(self, query: str) -> str:
         """System-prompt block of memories relevant to ``query`` (empty if none).
 
-        Retrieval, not wholesale injection: only the top-k entries that overlap
-        the request reach the prompt (MEM-005).
+        Hybrid retrieval (semantic + keyword) — only the top-k entries that
+        match the request reach the prompt (MEM-005). Async because the
+        semantic channel embeds the query.
         """
         if self.memories is None:
             return ""
         from agent_core.memory import memory_prompt
 
-        return memory_prompt(self.memories.retrieve(query))
+        return memory_prompt(await self.memories.aretrieve(query))
 
     # ---------------------------------------------------------------- queries
 
@@ -648,8 +650,15 @@ class AgentRuntime:
         collector = UsageCollector()
         self._collectors[run.id] = collector
         heartbeat = asyncio.create_task(self._heartbeat(run))
+        memory_token = None
         try:
             await self._ensure_checkpointer_ready()
+            # Retrieve relevant long-term memory before building the graph: the
+            # build is synchronous but semantic retrieval is async, so compute
+            # the block here and publish it via a context var.
+            if self.memories is not None:
+                block = await self._memory_block(str(run.metadata.get("input") or task.input))
+                memory_token = current_memory_block.set(block)
             graph = self.builder.build(spec)
             # Static context parts (tool schemas, skill manifests) for the
             # console's context breakdown; message tokens come from the
@@ -691,6 +700,8 @@ class AgentRuntime:
             current_task_id.reset(task_token)
             current_task_root.reset(root_token)
             current_query.reset(query_token)
+            if memory_token is not None:
+                current_memory_block.reset(memory_token)
             if model_token is not None:
                 current_model_override.reset(model_token)
         return run

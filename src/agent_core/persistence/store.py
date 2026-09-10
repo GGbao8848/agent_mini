@@ -28,7 +28,7 @@ from typing import Any
 from agent_core.errors.exceptions import ConfigurationError
 
 _SQLITE_PREFIX = "sqlite:///"
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _BUSY_TIMEOUT_MS = 15000
 
 _SCHEMA = """
@@ -66,6 +66,16 @@ _MIGRATIONS: dict[int, str] = {
 CREATE TABLE IF NOT EXISTS schedules (
     id TEXT PRIMARY KEY,
     data TEXT NOT NULL
+);
+""",
+    # Memory embeddings: kept out of the registry JSON (a 4096-dim float32
+    # vector would bloat every memory row); a derived index that can be
+    # rebuilt from the text if it is ever lost.
+    3: """
+CREATE TABLE IF NOT EXISTS memory_embeddings (
+    memory_id TEXT PRIMARY KEY,
+    dim INTEGER NOT NULL,
+    vector BLOB NOT NULL
 );
 """,
 }
@@ -250,3 +260,22 @@ class SqliteStore:
             "SELECT run_id, data FROM trace_events ORDER BY seq"
         ).fetchall()
         return [(run_id, data) for run_id, data in rows]
+
+    def save_embedding(self, memory_id: str, vector: bytes, dim: int) -> None:
+        """Persist a memory's float32 embedding (write-through, upsert)."""
+        self._write(
+            "INSERT INTO memory_embeddings (memory_id, dim, vector) VALUES (?, ?, ?) "
+            "ON CONFLICT(memory_id) DO UPDATE SET dim = excluded.dim, "
+            "vector = excluded.vector",
+            (memory_id, dim, vector),
+        )
+
+    def load_embeddings(self) -> list[tuple[str, int, bytes]]:
+        """``(memory_id, dim, vector)`` for every stored embedding."""
+        rows = self._conn.execute(
+            "SELECT memory_id, dim, vector FROM memory_embeddings"
+        ).fetchall()
+        return [(memory_id, dim, vector) for memory_id, dim, vector in rows]
+
+    def delete_embedding(self, memory_id: str) -> None:
+        self._write("DELETE FROM memory_embeddings WHERE memory_id = ?", (memory_id,))

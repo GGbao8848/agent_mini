@@ -25,6 +25,7 @@ from agent_core.config.settings import Settings, apply_proxy, get_settings
 from agent_core.domain.mcp import MCPServerStatus
 from agent_core.mcp.credentials import EnvCredentialResolver
 from agent_core.memory import MemoryRepository, MemoryService
+from agent_core.memory.embedding import EmbeddingClient
 from agent_core.mcp.manager import MCPManager
 from agent_core.observability.stream import EventStreamBroker
 from agent_core.observability.trace import InMemoryTracer
@@ -71,7 +72,21 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
 
     approvals = ApprovalManager(store)
     projects = ProjectRegistry(store)
-    memories = MemoryService(MemoryRepository(store))
+    # Semantic memory retrieval is optional: with no endpoint configured the
+    # service degrades to keyword scoring (see agent_core.memory).
+    embedding = EmbeddingClient(
+        base_url=resolved.memory_embedding_base_url,
+        model=resolved.memory_embedding_model,
+        api_key=resolved.memory_embedding_api_key,
+        timeout_seconds=resolved.memory_embedding_timeout_ms / 1000,
+        enabled=resolved.memory_embedding_enabled,
+    )
+    memories = MemoryService(
+        MemoryRepository(store),
+        embedding=embedding,
+        semantic_weight=resolved.memory_semantic_weight,
+        semantic_threshold=resolved.memory_semantic_threshold,
+    )
     memory_tracer = InMemoryTracer()
     tracer: InMemoryTracer | PersistingTracer = memory_tracer
     if store is not None:
