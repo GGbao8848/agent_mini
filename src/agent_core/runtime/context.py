@@ -82,6 +82,28 @@ def get_current_memory_block() -> str:
     return current_memory_block.get()
 
 
+current_task_state_block: ContextVar[str] = ContextVar(
+    "current_task_state_block", default=""
+)
+"""Pre-rendered task-progress block (R21) for the in-flight run.
+
+Filled by the runtime from the persisted :class:`TaskState` before the graph is
+built, read synchronously by the builder. Keeps the model's view of "where are
+we" anchored to the recorded state rather than its own recollection of history.
+"""
+
+
+def get_current_task_state_block() -> str:
+    """The task-state prompt block for the in-flight run (empty if none)."""
+    return current_task_state_block.get()
+
+
+def get_current_run() -> Run | None:
+    """The run executing in the current async context, or None outside a run."""
+    return current_run.get()
+
+
+
 def get_current_model_override() -> str | None:
     """The caller-pinned model spec for the in-flight run, if any."""
     return current_model_override.get()

@@ -9,7 +9,7 @@ application layer.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -27,6 +27,7 @@ from agent_core.domain.task import Run, Task, Turn
 from agent_core.domain.tool import ToolDefinition
 from agent_core.domain.trace import TraceEvent
 from agent_core.errors.exceptions import SkillError
+from agent_core.task_state.domain import TaskState
 
 if TYPE_CHECKING:
     from agent_core.config.model_config import CustomModel as CustomModelSpec
@@ -160,6 +161,98 @@ class TaskOut(BaseModel):
             pinned=task.pinned,
             has_unread=task.has_unread,
             metadata=task.metadata,
+        )
+
+
+class TaskStepOut(BaseModel):
+    id: str
+    description: str
+    status: str
+    tool: str | None = None
+    detail: str = ""
+
+
+class ActivityOut(BaseModel):
+    tool: str
+    count: int
+    failed: bool
+    detail: str = ""
+
+
+class ArtifactRefOut(BaseModel):
+    path: str
+    name: str = ""
+    run_id: str | None = None
+
+
+class TaskStateOut(BaseModel):
+    """Recorded progress of a conversation (R21), for the console / API."""
+
+    task_id: str
+    goal: str
+    status: str
+    steps: list[TaskStepOut]
+    decisions: list[str]
+    artifacts: list[ArtifactRefOut]
+    failures: list[str]
+    activity: list[ActivityOut]
+    current_step_id: str | None
+    next_action: str | None
+    run_count: int
+    plan_revision: int
+    updated_at: datetime
+    exists: bool = True
+    """False when nothing has been recorded yet (empty default shape)."""
+
+    @classmethod
+    def of(cls, state: TaskState | None, *, task_id: str) -> TaskStateOut:
+        if state is None:
+            return cls(
+                task_id=task_id,
+                goal="",
+                status="created",
+                steps=[],
+                decisions=[],
+                artifacts=[],
+                failures=[],
+                activity=[],
+                current_step_id=None,
+                next_action=None,
+                run_count=0,
+                plan_revision=0,
+                updated_at=datetime.now(UTC),
+                exists=False,
+            )
+        return cls(
+            task_id=state.task_id,
+            goal=state.goal,
+            status=state.status,
+            steps=[
+                TaskStepOut(
+                    id=s.id,
+                    description=s.description,
+                    status=s.status.value,
+                    tool=s.tool,
+                    detail=s.detail,
+                )
+                for s in state.steps
+            ],
+            decisions=list(state.decisions),
+            artifacts=[
+                ArtifactRefOut(path=a.path, name=a.name, run_id=a.run_id)
+                for a in state.artifacts
+            ],
+            failures=list(state.failures),
+            activity=[
+                ActivityOut(tool=a.tool, count=a.count, failed=a.failed, detail=a.detail)
+                for a in state.activity
+            ],
+            current_step_id=state.current_step_id,
+            next_action=state.next_action,
+            run_count=state.run_count,
+            plan_revision=state.plan_revision,
+            updated_at=state.updated_at,
+            exists=True,
         )
 
 

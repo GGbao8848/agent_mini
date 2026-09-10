@@ -25,6 +25,7 @@ from agent_core.api.schemas import (
     TaskCreateRequest,
     TaskMessageRequest,
     TaskOut,
+    TaskStateOut,
     TaskUpdateRequest,
 )
 from agent_core.config.settings import get_settings
@@ -115,6 +116,17 @@ def task_artifacts(task_id: str, service: ServiceDep) -> list[dict[str, Any]]:
     """
     service.get_task(task_id)  # fail fast with 404 for unknown conversations
     return service.task_artifacts(task_id)
+
+
+@router.get("/{task_id}/state", response_model=TaskStateOut)
+def task_state(task_id: str, service: ServiceDep) -> TaskStateOut:
+    """Recorded progress of a conversation (R21): plan, status, failures.
+
+    ``exists`` is False for a conversation that has produced no progress events
+    yet — the console shows nothing rather than an empty skeleton.
+    """
+    state = service.task_state(task_id)
+    return TaskStateOut.of(state, task_id=task_id)
 
 
 @router.get("/{task_id}/events")

@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from langchain_core.messages import HumanMessage, RemoveMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from pydantic import ValidationError
@@ -25,17 +27,12 @@ from agent_core.artifacts import (
     scan_task_artifacts,
     scan_workspace_artifacts,
 )
-from langchain_core.messages import HumanMessage, RemoveMessage
-
 from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
 from agent_core.domain.metrics import RunUsage
-from agent_core.memory.repository import MemoryRepository
-from agent_core.memory.service import MemoryService
-from agent_core.runtime.text import extract_text
 from agent_core.domain.task import Run, RunStatus, Task, make_title, new_id
-from agent_core.domain.trace import EventType
+from agent_core.domain.trace import EventType, TraceEvent
 from agent_core.errors.exceptions import (
     AgentError,
     ApprovalRejectedError,
@@ -43,6 +40,8 @@ from agent_core.errors.exceptions import (
     RunTimeoutError,
     StateError,
 )
+from agent_core.memory.repository import MemoryRepository
+from agent_core.memory.service import MemoryService
 from agent_core.observability.emitter import EventFanout
 from agent_core.observability.events import EventBus
 from agent_core.observability.trace import InMemoryTracer, Tracer
@@ -56,16 +55,18 @@ from agent_core.registries import AgentRegistry, ProjectRegistry, SkillRegistry,
 from agent_core.runtime.builder import AgentBuilder
 from agent_core.runtime.context import (
     current_memory_block,
-    current_skill_mounts,
     current_model_override,
     current_query,
     current_run,
+    current_skill_mounts,
     current_task_id,
     current_task_root,
+    current_task_state_block,
 )
 from agent_core.runtime.executor import AgentExecutor
 from agent_core.runtime.help_tool import make_help_tool
 from agent_core.runtime.model import ModelFactory
+from agent_core.runtime.text import extract_text
 from agent_core.runtime.tool_executor import ToolExecutor
 from agent_core.runtime.tooling import ToolFactory, make_gated_tool
 from agent_core.runtime.usage import UsageCollector
@@ -80,10 +81,28 @@ from agent_core.runtime.verification import (
 from agent_core.runtime.verification import (
     passed as verification_passed,
 )
+from agent_core.task_state.domain import TaskState
+from agent_core.task_state.service import TaskStateService
 
 if TYPE_CHECKING:
     # Import-time cycle: agent_core.eval pulls in orchestration → runtime.
     from agent_core.eval.judge import JudgeResult
+
+
+_TASK_STATE_EVENTS = frozenset(
+    {
+        EventType.RUN_STARTED,
+        EventType.RUN_STATUS_CHANGED,
+        EventType.RUN_FINISHED,
+        EventType.RUN_FAILED,
+        EventType.RUN_CANCELLED,
+        EventType.ACTION_PENDING,
+        EventType.PLAN_UPDATED,
+        EventType.TOOL_EXECUTED,
+        EventType.TOOL_FAILED,
+    }
+)
+"""Events the task-state reducer consumes (see :mod:`agent_core.task_state`)."""
 
 
 class AgentRuntime:
@@ -106,6 +125,7 @@ class AgentRuntime:
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         projects: ProjectRegistry | None = None,
         memories: MemoryService | None = None,
+        task_states: TaskStateService | None = None,
     ) -> None:
         self.agents = agents
         self.tools = tools
@@ -116,6 +136,8 @@ class AgentRuntime:
         # Always present: an in-memory service when no store-backed one is
         # injected, so callers never special-case a missing memory system.
         self.memories = memories if memories is not None else MemoryService(MemoryRepository())
+        # Task state (R21): event-derived progress, always present like memory.
+        self.task_states = task_states if task_states is not None else TaskStateService()
         self.tracer = tracer or InMemoryTracer()
         self.bus = bus or EventBus()
         self.fanout = EventFanout(self.tracer, self.bus)
@@ -153,6 +175,11 @@ class AgentRuntime:
         self._running: dict[str, asyncio.Task[Run]] = {}
         self._collectors: dict[str, UsageCollector] = {}
         self._store = store
+        # Fold the events that carry progress information into the task state
+        # (R21). Subscribing to a fixed set keeps the write volume proportional
+        # to real progress, not to heartbeat/thinking chatter.
+        for event_type in _TASK_STATE_EVENTS:
+            self.bus.subscribe(self._on_task_state_event, event_type)
 
     @property
     def checkpointer(self) -> BaseCheckpointSaver[Any]:
@@ -230,6 +257,20 @@ class AgentRuntime:
         from agent_core.memory import memory_prompt
 
         return memory_prompt(await self.memories.aretrieve(query))
+
+    def _on_task_state_event(self, event: TraceEvent) -> None:
+        """Bus listener: fold one progress event into the task state (R21)."""
+        try:
+            self.task_states.apply(event)
+        except Exception:
+            # State projection must never break the run that emitted the event.
+            logging.getLogger(__name__).exception(
+                "task-state reducer failed for %s", event.event_type.value
+            )
+
+    def task_state(self, task_id: str) -> TaskState | None:
+        """The recorded progress of a conversation, or None when none exists."""
+        return self.task_states.peek(task_id)
 
     # ---------------------------------------------------------------- queries
 
@@ -476,6 +517,7 @@ class AgentRuntime:
         self._tasks.pop(task_id, None)
         if self._store is not None:
             self._store.delete_task(task_id)
+        self.task_states.delete(task_id)
         if thread_id is not None:
             await self._ensure_checkpointer_ready()
             delete_thread = getattr(self.checkpointer, "adelete_thread", None)
@@ -550,6 +592,10 @@ class AgentRuntime:
                 run.finished_at = datetime.now(UTC)
                 self._save_run(run)
             self._runs[run.id] = run
+        # Task states (R21) outlive the runs they describe; restore them and
+        # repair any that a restart left claiming a live status.
+        self.task_states.hydrate()
+        self.task_states.reconcile(list(self._tasks.values()), list(self._runs.values()))
 
     # -------------------------------------------------------------- lifecycle
 
@@ -668,6 +714,7 @@ class AgentRuntime:
         heartbeat = asyncio.create_task(self._heartbeat(run))
         memory_token = None
         skills_token = None
+        task_state_token = None
         try:
             await self._ensure_checkpointer_ready()
             # Enabled skill sources, so run_code can mount the same read-only
@@ -680,6 +727,12 @@ class AgentRuntime:
             if self.memories is not None:
                 block = await self._memory_block(str(run.metadata.get("input") or task.input))
                 memory_token = current_memory_block.set(block)
+            # Explicit task progress (R21): the recorded plan/status/failures,
+            # so the model works from a state record instead of re-deriving
+            # "where were we" from the whole message history.
+            task_state_token = current_task_state_block.set(
+                self.task_states.prompt_block(run.task_id)
+            )
             graph = self.builder.build(spec)
             # Static context parts (tool schemas, skill manifests) for the
             # console's context breakdown; message tokens come from the
@@ -725,6 +778,8 @@ class AgentRuntime:
                 current_memory_block.reset(memory_token)
             if skills_token is not None:
                 current_skill_mounts.reset(skills_token)
+            if task_state_token is not None:
+                current_task_state_block.reset(task_state_token)
             if model_token is not None:
                 current_model_override.reset(model_token)
         return run
@@ -825,6 +880,9 @@ class AgentRuntime:
                 for record in merged.values()
             ]
             self._save_run(run)
+            # Mirror the produced files into the task state (R21): the model
+            # (and the console) then sees the deliverables alongside progress.
+            self.task_states.sync_artifacts(run.task_id, run.metadata["artifacts"])
 
     async def _self_verify(
         self,

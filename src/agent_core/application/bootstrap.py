@@ -22,15 +22,16 @@ from agent_core.builtins.memory import (
     make_recall_memories,
     make_remember,
 )
+from agent_core.builtins.plan import make_update_plan
 from agent_core.builtins.schedules import make_create_schedule
 from agent_core.builtins.skills import make_install_skill
 from agent_core.config.model_config import load_model_config
 from agent_core.config.settings import Settings, apply_proxy, get_settings
 from agent_core.domain.mcp import MCPServerStatus
 from agent_core.mcp.credentials import EnvCredentialResolver
+from agent_core.mcp.manager import MCPManager
 from agent_core.memory import MemoryRepository, MemoryService
 from agent_core.memory.embedding import EmbeddingClient
-from agent_core.mcp.manager import MCPManager
 from agent_core.observability.stream import EventStreamBroker
 from agent_core.observability.trace import InMemoryTracer
 from agent_core.permissions.approval import ApprovalManager
@@ -44,6 +45,7 @@ from agent_core.registries import (
     ToolRegistry,
 )
 from agent_core.runtime.runtime import AgentRuntime
+from agent_core.task_state import TaskStateRepository, TaskStateService
 
 
 def default_service(settings: Settings | None = None) -> AgentCoreService:
@@ -91,6 +93,7 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
         semantic_weight=resolved.memory_semantic_weight,
         semantic_threshold=resolved.memory_semantic_threshold,
     )
+    task_states = TaskStateService(TaskStateRepository(store))
     memory_tracer = InMemoryTracer()
     tracer: InMemoryTracer | PersistingTracer = memory_tracer
     if store is not None:
@@ -104,7 +107,7 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
 
     runtime = AgentRuntime(
         agents, tools, skills, tracer=tracer, approvals=approvals, store=store,
-        projects=projects, memories=memories,
+        projects=projects, memories=memories, task_states=task_states,
     )
     if store is not None:
         runtime.hydrate()
@@ -133,14 +136,15 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     if store is not None:
         schedules.restore()
     service.schedules = schedules
-    # Register service-bound tools (schedule + skill creation + memory) against
-    # the fully built service.
+    # Register service-bound tools (schedule + skill creation + memory + plan)
+    # against the fully built service.
     for definition, handler in (
         make_create_schedule(service),
         make_install_skill(service),
         make_remember(memories),
         make_recall_memories(memories),
         make_forget_memories(memories),
+        make_update_plan(runtime.fanout),
     ):
         try:
             tools.register(definition, handler)

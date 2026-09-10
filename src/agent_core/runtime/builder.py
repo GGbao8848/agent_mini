@@ -107,6 +107,12 @@ class AgentBuilder:
             from agent_core.memory.lesson import lesson_hint
 
             system_prompt += lesson_hint(query)
+        # Explicit task progress (R21): a compact record of the plan/status/
+        # failures so a long conversation does not have to be re-read to answer
+        # "where are we". Empty for a fresh, trivial task.
+        from agent_core.runtime.context import get_current_task_state_block
+
+        system_prompt = (system_prompt or "") + get_current_task_state_block()
         return create_deep_agent(
             model=self._model_factory(spec.model),
             tools=tools,
