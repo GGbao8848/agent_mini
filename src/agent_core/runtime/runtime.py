@@ -168,6 +168,27 @@ class AgentRuntime:
         collector = self._collectors.get(active.id)
         return collector.usage if collector else None
 
+    async def _heartbeat(self, run: Run) -> None:
+        """Emit a periodic liveness event while ``run`` executes.
+
+        A long, silent stretch (slow model inference, a big tool call) would
+        otherwise be indistinguishable from a stuck run. The console uses this
+        to keep the "已工作" timer honestly advancing.
+        """
+        interval = 15.0
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                elapsed = (datetime.now(UTC) - run.created_at).total_seconds() * 1000
+                self.fanout.emit(
+                    EventType.RUN_HEARTBEAT,
+                    run=run,
+                    agent_id=run.agent_id,
+                    metadata={"elapsed_ms": elapsed},
+                )
+        except asyncio.CancelledError:
+            return  # the run finished; nothing to report
+
     def _skill_allowed_tools(self, skill_id: str) -> list[str] | None:
         """A bound skill's allowed_tools, or ``None`` when the skill is unknown.
 
@@ -626,6 +647,7 @@ class AgentRuntime:
         )
         collector = UsageCollector()
         self._collectors[run.id] = collector
+        heartbeat = asyncio.create_task(self._heartbeat(run))
         try:
             await self._ensure_checkpointer_ready()
             graph = self.builder.build(spec)
@@ -661,6 +683,7 @@ class AgentRuntime:
         except AgentError as exc:
             self._finish_with_error(run, exc, RunStatus.FAILED)
         finally:
+            heartbeat.cancel()
             self._collect_artifacts(run)
             self._collectors.pop(run.id, None)
             self.loop_guard.forget_run(run.id)

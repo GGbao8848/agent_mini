@@ -36,6 +36,7 @@ class EventType(StrEnum):
     ACTION_REJECTED = "action_rejected"
     LOOP_DETECTED = "loop_detected"
     BUDGET_WARNING = "budget_warning"
+    RUN_HEARTBEAT = "run_heartbeat"
     RUN_STATUS_CHANGED = "run_status_changed"
 
 

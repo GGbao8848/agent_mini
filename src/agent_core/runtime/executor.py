@@ -71,16 +71,29 @@ class AgentExecutor:
                 # Same thread → LangGraph replays the stored conversation, so
                 # follow-up messages continue where the previous run stopped.
                 config["configurable"] = {"thread_id": thread_id}
-            state = await asyncio.wait_for(
-                graph.ainvoke(
-                    {"messages": [{"role": "user", "content": input_text}]},
-                    config=config,
-                ),
-                timeout=spec.limits.timeout_seconds,
-            )
+
+            async def _invoke() -> Any:
+                # A TimeoutError raised *inside* the graph (socket / HTTP /
+                # subprocess timeouts share the builtin class since 3.10) must
+                # not be mistaken for the run's own deadline; tag it so the
+                # wait_for clause below only ever catches its own timeout.
+                try:
+                    return await graph.ainvoke(
+                        {"messages": [{"role": "user", "content": input_text}]},
+                        config=config,
+                    )
+                except TimeoutError as exc:
+                    raise AgentExecutionError(
+                        f"A step inside the run timed out: {exc}",
+                        details={"run_id": run.id},
+                    ) from exc
+
+            state = await asyncio.wait_for(_invoke(), timeout=spec.limits.timeout_seconds)
         except asyncio.CancelledError:
             raise
         except TimeoutError as exc:
+            # Only asyncio.wait_for's own deadline reaches here; inner
+            # TimeoutErrors were wrapped as AgentExecutionError above.
             raise RunTimeoutError(run.id, spec.limits.timeout_seconds) from exc
         except AgentError:
             raise
