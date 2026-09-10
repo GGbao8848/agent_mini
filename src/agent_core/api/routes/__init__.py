@@ -10,6 +10,7 @@ from agent_core.api.routes import (
     dirs,
     events,
     mcp,
+    memories,
     model_config,
     projects,
     runs,
@@ -24,6 +25,7 @@ api_router.include_router(agents.router)
 api_router.include_router(skills.router)
 api_router.include_router(tools.router)
 api_router.include_router(mcp.router)
+api_router.include_router(memories.router)
 api_router.include_router(model_config.router)
 api_router.include_router(projects.router)
 api_router.include_router(attachments.router)

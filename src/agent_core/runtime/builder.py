@@ -48,6 +48,7 @@ class AgentBuilder:
         usage_provider: Callable[[], RunUsage | None] | None = None,
         help_tool: BaseTool | None = None,
         checkpointer_provider: Callable[[], Any] | None = None,
+        memory_provider: Callable[[str], str] | None = None,
     ) -> None:
         self._agents = agents
         self._tools = tools
@@ -58,6 +59,7 @@ class AgentBuilder:
         self._usage_provider = usage_provider
         self._help_tool = help_tool
         self._checkpointer_provider = checkpointer_provider
+        self._memory_provider = memory_provider
 
     def _default_model_factory(self, model_spec: str | None) -> BaseChatModel:
         from agent_core.runtime.context import get_current_model_override
@@ -91,6 +93,18 @@ class AgentBuilder:
         system_prompt = (system_prompt or "") + environment_note(
             current_task_dir(Path(settings.workspace_dir)), settings
         )
+        # Retrieved long-term memory: only the few entries relevant to this
+        # request (see agent_core.memory), never the whole store (MEM-005).
+        if self._memory_provider is not None:
+            from agent_core.runtime.context import get_current_query
+
+            query = get_current_query() or ""
+            system_prompt = (system_prompt or "") + self._memory_provider(query)
+            # Deterministic correction nudge (R11): only on turns that read like
+            # a correction, so ordinary turns pay nothing and record nothing.
+            from agent_core.memory.lesson import lesson_hint
+
+            system_prompt += lesson_hint(query)
         return create_deep_agent(
             model=self._model_factory(spec.model),
             tools=tools,

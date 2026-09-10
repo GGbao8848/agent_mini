@@ -17,12 +17,14 @@ from typing import Any
 from agent_core.application.scheduler import ScheduleManager
 from agent_core.application.service import AgentCoreService
 from agent_core.builtins import register_builtin_tools
+from agent_core.builtins.memory import make_remember
 from agent_core.builtins.schedules import make_create_schedule
 from agent_core.builtins.skills import make_install_skill
 from agent_core.config.model_config import load_model_config
 from agent_core.config.settings import Settings, apply_proxy, get_settings
 from agent_core.domain.mcp import MCPServerStatus
 from agent_core.mcp.credentials import EnvCredentialResolver
+from agent_core.memory import MemoryRepository, MemoryService
 from agent_core.mcp.manager import MCPManager
 from agent_core.observability.stream import EventStreamBroker
 from agent_core.observability.trace import InMemoryTracer
@@ -69,6 +71,7 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
 
     approvals = ApprovalManager(store)
     projects = ProjectRegistry(store)
+    memories = MemoryService(MemoryRepository(store))
     memory_tracer = InMemoryTracer()
     tracer: InMemoryTracer | PersistingTracer = memory_tracer
     if store is not None:
@@ -76,12 +79,13 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
             store, agents=agents, tools=tools, skills=skills, approvals=approvals,
             projects=projects,
         )
+        memories.hydrate()
         tracer = PersistingTracer(memory_tracer, store)
         tracer.restore()  # re-seed event history so run outputs stay queryable
 
     runtime = AgentRuntime(
         agents, tools, skills, tracer=tracer, approvals=approvals, store=store,
-        projects=projects,
+        projects=projects, memories=memories,
     )
     if store is not None:
         runtime.hydrate()
@@ -110,11 +114,12 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     if store is not None:
         schedules.restore()
     service.schedules = schedules
-    # Register service-bound tools (schedule + skill creation) against the
-    # fully built service.
+    # Register service-bound tools (schedule + skill creation + memory) against
+    # the fully built service.
     for definition, handler in (
         make_create_schedule(service),
         make_install_skill(service),
+        make_remember(memories),
     ):
         try:
             tools.register(definition, handler)

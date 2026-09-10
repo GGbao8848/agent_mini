@@ -14,17 +14,9 @@ import json
 
 from agent_core.domain.skill import SkillManifest
 from agent_core.domain.tool import ToolDefinition, ToolSource
+from agent_core.text.tokens import estimate_tokens
 
-
-def estimate_tokens(text: str) -> int:
-    """CJK-aware token heuristic: ~1 token per CJK char, ~1 per 4 ASCII chars.
-
-    Good enough for proportional display; never used for billing or gating.
-    """
-    if not text:
-        return 0
-    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff" or "\u3000" <= ch <= "\u303f")
-    return max(1, cjk + (len(text) - cjk) // 4)
+__all__ = ["estimate_tokens", "static_breakdown"]
 
 
 def _definition_text(definition: ToolDefinition) -> str:

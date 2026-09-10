@@ -31,6 +31,8 @@ from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
 from agent_core.domain.metrics import RunUsage
+from agent_core.memory.repository import MemoryRepository
+from agent_core.memory.service import MemoryService
 from agent_core.runtime.text import extract_text
 from agent_core.domain.task import Run, RunStatus, Task, make_title, new_id
 from agent_core.domain.trace import EventType
@@ -54,6 +56,7 @@ from agent_core.registries import AgentRegistry, ProjectRegistry, SkillRegistry,
 from agent_core.runtime.builder import AgentBuilder
 from agent_core.runtime.context import (
     current_model_override,
+    current_query,
     current_run,
     current_task_id,
     current_task_root,
@@ -100,6 +103,7 @@ class AgentRuntime:
         store: SqliteStore | None = None,
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         projects: ProjectRegistry | None = None,
+        memories: MemoryService | None = None,
     ) -> None:
         self.agents = agents
         self.tools = tools
@@ -107,6 +111,9 @@ class AgentRuntime:
         # `projects or default` would be wrong here: BaseRegistry defines
         # __len__, so an EMPTY registry is falsy and its store would be lost.
         self.projects = projects if projects is not None else ProjectRegistry()
+        # Always present: an in-memory service when no store-backed one is
+        # injected, so callers never special-case a missing memory system.
+        self.memories = memories if memories is not None else MemoryService(MemoryRepository())
         self.tracer = tracer or InMemoryTracer()
         self.bus = bus or EventBus()
         self.fanout = EventFanout(self.tracer, self.bus)
@@ -136,6 +143,7 @@ class AgentRuntime:
             usage_provider=self._live_usage,
             help_tool=make_help_tool(self.gate),
             checkpointer_provider=lambda: self.checkpointer,
+            memory_provider=self._memory_block,
         )
         self.executor = AgentExecutor(self.fanout)
         self._runs: dict[str, Run] = {}
@@ -171,6 +179,18 @@ class AgentRuntime:
             return self.skills.get(skill_id).allowed_tools
         except RegistryError:
             return None
+
+    def _memory_block(self, query: str) -> str:
+        """System-prompt block of memories relevant to ``query`` (empty if none).
+
+        Retrieval, not wholesale injection: only the top-k entries that overlap
+        the request reach the prompt (MEM-005).
+        """
+        if self.memories is None:
+            return ""
+        from agent_core.memory import memory_prompt
+
+        return memory_prompt(self.memories.retrieve(query))
 
     # ---------------------------------------------------------------- queries
 
@@ -597,6 +617,9 @@ class AgentRuntime:
         run_token = current_run.set(run)
         task_token = current_task_id.set(run.task_id)
         root_token = current_task_root.set(self.task_root(run.task_id))
+        query_token = current_query.set(
+            str(run.metadata.get("input") or task.input)
+        )
         override = run.metadata.get("model")
         model_token = (
             current_model_override.set(str(override)) if override else None
@@ -644,6 +667,7 @@ class AgentRuntime:
             current_run.reset(run_token)
             current_task_id.reset(task_token)
             current_task_root.reset(root_token)
+            current_query.reset(query_token)
             if model_token is not None:
                 current_model_override.reset(model_token)
         return run

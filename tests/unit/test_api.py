@@ -664,3 +664,30 @@ class TestTaskAttachments:
         assert response.status_code == 400
         assert "unsafe path" in str(response.json()).lower()
 
+
+
+class TestMemoryRoutes:
+    async def test_create_list_and_forget(self, client: Any) -> None:
+        created = await client.post(
+            "/v1/memories",
+            json={"content": "用户叫宋奎，在江苏北人工作。", "scope": "user", "type": "fact"},
+        )
+        assert created.status_code == 201
+        body = created.json()
+        assert body["scope"] == "user"
+        assert body["type"] == "fact"
+        assert body["active"] is True
+
+        listed = (await client.get("/v1/memories")).json()
+        assert any(m["id"] == body["id"] for m in listed)
+
+        deleted = await client.delete(f"/v1/memories/{body['id']}")
+        assert deleted.status_code == 200
+        assert (await client.get("/v1/memories")).json() == []
+
+    async def test_duplicate_content_refreshes_not_duplicates(self, client: Any) -> None:
+        payload = {"content": "用户偏好简洁回复。"}
+        await client.post("/v1/memories", json=payload)
+        await client.post("/v1/memories", json=payload)
+
+        assert len((await client.get("/v1/memories")).json()) == 1

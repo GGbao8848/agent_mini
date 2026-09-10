@@ -41,9 +41,23 @@ spec. Sub-agent invocations inherit it like the other context vars.
 """
 
 
+current_query: ContextVar[str | None] = ContextVar("current_query", default=None)
+"""The user input of the in-flight run, or None.
+
+Set by the runtime before building the graph so memory retrieval can score the
+long-term store against the actual request text and inject only the relevant
+entries.
+"""
+
+
 def get_current_model_override() -> str | None:
     """The caller-pinned model spec for the in-flight run, if any."""
     return current_model_override.get()
+
+
+def get_current_query() -> str | None:
+    """The user input driving the in-flight run, if any (memory retrieval)."""
+    return current_query.get()
 
 
 def get_current_task_id() -> str | None:
