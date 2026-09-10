@@ -13,6 +13,7 @@ import {
   type Artifact,
   type DirBrowse,
   type MCPServer,
+  type Memory,
   type ModelConfig,
   type ModelConfigUpdate,
   type ModelDiscover,
@@ -118,6 +119,35 @@ export function useSkills() {
     queryFn: () => api.get<Skill[]>("/v1/skills"),
     staleTime: Infinity,
   })
+}
+
+export function useMemories() {
+  return useQuery({
+    queryKey: ["memories"],
+    queryFn: () => api.get<Memory[]>("/v1/memories"),
+    staleTime: Infinity,
+  })
+}
+
+export function useMemoryActions() {
+  const queryClient = useQueryClient()
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["memories"] })
+  const add = useToastMutation<Memory, { content: string; scope?: string; type?: string }>({
+    mutationFn: (payload) => api.post<Memory>("/v1/memories", payload),
+    onSuccess: invalidate,
+  })
+  const update = useToastMutation<
+    Memory,
+    { id: string; content?: string; scope?: string; type?: string }
+  >({
+    mutationFn: ({ id, ...patch }) => api.patch<Memory>(`/v1/memories/${id}`, patch),
+    onSuccess: invalidate,
+  })
+  const remove = useToastMutation<Memory, string>({
+    mutationFn: (id) => api.del<Memory>(`/v1/memories/${id}`),
+    onSuccess: invalidate,
+  })
+  return { add, update, remove }
 }
 
 export function useMcpServers() {

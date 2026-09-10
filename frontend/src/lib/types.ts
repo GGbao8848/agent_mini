@@ -277,3 +277,18 @@ export interface ModelDiscover {
   models: string[]
   error?: string | null
 }
+
+export interface Memory {
+  id: string
+  scope: string
+  type: string
+  content: string
+  source: string
+  task_id: string | null
+  confidence: number
+  importance: number
+  active: boolean
+  superseded_by: string | null
+  created_at: string
+  updated_at: string
+}
