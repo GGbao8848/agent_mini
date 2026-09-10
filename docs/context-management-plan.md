@@ -155,7 +155,9 @@ memory↔runtime 循环导入。
    技能/失败事件）、空白思考框（模型吐 `\n\n` 分片新开空框）、SSE 未禁反代缓冲、
    产物契约字段生产恒缺失（`register_artifact` 无调用方，全靠目录扫描 → 改在
    `_collect_artifacts` 统一 `enrich_artifact` 补全）。
-8. **下一专项：长任务可观测性**（本次"PPT 任务像卡住"暴露）——运行时无心跳、
-   run 注册表进程内（重启丢运行态）。方向：进度/心跳事件、超时兜底、重启后非终态
-   run 恢复或明确标记失败。
+8. ~~**长任务可观测性**~~ ✅ `b006f35`：① `run_heartbeat` 事件（运行中每 15s 一次，
+   console 计时据此保持"活着"）；② 修 `asyncio.wait_for` 把图内层 `TimeoutError`
+   （socket/HTTP/子进程同属 builtin 类）误判为"整轮 5400s 超时"——生产 6 个 run
+   实际只跑几分钟却标 90 分钟超时；现在只有 wait_for 自身 deadline 映射为
+   `RunTimeoutError`，内层超时算单步失败。重启后非终态 run 已由 `hydrate` 标 FAILED。
 
