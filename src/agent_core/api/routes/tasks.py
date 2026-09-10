@@ -19,6 +19,7 @@ from sse_starlette import EventSourceResponse
 
 from agent_core.api.attachments import attachment_notes, mirror_attachments
 from agent_core.api.deps import ServiceDep
+from agent_core.api.routes.events import SSE_HEADERS
 from agent_core.api.schemas import (
     EventOut,
     TaskCreateRequest,
@@ -139,7 +140,7 @@ async def stream_task_events(task_id: str, service: ServiceDep) -> EventSourceRe
         finally:
             service.unsubscribe_events(stream)
 
-    return EventSourceResponse(generator())
+    return EventSourceResponse(generator(), headers=SSE_HEADERS)
 
 
 @router.patch("/{task_id}", response_model=TaskOut)

@@ -55,6 +55,7 @@ import {
   CopyIcon,
   FolderIcon,
   FolderOpenIcon,
+  BrainIcon,
   FolderPlusIcon,
   Loader2Icon,
   PencilIcon,
@@ -75,6 +76,7 @@ const data = {
   navMain: [
     { title: "新建任务", url: "#", icon: <PlusIcon /> },
     { title: "技能", url: "#", icon: <PuzzleIcon /> },
+    { title: "记忆", url: "#", icon: <BrainIcon /> },
     { title: "MCP", url: "#", icon: <PlugIcon /> },
     { title: "工具", url: "#", icon: <WrenchIcon /> },
     { title: "模型配置", url: "#", icon: <SettingsIcon /> },

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from agent_core.config.settings import get_settings
+from agent_core.domain.action import RiskLevel
 from agent_core.domain.skill import SkillManifest
 from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError, ToolError
@@ -126,6 +127,11 @@ def make_install_skill(service: AgentCoreService) -> tuple[ToolDefinition, Any]:
         name=INSTALL_SKILL_TOOL,
         description=_DESCRIPTION,
         source=ToolSource.INTERNAL,
+        # Publishing to the shared skill registry is a control-plane action:
+        # the agent may *propose* a skill, but a human must approve the
+        # registry change (runtime invariant I-04). HIGH risk routes every
+        # call through the approval queue instead of executing it directly.
+        risk_level=RiskLevel.HIGH,
         input_schema={
             "type": "object",
             "properties": {

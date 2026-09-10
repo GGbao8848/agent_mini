@@ -31,6 +31,8 @@ from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
 from agent_core.domain.metrics import RunUsage
+from agent_core.memory.repository import MemoryRepository
+from agent_core.memory.service import MemoryService
 from agent_core.runtime.text import extract_text
 from agent_core.domain.task import Run, RunStatus, Task, make_title, new_id
 from agent_core.domain.trace import EventType
@@ -54,6 +56,7 @@ from agent_core.registries import AgentRegistry, ProjectRegistry, SkillRegistry,
 from agent_core.runtime.builder import AgentBuilder
 from agent_core.runtime.context import (
     current_model_override,
+    current_query,
     current_run,
     current_task_id,
     current_task_root,
@@ -100,6 +103,7 @@ class AgentRuntime:
         store: SqliteStore | None = None,
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         projects: ProjectRegistry | None = None,
+        memories: MemoryService | None = None,
     ) -> None:
         self.agents = agents
         self.tools = tools
@@ -107,10 +111,15 @@ class AgentRuntime:
         # `projects or default` would be wrong here: BaseRegistry defines
         # __len__, so an EMPTY registry is falsy and its store would be lost.
         self.projects = projects if projects is not None else ProjectRegistry()
+        # Always present: an in-memory service when no store-backed one is
+        # injected, so callers never special-case a missing memory system.
+        self.memories = memories if memories is not None else MemoryService(MemoryRepository())
         self.tracer = tracer or InMemoryTracer()
         self.bus = bus or EventBus()
         self.fanout = EventFanout(self.tracer, self.bus)
-        self.policy = policy or ActionPolicy()
+        # Skill capability binding: the policy resolves each bound skill's
+        # allowed_tools so the gate can deny out-of-scope tool calls (I-11).
+        self.policy = policy or ActionPolicy(skill_allowed_tools=self._skill_allowed_tools)
         self.approvals = approvals or ApprovalManager()
         self.loop_guard = LoopGuard()
         self.tool_executor = ToolExecutor()
@@ -134,6 +143,7 @@ class AgentRuntime:
             usage_provider=self._live_usage,
             help_tool=make_help_tool(self.gate),
             checkpointer_provider=lambda: self.checkpointer,
+            memory_provider=self._memory_block,
         )
         self.executor = AgentExecutor(self.fanout)
         self._runs: dict[str, Run] = {}
@@ -157,6 +167,30 @@ class AgentRuntime:
             return None
         collector = self._collectors.get(active.id)
         return collector.usage if collector else None
+
+    def _skill_allowed_tools(self, skill_id: str) -> list[str] | None:
+        """A bound skill's allowed_tools, or ``None`` when the skill is unknown.
+
+        Used by :class:`ActionPolicy` to enforce skill capability binding; an
+        unknown skill returns ``None`` (unrestricted) so a stale binding never
+        silently locks an agent out of all of its tools.
+        """
+        try:
+            return self.skills.get(skill_id).allowed_tools
+        except RegistryError:
+            return None
+
+    def _memory_block(self, query: str) -> str:
+        """System-prompt block of memories relevant to ``query`` (empty if none).
+
+        Retrieval, not wholesale injection: only the top-k entries that overlap
+        the request reach the prompt (MEM-005).
+        """
+        if self.memories is None:
+            return ""
+        from agent_core.memory import memory_prompt
+
+        return memory_prompt(self.memories.retrieve(query))
 
     # ---------------------------------------------------------------- queries
 
@@ -583,6 +617,9 @@ class AgentRuntime:
         run_token = current_run.set(run)
         task_token = current_task_id.set(run.task_id)
         root_token = current_task_root.set(self.task_root(run.task_id))
+        query_token = current_query.set(
+            str(run.metadata.get("input") or task.input)
+        )
         override = run.metadata.get("model")
         model_token = (
             current_model_override.set(str(override)) if override else None
@@ -630,6 +667,7 @@ class AgentRuntime:
             current_run.reset(run_token)
             current_task_id.reset(task_token)
             current_task_root.reset(root_token)
+            current_query.reset(query_token)
             if model_token is not None:
                 current_model_override.reset(model_token)
         return run
@@ -708,18 +746,27 @@ class AgentRuntime:
         }
         root = self.task_root(run.task_id)
         if root is not None:
-            merged.update(
-                {
-                    str(a["path"]): a
-                    for a in scan_workspace_artifacts(root, since_ts=since)
-                }
-            )
+            # Explicit claims take precedence: the scan only fills paths that
+            # were not claimed, so the artifact contract (sha256/mime/…) is
+            # never clobbered by a bare directory listing (I-06).
+            for a in scan_workspace_artifacts(root, since_ts=since):
+                merged.setdefault(str(a["path"]), a)
         else:
             for a in scan_task_artifacts(workspace, run.task_id, since_ts=since):
                 merged.setdefault(str(a["path"]), a)
         clear_claims(run.task_id)
         if merged:
-            run.metadata["artifacts"] = list(merged.values())
+            # Every artifact gets the explicit contract (id/mime/sha256) even
+            # when it was discovered by the directory scan, not an explicit
+            # claim — nothing in production calls register_artifact, so this is
+            # the only place the manifest can be completed (ART-001).
+            from agent_core.artifacts import enrich_artifact
+
+            base = root or (workspace / "tasks" / run.task_id)
+            run.metadata["artifacts"] = [
+                enrich_artifact(record, base, task_id=run.task_id, run_id=run.id)
+                for record in merged.values()
+            ]
             self._save_run(run)
 
     async def _self_verify(

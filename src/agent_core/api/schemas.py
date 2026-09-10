@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent_core.domain.action import ApprovalRequest
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
+from agent_core.domain.memory import Memory
 from agent_core.domain.metrics import RunUsage
 from agent_core.domain.project import Project
 from agent_core.domain.schedule import Schedule, ScheduleType
@@ -628,3 +629,38 @@ class ProjectOut(BaseModel):
             created_at=project.created_at,
             metadata=project.metadata,
         )
+
+
+class MemoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    scope: str
+    type: str
+    content: str
+    source: str
+    task_id: str | None
+    confidence: float
+    importance: int
+    active: bool
+    superseded_by: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def of(cls, memory: Memory) -> MemoryOut:
+        return cls.model_validate(memory)
+
+
+class MemoryCreateRequest(BaseModel):
+    content: str = Field(min_length=1)
+    scope: str = "user"
+    type: str = "fact"
+
+
+class MemoryUpdateRequest(BaseModel):
+    """Partial edit; omitted fields are left unchanged."""
+
+    content: str | None = None
+    scope: str | None = None
+    type: str | None = None

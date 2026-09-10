@@ -7,7 +7,6 @@ DeepAgents keeps owning the delegation loop, skills and HITL machinery.
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -28,6 +27,7 @@ from agent_core.runtime.middleware import build_middleware
 from agent_core.runtime.model import ModelFactory, build_model
 from agent_core.runtime.paths import current_task_dir, environment_note
 from agent_core.runtime.tooling import ToolFactory, make_direct_tool
+from agent_core.workspace import WorkspaceLayout, filesystem_permissions
 
 CompiledGraph = CompiledStateGraph[Any, Any, Any, Any]
 """Fully parameterized alias; concrete state types are DeepAgents internals."""
@@ -48,6 +48,7 @@ class AgentBuilder:
         usage_provider: Callable[[], RunUsage | None] | None = None,
         help_tool: BaseTool | None = None,
         checkpointer_provider: Callable[[], Any] | None = None,
+        memory_provider: Callable[[str], str] | None = None,
     ) -> None:
         self._agents = agents
         self._tools = tools
@@ -58,6 +59,7 @@ class AgentBuilder:
         self._usage_provider = usage_provider
         self._help_tool = help_tool
         self._checkpointer_provider = checkpointer_provider
+        self._memory_provider = memory_provider
 
     def _default_model_factory(self, model_spec: str | None) -> BaseChatModel:
         from agent_core.runtime.context import get_current_model_override
@@ -91,6 +93,18 @@ class AgentBuilder:
         system_prompt = (system_prompt or "") + environment_note(
             current_task_dir(Path(settings.workspace_dir)), settings
         )
+        # Retrieved long-term memory: only the few entries relevant to this
+        # request (see agent_core.memory), never the whole store (MEM-005).
+        if self._memory_provider is not None:
+            from agent_core.runtime.context import get_current_query
+
+            query = get_current_query() or ""
+            system_prompt = (system_prompt or "") + self._memory_provider(query)
+            # Deterministic correction nudge (R11): only on turns that read like
+            # a correction, so ordinary turns pay nothing and record nothing.
+            from agent_core.memory.lesson import lesson_hint
+
+            system_prompt += lesson_hint(query)
         return create_deep_agent(
             model=self._model_factory(spec.model),
             tools=tools,
@@ -98,6 +112,9 @@ class AgentBuilder:
             subagents=[self._resolve_subagent(ref, parent_id=spec.id) for ref in spec.subagents]
             or None,
             middleware=build_middleware(spec, self._model_factory, self._usage_provider),
+            # Read-only mounts and write-path rules: inputs/skills are immutable
+            # to the agent (runtime invariant I-01/I-02).
+            permissions=filesystem_permissions(),
             # Resolved lazily: build() runs inside a loop, construction may not.
             checkpointer=self._checkpointer_provider() if self._checkpointer_provider else None,
             name=spec.name,
@@ -132,52 +149,42 @@ class AgentBuilder:
         ]
 
     def _backend_kwargs(self, spec: AgentSpec) -> dict[str, Any]:
-        """Root the harness file tools on the workspace the task writes into.
+        """Build the agent's filesystem backend and skill mount.
 
-        With a workspace the agent's ``write_file``/``read_file``/... land on
-        actual disk (contained by FilesystemBackend), which is what makes
-        ``run_code``-built artifacts (pptx, sites, images) possible. When a
-        task is executing (the ``current_task_id`` context var is set — build
-        runs inside the run), the backend is rooted at the task's private
-        directory ``workspace/tasks/<task_id>/`` so every task's outputs stay
-        isolated; skills are staged *inside that same directory* (DeepAgents
-        serves skills and file tools from ONE backend, and skill source paths
-        resolve relative to the backend root).
+        The agent gets a *controlled* working environment, not the raw task
+        directory: the task root is laid out as ``inputs/`` (read-only),
+        ``workspace/``, ``outputs/`` and ``tmp/`` (writable) — see
+        :mod:`agent_core.workspace`. Skills are **not** copied in: each enabled
+        skill is mounted read-only at ``/skills/<id>`` through a
+        :class:`CompositeBackend` route straight to its registry source, so the
+        agent can read skill material but the source on disk is never mutated
+        (invariants I-02/I-03).
         """
+        from deepagents.backends import CompositeBackend
+
+        from agent_core.workspace.backend import BoundaryBackend
+
         settings = self._settings or get_settings()
         workspace = Path(settings.workspace_dir)
-        # Task-bound root: the conversation's project directory when bound,
-        # otherwise the anonymous workspace/tasks/<task_id>/ folder.
         backend_root = current_task_dir(workspace)
-        backend = FilesystemBackend(root_dir=backend_root)
-        skill_source = self._stage_skills(backend_root, settings)
-        if skill_source is not None:
-            return {"skills": [skill_source], "backend": backend}
-        return {"backend": backend}
-
-    def _stage_skills(self, stage_root: Path, settings: Settings) -> str | None:
-        """Copy every registered skill into ``stage_root``; return their source.
-
-        Skills are a shared pool: anything registered in the SkillRegistry is
-        loaded for every agent. The staged copy lives under the *same* root the
-        file backend uses (``stage_root/.skills/``), so DeepAgents can find it
-        relative to the backend. ``.skills/`` is wiped and rebuilt on every
-        build so the staged copy always matches the registry.
-        """
-        manifests = [m for m in self._skills.list() if m.enabled]
-        if not manifests:
-            return None
-        staged = stage_root / ".skills"
-        if staged.exists():
-            shutil.rmtree(staged)
-        for manifest in manifests:
+        WorkspaceLayout.ensure(backend_root)
+        backend: Any = FilesystemBackend(root_dir=backend_root)
+        routes: dict[str, Any] = {}
+        for manifest in self._skills.list():
+            if not manifest.enabled:
+                continue
             source = self._resolve_skill_path(manifest.id)
-            shutil.copytree(
-                source,
-                staged / manifest.id,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            routes[f"/skills/{manifest.id}/"] = FilesystemBackend(
+                root_dir=source, virtual_mode=True
             )
-        return ".skills"
+        if routes:
+            backend = CompositeBackend(default=backend, routes=routes)
+        # Data-layer enforcement of the read-only mounts (I-01/I-02): the
+        # middleware checks the tool wrappers, this also guards direct calls.
+        backend = BoundaryBackend(backend)
+        if routes:
+            return {"skills": ["/skills/"], "backend": backend}
+        return {"backend": backend}
 
     def _resolve_tool(self, name: str) -> BaseTool:
         definition = self._tools.get(name)

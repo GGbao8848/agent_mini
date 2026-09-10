@@ -107,6 +107,11 @@ def register_artifact(
     in-memory only — it is persisted when the run finishes (the runtime folds
     all claims into ``run.metadata["artifacts"]``). ``limit`` is a soft cap so
     a runaway producer cannot bloat the manifest.
+
+    The record carries the explicit artifact contract (guide Phase R8): a
+    stable ``artifact_id``, ``path``, ``size``, ``mime_type`` and a content
+    ``sha256``, so a download can be verified against the manifest instead of
+    trusting a directory scan.
     """
     root = (workspace / _TASKS_DIR_NAME / task_id).resolve()
     resolved = path.resolve()
@@ -120,13 +125,56 @@ def register_artifact(
         return
     if len(claims) >= limit:
         return
+    stat = resolved.stat()
     claims.append(
         {
+            "artifact_id": f"{task_id}:{rel}",
             "path": rel,
-            "size": resolved.stat().st_size,
-            "mtime": _iso_mtime(resolved.stat().st_mtime),
+            "size": stat.st_size,
+            "mtime": _iso_mtime(stat.st_mtime),
+            "mime_type": guess_media_type(resolved),
+            "sha256": _sha256(resolved),
         }
     )
+
+
+def _sha256(path: Path) -> str:
+    """Streaming content hash of ``path`` (empty string when unreadable)."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            while chunk := handle.read(65536):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
+def enrich_artifact(
+    record: dict[str, Any], root: Path, *, task_id: str, run_id: str | None = None
+) -> dict[str, Any]:
+    """Complete an artifact record so it satisfies the explicit contract (R8).
+
+    Directory scans produce only ``{path,size,mtime}``; nothing in production
+    calls :func:`register_artifact`, so every artifact used to reach the console
+    without an id/mime/hash. This fills the missing fields in place from the
+    on-disk file, giving every artifact the same contract regardless of how it
+    was discovered.
+    """
+    record.setdefault("task_id", task_id)
+    if run_id is not None:
+        record.setdefault("run_id", run_id)
+    path = root / str(record["path"])
+    if not path.is_file():
+        return record
+    stat = path.stat()
+    record.setdefault("artifact_id", f"{task_id}:{record['path']}")
+    record.setdefault("size", stat.st_size)
+    record.setdefault("mime_type", guess_media_type(path))
+    record.setdefault("sha256", _sha256(path))
+    return record
 
 
 def claimed_artifacts(task_id: str) -> list[dict[str, Any]]:
