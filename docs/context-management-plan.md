@@ -260,6 +260,24 @@ Context + State + Capabilities + Execution Policy + Persistence + Recovery + Obs
 **运维（本次）**：`.env` 不再导出代理（`AGENT_CORE_PROXY_URL` 注释掉）——代理改由
 任务按需显式使用 `http://10.10.10.214:7890`（已存为 project 记忆）；sandbox 保持 host。
 
+**回归修复：host 模式又把 skill 说没了（`69778c2`）**：用户反映"又找不到 skill 了"。
+真实 `创建一个ppt` 任务里 agent 自述"txt2img 技能在当前环境也未挂载"，探针确认
+`ls /skills` 在宿主机上失败——但 skill 注册表里 txt2img 是 enabled、路径也在磁盘上。
+根因是 `environment_note` **写死了"技能挂载在 /skills/<id>"**：这句只在 podman 下成立
+（`build_sandbox_command` 把每个源挂到 `/skills/<id>`），host 模式 `run_code` 就是宿主
+shell，根本没有 `/skills`——提示词在对模型说谎。**与上一轮 skill-in-sandbox 回归同型
+镜像**：podman 专用修法被无条件下沉到提示词。
+
+修：`environment_note(root, settings, skill_mounts)` 按后端渲染 skill 位置——podman 给
+`/skills/<id>`（并列可用 id），host 给**磁盘真实源目录**并显式声明"没有 /skills 挂载点"，
+无技能则不出这一段；builder 解析 `(skill_id, source_dir)` 传入。真实复验：询问路径 → 正确
+答出 `.skills-upload/txt2img/scripts/txt2img.py` 且 stat 存在；生成任务 → 产出
+`outputs/skill_check.png` 180887B 有效 PNG。
+
+**教训（第三次同型）**：凡"某路径在哪"的断言，必须按**执行后端**分支；把某后端的布局
+写成全局事实，另一个后端上就会变成谎言。改路径相关文案时要问："这句话在 host 下也成立吗？"
+
+
 **Backlog（R25/R26 及剩余）**：① 6 个固定 Scenario ×5 重复性验收；② Release Gate
 报告（`release-gate-<version>.md`）；③ podman 下 `--cap-drop`/`--security-opt`/只读
 根文件系统；④ 把能力集写入每个 Run 记录（审计/回放）；⑤ MCP schema 的按需加载
