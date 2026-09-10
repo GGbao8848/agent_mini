@@ -312,3 +312,13 @@ shell，根本没有 `/skills`——提示词在对模型说谎。**与上一轮
 根文件系统；④ 把能力集写入每个 Run 记录（审计/回放）；⑤ MCP schema 的按需加载
 （当前最大固定上下文成本）。
 
+
+**回归修复：技能清单根本没进 prompt（`50cfdce`）**：做工具分层时顺带发现——框架的
+skill 发现会**先列父目录 `/skills/`** 再读每个 `/skills/<id>/SKILL.md`，但
+`CompositeBackend` 只路由 `/skills/<id>/`（带斜杠），裸父目录无路由 → 落到任务根
+→ `path_not_found`。DeepAgents 只当 warning 吞掉并继续，于是 `skills_metadata`
+恒为空，**所有技能 manifest 从未进入系统提示**；agent 之所以还"知道"有技能，只是
+因为 `runtime/paths.py` 在环境说明里点了名——框架自己的发现逻辑一直是死的。
+修：`workspace/skills_index.py` 的 `SkillsIndexBackend` 只回答那一次父目录列举
+（不复制、不读文件，I-03 不破），其余一律转交 composite。复验：发现返回全部 4 个
+技能、零错误；真实任务里模型**不读文件**就答出了完整技能清单与 txt2img 用途。
