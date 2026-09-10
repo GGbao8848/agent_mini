@@ -68,6 +68,23 @@ class Settings(BaseSettings):
     # for a console exposed on the LAN. Unset means open access.
     console_token: str | None = None
 
+    # Long-term memory semantic retrieval (ported from aimemory): an
+    # OpenAI-compatible /v1/embeddings endpoint. When disabled or unreachable
+    # retrieval gracefully falls back to keyword scoring — never a hard
+    # dependency.
+    memory_embedding_enabled: bool = False
+    memory_embedding_base_url: str | None = None
+    memory_embedding_model: str | None = None
+    memory_embedding_api_key: str | None = None
+    memory_embedding_timeout_ms: int = 30000
+    # Blend weight for cosine similarity vs keyword overlap in hybrid ranking
+    # (0.7 = semantic-leaning, keyword still contributes).
+    memory_semantic_weight: float = 0.7
+    # Minimum cosine to count as a semantic hit; below it an entry only counts
+    # if it also matches by keyword. Qwen3-Embedding scores unrelated text
+    # around 0.4-0.5, so this gates paraphrase-only noise.
+    memory_semantic_threshold: float = 0.55
+
     # Outbound HTTP proxy for model providers / MCP (e.g. http://127.0.0.1:7890).
     # Applied to the standard HTTP_PROXY / HTTPS_PROXY env vars so every HTTP
     # client in the process (OpenAI SDK, langchain, MCP) picks it up.

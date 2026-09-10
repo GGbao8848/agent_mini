@@ -50,6 +50,20 @@ entries.
 """
 
 
+current_memory_block: ContextVar[str] = ContextVar("current_memory_block", default="")
+"""Pre-rendered long-term-memory system-prompt block for the in-flight run.
+
+Computed asynchronously by the runtime (hybrid semantic+keyword retrieval)
+before the graph is built, then read synchronously by the builder — the
+builder cannot await, and retrieval needs to.
+"""
+
+
+def get_current_memory_block() -> str:
+    """The retrieved-memory prompt block for the in-flight run (empty if none)."""
+    return current_memory_block.get()
+
+
 def get_current_model_override() -> str | None:
     """The caller-pinned model spec for the in-flight run, if any."""
     return current_model_override.get()
