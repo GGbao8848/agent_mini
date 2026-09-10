@@ -31,6 +31,13 @@ def _sse(event: Any) -> dict[str, str]:
     return {"event": event.event_type.value, "data": EventOut.of(event).model_dump_json()}
 
 
+# Reverse proxies (nginx et al.) buffer proxied responses by default, which
+# makes SSE arrive in bursts — the console's thinking/tool chain then looks
+# stalled or empty even though the run is emitting fine. This header turns
+# buffering off for the stream; it is ignored by servers that don't use it.
+SSE_HEADERS = {"X-Accel-Buffering": "no", "Cache-Control": "no-cache"}
+
+
 @router.get("/runs/{run_id}/events")
 async def stream_run_events(run_id: str, service: ServiceDep) -> EventSourceResponse:
     service.get_run(run_id)  # fail fast with 404 before opening the stream
@@ -46,7 +53,7 @@ async def stream_run_events(run_id: str, service: ServiceDep) -> EventSourceResp
         finally:
             service.unsubscribe_events(stream)
 
-    return EventSourceResponse(generator())
+    return EventSourceResponse(generator(), headers=SSE_HEADERS)
 
 
 @router.get("/events")
@@ -59,4 +66,4 @@ async def stream_all_events(service: ServiceDep) -> EventSourceResponse:
         finally:
             service.unsubscribe_events(stream)
 
-    return EventSourceResponse(generator())
+    return EventSourceResponse(generator(), headers=SSE_HEADERS)
