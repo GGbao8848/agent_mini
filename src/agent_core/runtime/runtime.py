@@ -722,12 +722,11 @@ class AgentRuntime:
         }
         root = self.task_root(run.task_id)
         if root is not None:
-            merged.update(
-                {
-                    str(a["path"]): a
-                    for a in scan_workspace_artifacts(root, since_ts=since)
-                }
-            )
+            # Explicit claims take precedence: the scan only fills paths that
+            # were not claimed, so the artifact contract (sha256/mime/…) is
+            # never clobbered by a bare directory listing (I-06).
+            for a in scan_workspace_artifacts(root, since_ts=since):
+                merged.setdefault(str(a["path"]), a)
         else:
             for a in scan_task_artifacts(workspace, run.task_id, since_ts=since):
                 merged.setdefault(str(a["path"]), a)
