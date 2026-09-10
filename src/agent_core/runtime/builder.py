@@ -231,6 +231,7 @@ class AgentBuilder:
         from deepagents.backends import CompositeBackend
 
         from agent_core.workspace.backend import BoundaryBackend
+        from agent_core.workspace.skills_index import SkillsIndexBackend
 
         settings = self._settings or get_settings()
         workspace = Path(settings.workspace_dir)
@@ -238,6 +239,7 @@ class AgentBuilder:
         WorkspaceLayout.ensure(backend_root)
         backend: Any = FilesystemBackend(root_dir=backend_root)
         routes: dict[str, Any] = {}
+        skill_ids: list[str] = []
         for manifest in self._skills.list():
             if not manifest.enabled:
                 continue
@@ -245,8 +247,17 @@ class AgentBuilder:
             routes[f"/skills/{manifest.id}/"] = FilesystemBackend(
                 root_dir=source, virtual_mode=True
             )
+            skill_ids.append(manifest.id)
         if routes:
-            backend = CompositeBackend(default=backend, routes=routes)
+            # The parent /skills/ must be listable for the framework's skill
+            # discovery, which lists it before reading each /skills/<id>/SKILL.md.
+            # CompositeBackend routes by longest prefix, so the bare parent has
+            # no route and would fall through to the task root; the index
+            # answers exactly that one listing (see workspace.skills_index).
+            backend = SkillsIndexBackend(
+                skill_ids,
+                fallback=CompositeBackend(default=backend, routes=routes),
+            )
         # Data-layer enforcement of the read-only mounts (I-01/I-02): the
         # middleware checks the tool wrappers, this also guards direct calls.
         backend = BoundaryBackend(backend)
