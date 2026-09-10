@@ -48,19 +48,46 @@ def _definition_text(definition: ToolDefinition) -> str:
     )
 
 
+def _stub_text(definition: ToolDefinition) -> str:
+    """The cheap stand-in shape a tiered cold tool is advertised as.
+
+    Mirrors :meth:`agent_core.runtime.tool_tiering.ToolTieringMiddleware._stub`
+    (name, first-sentence summary, permissive args) so the accounting matches
+    what is actually sent.
+    """
+    from agent_core.runtime.tool_tiering import _summary
+
+    return json.dumps(
+        {
+            "name": definition.name,
+            "description": _summary(definition.description or "", 160)
+            + "（调用后将加载完整参数说明）",
+        },
+        ensure_ascii=False,
+    )
+
+
 def static_breakdown(
-    tools: list[ToolDefinition], skills: list[SkillManifest]
+    tools: list[ToolDefinition],
+    skills: list[SkillManifest],
+    *,
+    cold_names: set[str] | None = None,
 ) -> dict[str, int]:
     """Estimate the per-build (static) prompt parts: tool schemas and skills.
 
     Tool schemas enter every request; skill *manifests* (name + description)
     are what the harness lists in the prompt — full skill bodies are read
     from disk on demand and don't sit in the context.
+
+    ``cold_names`` are tools advertised as stubs this run (R20 §10 tiering);
+    they are counted at their stub cost, not their full schema.
     """
+    cold = cold_names or set()
     builtin = 0
     mcp = 0
     for definition in tools:
-        cost = estimate_tokens(_definition_text(definition))
+        text = _stub_text(definition) if definition.name in cold else _definition_text(definition)
+        cost = estimate_tokens(text)
         if definition.source == ToolSource.MCP:
             mcp += cost
         else:

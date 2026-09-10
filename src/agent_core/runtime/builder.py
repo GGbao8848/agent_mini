@@ -141,13 +141,24 @@ class AgentBuilder:
             lesson=lesson_text,
         )
         current_context.set(context)
+        # Cold tools are advertised as cheap stubs (full schema on first use),
+        # so the fixed per-request tool cost does not scale with tool count.
+        from agent_core.runtime.tool_tiering import cold_tool_names
+
+        cold = cold_tool_names(
+            [self._tools.get(name) for name in self._agent_tool_names(spec)],
+            enabled=settings.tool_tiering_enabled,
+            explicit=settings.tool_tiering_cold_tools,
+        )
         return create_deep_agent(
             model=self._model_factory(spec.model),
             tools=tools,
             system_prompt=context.prompt,
             subagents=[self._resolve_subagent(ref, parent_id=spec.id) for ref in spec.subagents]
             or None,
-            middleware=build_middleware(spec, self._model_factory, self._usage_provider),
+            middleware=build_middleware(
+                spec, self._model_factory, self._usage_provider, cold_tools=cold
+            ),
             # Read-only mounts and write-path rules: inputs/skills are immutable
             # to the agent (runtime invariant I-01/I-02).
             permissions=filesystem_permissions(),
@@ -167,10 +178,19 @@ class AgentBuilder:
         skill manifests (see :mod:`agent_core.runtime.context_breakdown`).
         Message-history tokens are dynamic and counted per model call."""
         from agent_core.runtime.context_breakdown import static_breakdown
+        from agent_core.runtime.tool_tiering import cold_tool_names
 
+        settings = self._settings or get_settings()
         names = self._agent_tool_names(spec)
         definitions = [self._tools.get(name) for name in names]
-        return static_breakdown(definitions, self._skills.list())
+        # Cold tools are advertised as stubs, so count them as such — otherwise
+        # the breakdown would report a cost that is not actually sent.
+        cold = cold_tool_names(
+            definitions,
+            enabled=settings.tool_tiering_enabled,
+            explicit=settings.tool_tiering_cold_tools,
+        )
+        return static_breakdown(definitions, self._skills.list(), cold_names=cold)
 
     def _skill_mounts(self) -> list[tuple[str, Path]]:
         """Enabled ``(skill_id, source_dir)`` pairs for the environment note.

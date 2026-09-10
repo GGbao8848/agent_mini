@@ -109,6 +109,15 @@ class Settings(BaseSettings):
     tool_description_max_chars: int = 500
     tool_param_description_max_chars: int = 400
 
+    # Tool tiering (R20 §10): advertise heavy/rare tools as a cheap stub and
+    # inject their full schema only once the agent reaches for them, so the
+    # fixed per-request tool cost stops growing linearly with the tool count.
+    # Default: every MCP tool is "cold". Set the list to override which tools
+    # are cold (comma-separated names or prefixes); empty string falls back to
+    # "all MCP tools".
+    tool_tiering_enabled: bool = True
+    tool_tiering_cold_tools: str | None = None
+
     # Token ceiling for the *droppable* system-prompt sections (retrieved
     # memory + correction hint). Unset disables trimming. The agent's own
     # instructions are never trimmed — see agent_core.context.

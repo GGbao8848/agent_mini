@@ -36,8 +36,14 @@ def build_middleware(
     spec: AgentSpec,
     model_factory: ModelFactory,
     usage_provider: UsageProvider | None = None,
+    *,
+    cold_tools: set[str] | None = None,
 ) -> list[AgentMiddleware]:
-    """Build the middleware list for ``spec.resilience`` and ``spec.autonomy``."""
+    """Build the middleware list for ``spec.resilience`` and ``spec.autonomy``.
+
+    ``cold_tools`` names the tools to advertise as cheap stubs (their full
+    schema expands on first use — see :mod:`agent_core.runtime.tool_tiering`).
+    """
     middlewares: list[Any] = []
 
     policy = spec.resilience
@@ -73,6 +79,12 @@ def build_middleware(
     budget = _effective_budget(spec)
     if budget is not None and usage_provider is not None:
         middlewares.append(BudgetMiddleware(budget, usage_provider))
+    # Tool tiering rides last: it only rewrites the advertised tool list and
+    # intercepts cold-tool activation, independent of the policies above.
+    if cold_tools:
+        from agent_core.runtime.tool_tiering import ToolTieringMiddleware
+
+        middlewares.append(ToolTieringMiddleware(cold_tools))
     return middlewares
 
 
