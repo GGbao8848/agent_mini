@@ -101,7 +101,9 @@ class AgentBuilder:
         # the hygiene rules (no full-disk find, ensure_packages first).
         settings = self._settings or get_settings()
         environment_text = environment_note(
-            current_task_dir(Path(settings.workspace_dir)), settings
+            current_task_dir(Path(settings.workspace_dir)),
+            settings,
+            self._skill_mounts(),
         )
         # Retrieved long-term memory: only the few entries relevant to this
         # request (see agent_core.memory), never the whole store (MEM-005).
@@ -169,6 +171,20 @@ class AgentBuilder:
         names = self._agent_tool_names(spec)
         definitions = [self._tools.get(name) for name in names]
         return static_breakdown(definitions, self._skills.list())
+
+    def _skill_mounts(self) -> list[tuple[str, Path]]:
+        """Enabled ``(skill_id, source_dir)`` pairs for the environment note.
+
+        Mirrors the backend's skill exposure (see ``_backend_kwargs``): only
+        enabled skills with a real on-disk directory. The note renders these as
+        ``/skills/<id>`` under podman and as the real path on the host.
+        """
+        mounts: list[tuple[str, Path]] = []
+        for manifest in self._skills.list():
+            if not manifest.enabled or manifest.path is None or not manifest.path.is_dir():
+                continue
+            mounts.append((manifest.id, manifest.path))
+        return mounts
 
     def _agent_tool_names(self, spec: AgentSpec) -> list[str]:
         """The tool names an agent is bound to (R22: via the resolver).

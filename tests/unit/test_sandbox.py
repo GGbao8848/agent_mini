@@ -159,3 +159,37 @@ class TestEnvironmentNote:
 
         assert "/work" in note
         assert str(tmp_path) not in note
+
+    def test_host_note_points_skills_at_their_real_path(self, tmp_path: Path) -> None:
+        """Regression: host mode has NO /skills mount — never claim one.
+
+        A real task showed the agent reporting the txt2img skill as "未挂载"
+        because the note hard-coded /skills/<id> (a podman-only mount). On the
+        host the note must name the real source directory instead.
+        """
+        from agent_core.runtime.paths import environment_note
+
+        settings = code_settings(tmp_path)
+        # Sample skills from a directory NOT named "skills" so a real path
+        # cannot accidentally contain the "/skills/" marker we assert against.
+        skill_dir = tmp_path / "capabilities" / "txt2img"
+        note = environment_note(tmp_path, settings, [("txt2img", skill_dir)])
+
+        assert str(skill_dir) in note
+        assert "/skills/" not in note  # no container path in host mode
+
+    def test_podman_note_points_skills_at_the_mount(self, tmp_path: Path) -> None:
+        from agent_core.runtime.paths import environment_note
+
+        settings = code_settings(tmp_path, sandbox="podman")
+        skill_dir = tmp_path / "capabilities" / "txt2img"
+        note = environment_note(tmp_path, settings, [("txt2img", skill_dir)])
+
+        assert "/skills/txt2img" in note
+        assert str(skill_dir) not in note
+
+    def test_note_omits_skills_when_none_enabled(self, tmp_path: Path) -> None:
+        from agent_core.runtime.paths import environment_note
+
+        note = environment_note(tmp_path, code_settings(tmp_path), [])
+        assert "/skills" not in note
