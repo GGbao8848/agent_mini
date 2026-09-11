@@ -23,7 +23,6 @@ import {
   useApprovals,
   useCancelTask,
   useMarkTaskRead,
-  useProjects,
   useRun,
   useSendFollowup,
   useSubmitTask,
@@ -284,7 +283,6 @@ function NewTaskComposer({
   ) => void
   initialProjectId?: string | null
 }) {
-  const projects = useProjects()
   const [projectId, setProjectId] = React.useState<string | null>(initialProjectId ?? null)
   const [mode, setMode] = React.useState<PermissionMode>("confirm")
   // The sidebar's project-row "+" updates the preset while the composer is
@@ -292,8 +290,6 @@ function NewTaskComposer({
   React.useEffect(() => {
     setProjectId(initialProjectId ?? null)
   }, [initialProjectId])
-  const projectPath =
-    projects.data?.find((p) => p.id === projectId)?.path ?? ""
   return (
     <Composer
       placeholder="给分身派个任务，例如：把画册的冬天板块加两张图…"
@@ -303,12 +299,7 @@ function NewTaskComposer({
       onSubmit={(text, paths, model) => onSubmit(text, paths, projectId, model, mode)}
     >
       <div className="flex items-center gap-2 px-1 pt-1">
-        <FolderControl
-          currentPath={projectPath}
-          onSelect={(path) =>
-            setProjectId(path ? (projects.data?.find((p) => p.path === path)?.id ?? null) : null)
-          }
-        />
+        <FolderControl currentProjectId={projectId} onSelect={setProjectId} />
       </div>
     </Composer>
   )
@@ -371,7 +362,6 @@ function ChatThread({ task }: { task: Task }) {
   const cancel = useCancelTask()
   const events = useTaskEvents(task.id)
   const taskArtifacts = useTaskArtifacts(task.id)
-  const projects = useProjects()
   const updateTask = useUpdateTask()
   const [confirmStop, setConfirmStop] = React.useState(false)
   // The dial shown in the composer, seeded from the conversation. ChatThread is
@@ -613,16 +603,11 @@ function ChatThread({ task }: { task: Task }) {
             <div className="flex items-center gap-2 px-1 pt-1">
               <FolderControl
                 readonly={running}
-                currentPath={
-                  projects.data?.find((p) => p.id === current.project_id)?.path ?? ""
-                }
-                onSelect={(path) =>
+                currentProjectId={current.project_id ?? null}
+                onSelect={(projectId) =>
                   updateTask.mutate({
                     taskId: current.id,
-                    patch: {
-                      project_id:
-                        (path && projects.data?.find((p) => p.path === path)?.id) || "",
-                    },
+                    patch: { project_id: projectId ?? "" },
                   })
                 }
               />

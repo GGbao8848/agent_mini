@@ -10,8 +10,3 @@ export const FOLDER_NONE_LABEL = `回到 ${DEFAULT_FOLDER_LABEL} 文件夹`
 export function folderBasename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? ""
 }
-
-/** What to show for a conversation: its folder name, or "default" when unbound. */
-export function folderLabel(path: string): string {
-  return folderBasename(path) || DEFAULT_FOLDER_LABEL
-}
