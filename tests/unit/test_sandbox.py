@@ -140,14 +140,17 @@ class TestMetadata:
 
 
 class TestEnvironmentNote:
-    def test_host_note_names_real_root_and_hygiene_rules(self, tmp_path: Path) -> None:
+    def test_host_note_teaches_the_virtual_root_and_hygiene_rules(self, tmp_path: Path) -> None:
         from agent_core.runtime.paths import environment_note
 
         settings = code_settings(tmp_path)
         root = tmp_path / "proj"
         note = environment_note(root, settings)
 
-        assert str(root) in note  # the agent is told the REAL working directory
+        # The file tools' root is the virtual /; the note must NOT name the
+        # host path (the model copies it into file-tool calls → not found).
+        assert "虚拟根 `/`" in note
+        assert str(root) not in note
         assert "find /" in note  # full-disk scans are explicitly banned
         assert "ensure_packages" in note
 

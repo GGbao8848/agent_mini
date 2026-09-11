@@ -1,54 +1,61 @@
-# One workspace, shared across conversations (design)
+# Workspace as a container of working folders (design)
 
 Status: implemented (2026-09-11). Supersedes the per-task sandbox folder.
 
-## Problem
+## Shape
 
-Every unbound conversation worked in its own folder,
-``workspace/tasks/<task_id>/``. So a repeating task — "generate 10 images with
-this script" — re-authored the *same* script in every new conversation: the old
-one was in a sibling folder the new conversation could not see. The agent had no
-way to reuse its own previous work, and the workspace became N near-identical
-trees.
+```
+<workspace_dir>/                the workspace is a container, not a working dir
+├── default/                    working folder for conversations not bound to a project
+│   ├── inputs/                 read-only: user-provided material (attachments)
+│   ├── workspace/              agent scratch space
+│   ├── outputs/                deliverables
+│   ├── scratch/                ephemeral scratch (not "tmp" — see below)
+│   └── uploads/                mirrored attachments (a copy of the staged batch)
+├── <project-dir>/              a bound project works here (its own folder)
+├── skills/                     global skills (one dir per skill) — outside any working folder
+└── uploads/<batch>/            attachment staging — outside any working folder
+```
 
-ZCode's shape is simpler and better: one workspace directory, everything lives
-in it, every conversation shares it.
+This mirrors how ZCode lays it out (``…/.zcode/workspace/default``): one folder
+per group, named, with ``default`` holding everything ungrouped.
 
 ## Decision
 
-There is **one working root** for unbound conversations: the workspace directory
-itself. Only conversations **bound to a project** get a separate root (that
-project's directory), because a project *is* the thing that owns a distinct
-workspace.
+A conversation's **working folder** is:
 
-- `current_task_dir` returns the workspace root when no project is bound — no
-  per-task folder is created.
-- The workspace root holds the task layout (``inputs/ outputs/ scratch/``) plus
-  the shared ``skills/`` and ``uploads/`` directories.
-- Files therefore persist across conversations: a script written in one is
-  right there in the next. This is the point of the change.
+- the bound project's directory, when the conversation is bound to a project; or
+- the workspace's ``default`` folder, otherwise.
+
+The agent's file tools are rooted at the working folder, presented as the
+virtual root ``/``. ``skills/`` and the ``uploads/`` staging area live at the
+workspace **root** — siblings of the working folders, never inside one — because
+they are global (skills) and pre-run staging (uploads).
+
+## Why not just the workspace root
+
+The previous iteration made the workspace root itself the working folder. That
+works, but it conflates "the container" with "a working folder": global
+``skills/`` and staging ``uploads/`` got mixed in with deliverables, and there
+was no place to put a *second* group later. A named ``default`` folder keeps the
+container clean and leaves room for more groups (projects already are groups).
 
 ## Consequences
 
-- **Artifacts** are discovered relative to the run root (workspace, or the bound
-  project directory). ``skills/`` and ``uploads/`` are excluded — a skill the
-  agent edited is a capability, not a deliverable, and uploads are inputs.
-  Manifest paths are root-relative.
-- **Attachments** already land under ``<workspace>/uploads/<batch>/``, which is
-  inside the shared root, so the ``uploads/<batch>/...`` paths in the message
-  hint resolve directly. Per-conversation mirroring is gone.
-- **Isolation is by project, not by conversation.** Two conversations in the
-  same workspace share files (intended). Two projects stay separate. The old
-  "concurrent tasks never see each other's files" guarantee applies to
-  *projects*, not to unbound conversations running side by side — that is the
-  trade the user asked for.
-- The environment note now says files persist across conversations and to look
-  before re-generating.
+- Files persist across conversations inside ``default`` (the point of the
+  change): a script written in one conversation is there in the next.
+- Artifacts are discovered relative to the working folder; only ``uploads/`` is
+  excluded (a mirrored attachment is not a deliverable). ``inputs/`` and
+  ``outputs/`` deliberately still count.
+- Attachments are staged at ``<workspace>/uploads/<batch>/`` (outside the working
+  folder) and **mirrored** into the working folder so the message's
+  ``uploads/<batch>/...`` hint resolves against the file tools' root.
+- Isolation is by group (project vs default), not by conversation. Two unbound
+  conversations share ``default``; two projects stay separate.
 
 ## Legacy
 
-Conversations that ran under the old layout keep their files under
-``workspace/tasks/<task_id>/``; those directories are left in place (their runs
-still reference them). The sidebar/download paths resolve against the current
-root, so very old artifacts may no longer resolve — acceptable for pre-release
-history.
+Conversations that ran under the earlier layouts keep their files under
+``workspace/tasks/<task_id>/`` (per-task) — archived to
+``.db_backup/tasks-per-conversation-archive-20260911``. Very old artifact
+download links may no longer resolve; acceptable for pre-release history.

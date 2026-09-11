@@ -30,7 +30,7 @@ class _StubBuilder:
             from agent_core.runtime.context import current_task_root
 
             root = current_task_root.get()
-            base = root if root is not None else Path("workspace")
+            base = root if root is not None else Path("workspace") / "default"
             out = base / "out" / "hello.md"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text("# hi")
@@ -106,7 +106,7 @@ class TestArtifactManifest:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         service = make_service(tmp_path, monkeypatch)
-        workspace = tmp_path / "workspace"
+        workspace = tmp_path / "workspace" / "default"
         (workspace / "out").mkdir(parents=True)
         old = workspace / "out" / "before.txt"
         old.write_text("old")
@@ -202,7 +202,7 @@ class TestArtifactApi:
         a hand-built Content-Disposition raised UnicodeEncodeError → 500)."""
         service = make_service(tmp_path, monkeypatch)
         client = make_client(service)
-        workspace = tmp_path / "workspace"
+        workspace = tmp_path / "workspace" / "default"
         run = service.runtime.create_run("helper", "make a deck")
         task_dir = workspace / "ppt"
         task_dir.mkdir(parents=True, exist_ok=True)

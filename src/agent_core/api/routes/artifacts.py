@@ -3,8 +3,8 @@
 Everything is confined to the agent workspace (Phase 20/21): the manifest is
 recorded by the runtime at run finish; the download endpoint re-resolves and
 rejects anything that escapes the root. Manifest paths are relative to the run
-root — the shared workspace directory, or a bound project directory — so the
-download URL is ``<run_id>/download?path=<root-relative-path>``.
+root — the conversation's working folder (``default`` or a project directory) —
+so the download URL is ``<run_id>/download?path=<root-relative-path>``.
 """
 
 from __future__ import annotations
@@ -24,13 +24,14 @@ from agent_core.artifacts import (
 )
 from agent_core.config.settings import get_settings
 from agent_core.errors.exceptions import RegistryError
+from agent_core.workspace.layout import default_root
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
 
 def _run_root(service: ServiceDep, task_id: str) -> Path:
-    """The directory holding a run's artifacts (shared workspace, or project dir)."""
-    return service.task_root(task_id) or Path(get_settings().workspace_dir)
+    """The working folder holding a run's artifacts (project dir, else default)."""
+    return service.task_root(task_id) or default_root(Path(get_settings().workspace_dir))
 
 
 @router.get("/{run_id}", response_model=list[dict[str, Any]])

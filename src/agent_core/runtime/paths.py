@@ -10,22 +10,24 @@ from pathlib import Path
 
 from agent_core.config.settings import Settings
 from agent_core.runtime.context import current_task_root
+from agent_core.workspace.layout import default_root
 
 
 def current_task_dir(workspace: Path) -> Path:
-    """The working root of the in-flight run, created on demand.
+    """The working folder of the in-flight run, created on demand.
 
-    A conversation **bound to a project** works directly inside that project's
-    directory (the runtime publishes it via ``current_task_root``). Every other
-    conversation shares the single workspace root — there is deliberately **no**
-    per-conversation sandbox folder, so a file written in one conversation (a
-    script, a dataset) is still there in the next one.
+    A conversation **bound to a project** works inside that project's directory
+    (the runtime publishes it via ``current_task_root``). Every other
+    conversation shares the workspace's ``default`` folder — so a file written
+    in one conversation (a script, a dataset) is still there in the next, and
+    the workspace stays a container of named working folders rather than one
+    flat pile.
     """
     root = current_task_root.get()
     if root is not None:
         root.mkdir(parents=True, exist_ok=True)
         return root
-    return workspace
+    return default_root(workspace)
 
 
 def environment_note(
@@ -74,11 +76,16 @@ def environment_note(
         else:
             skill_note = ""
     else:
+        # Do NOT name the host path here: the model copies whatever absolute
+        # path it sees into its file-tool calls, and the file tools resolve
+        # those as *virtual* paths → path_not_found (seen repeatedly in live
+        # runs). State the rule concretely, with the only spellings that work.
         detail = (
-            f"**文件工具**的根是虚拟根 `/`（对应宿主机目录 {root}）：一律用相对路径"
-            f"（如 `read_file('hello.py')`）或 `/xxx` 虚拟路径——**不要**把宿主机绝对路径"
-            f"（`{root}/hello.py`）传给文件工具，它会被当成虚拟路径而报 not found。"
-            f"**run_code** 的 bash 则以 {root} 为 cwd，相对路径即可。"
+            "你在自己的工作目录里工作，**文件工具的根是虚拟根 `/`**：读文件用 "
+            "`read_file('xxx.py')`、列目录用 `ls('.')` 或 `ls('/')`、写文件用 "
+            "`write_file('out/x.txt', ...)`——一律用**相对路径或 `/xxx`**。"
+            "**绝不要在文件工具里传 `/home/...` 这类宿主机绝对路径**，它会被当成虚拟路径而"
+            "报 not found。**run_code** 的 bash 已经在这个工作目录里（cwd），同样用相对路径。"
         )
         if skill_root is not None:
             skill_note = (

@@ -130,8 +130,8 @@ class TestProjectScopedExecution:
 
         assert str(project.path) in result
 
-    def test_current_task_dir_falls_back_to_the_shared_root(self, tmp_path: Path) -> None:
-        """An unbound conversation shares the workspace root — no per-task folder."""
+    def test_current_task_dir_falls_back_to_the_default_folder(self, tmp_path: Path) -> None:
+        """An unbound conversation works in the workspace's `default` folder."""
         token = run_context.current_task_root.set(None)
         token_id = run_context.current_task_id.set("t9")
         try:
@@ -140,7 +140,7 @@ class TestProjectScopedExecution:
             run_context.current_task_root.reset(token)
             run_context.current_task_id.reset(token_id)
 
-        assert root == tmp_path / "workspace"
+        assert root == tmp_path / "workspace" / "default"
 
 
 class TestRunPublishesProjectRoot:

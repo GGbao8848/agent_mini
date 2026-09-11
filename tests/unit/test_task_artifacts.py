@@ -27,7 +27,7 @@ class TestSharedWorkspace:
 
         await service.runtime.execute_run(run)
 
-        workspace = tmp_path / "workspace"
+        workspace = tmp_path / "workspace" / "default"
         assert (workspace / "out" / "hello.md").is_file()
         # The manifest path is relative to the run root (the shared workspace).
         paths = [a["path"] for a in run.metadata["artifacts"]]
@@ -42,19 +42,17 @@ class TestSharedWorkspace:
         await service.runtime.execute_run(first)
 
         second = service.runtime.create_run("helper", "reuse the script")
-        second_root = service.runtime.task_root(second.task_id) or Path("workspace")
+        second_root = service.runtime.task_root(second.task_id) or Path("workspace") / "default"
 
-        # The second conversation's root is the same shared directory as the
-        # first's, and the file the first one wrote is still there.
-        assert second_root.resolve() == (tmp_path / "workspace").resolve()
+        # The second conversation's folder is the same shared `default` folder as
+        # the first's, and the file the first one wrote is still there.
+        assert second_root.resolve() == (tmp_path / "workspace" / "default").resolve()
         assert (second_root / "out" / "hello.md").is_file()
 
-    async def test_scan_skips_skills_uploads_and_legacy_tasks(self, tmp_path, monkeypatch) -> None:
-        workspace = tmp_path / "workspace"
+    async def test_scan_skips_mirrored_uploads(self, tmp_path, monkeypatch) -> None:
+        workspace = tmp_path / "workspace" / "default"
         for rel in (
-            "skills/demo/SKILL.md",
             "uploads/batch/x.pdf",
-            "tasks/old-task/out/old.pptx",
             "out/deck.pptx",
         ):
             path = workspace / rel
@@ -64,9 +62,7 @@ class TestSharedWorkspace:
         found = {a["path"] for a in scan_run_artifacts(workspace, since_ts=0)}
 
         assert "out/deck.pptx" in found
-        assert "skills/demo/SKILL.md" not in found
         assert "uploads/batch/x.pdf" not in found
-        assert "tasks/old-task/out/old.pptx" not in found
 
 
 class TestExplicitClaims:
@@ -116,6 +112,33 @@ class TestExplicitClaims:
         assert "tasks/task-xyz" not in output
 
 
+class TestAttachmentMirroring:
+    def test_uploads_are_mirrored_into_the_working_folder(self, tmp_path: Path) -> None:
+        """Uploads are staged at the workspace root (outside the working folder),
+        so the referenced batch is mirrored into the folder the file tools see."""
+        from agent_core.api.attachments import mirror_attachments, save_attachments
+        from agent_core.workspace.layout import default_root
+
+        workspace = tmp_path / "workspace"
+        saved = save_attachments(workspace, "batch1", [("report.pdf", b"PDF")])
+
+        mirror_attachments(workspace, default_root(workspace), [saved[0]["path"]])
+
+        dest = workspace / "default" / saved[0]["path"]
+        assert dest.is_file()
+        assert dest.read_bytes() == b"PDF"
+
+    def test_mirror_skips_non_uploads_and_missing_batches(self, tmp_path: Path) -> None:
+        from agent_core.api.attachments import mirror_attachments
+        from agent_core.workspace.layout import default_root
+
+        workspace = tmp_path / "workspace"
+        root = default_root(workspace)
+        mirror_attachments(workspace, root, ["ppt/slides.pptx", "uploads/nope/x.pdf"])
+
+        assert not list(root.rglob("*"))
+
+
 class TestPreviewEndpoint:
     async def test_text_image_and_binary_kinds(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -124,7 +147,7 @@ class TestPreviewEndpoint:
 
         service = make_service(tmp_path, monkeypatch)
         task = service.runtime.create_conversation("helper", "hi")
-        root = tmp_path / "workspace"
+        root = tmp_path / "workspace" / "default"
         root.mkdir(parents=True, exist_ok=True)
         (root / "notes.md").write_text("# 标题\n正文", encoding="utf-8")
         (root / "pic.png").write_bytes(b"\x89PNG fake")

@@ -1,9 +1,9 @@
-"""Artifact discovery: which files did a run leave in the workspace?
+"""Artifact discovery: which files did a run leave in its working folder?
 
-Unbound conversations all work in the one shared workspace root (no
-per-conversation folder — see :mod:`agent_core.runtime.paths`); a conversation
-bound to a project works in that project's directory. Either way a run's
-deliverables are the files it created there, discovered two ways:
+Every unbound conversation works in the workspace's ``default`` folder, and a
+conversation bound to a project works in that project's directory (see
+:mod:`agent_core.runtime.paths`). Either way a run's deliverables are the files
+it created there, discovered two ways:
 
 - **Explicit claim** (preferred): a tool that produces files records them via
   :func:`register_artifact` as they are written, so nothing depends on timing
@@ -21,21 +21,19 @@ from pathlib import Path
 from typing import Any
 
 from agent_core.config.settings import Settings, get_settings
+from agent_core.workspace.layout import default_root
 
 MAX_ARTIFACTS = 200
 
-# Directories under the shared root that never hold deliverables: skills are
-# capability sources, uploads are user-provided inputs (and may belong to
-# another conversation), and ``tasks/`` is the legacy per-conversation layout
-# (kept on disk for old runs, but no longer where new work lands). Excluded
-# from the artifact scan.
-_NON_ARTIFACT_DIRS: frozenset[str] = frozenset({"skills", "uploads", "tasks"})
+# Directory under a working root that never holds deliverables: ``uploads/`` is
+# where a conversation's mirrored attachments live. Excluded from the scan.
+_NON_ARTIFACT_DIRS: frozenset[str] = frozenset({"uploads"})
 
 
 def default_workspace_root(settings: Settings | None = None) -> Path:
-    """The shared working root every unbound conversation uses."""
+    """The ``default`` working folder every unbound conversation uses."""
     resolved = settings or get_settings()
-    return Path(resolved.workspace_dir)
+    return default_root(Path(resolved.workspace_dir))
 
 
 def scan_workspace_artifacts(

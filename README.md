@@ -311,7 +311,7 @@ uv run --env-file .env python scripts/serve_console.py   # 默认 0.0.0.0:8000
 
 派任务/续聊在页面底部聊天输入框完成（Runs 列表在左侧边栏，点击即续聊该线程）。
 
-**项目模式**：Console 侧边栏「项目」页把真实文件夹注册为项目（持久化，重启不丢）；新建任务时选择项目，agent 就直接在该目录里读写文件、执行命令——产物留在项目里而不是 `workspace/tasks/<id>/` 下。绑定任务的文件后端、run_code 工作目录、沙箱挂载、产物扫描与下载边界全部切换到项目根；未绑定项目的任务行为不变。项目必须由人注册，agent 无法自选目录。安全：设置 `AGENT_CORE_CONSOLE_TOKEN` 后所有 `/v1` 与 `/console` 请求需携带 token（页面首次提示输入，存 localStorage）；不设置则局域网内开放。前端技术栈见 Phase 25。
+**项目模式**：Console 侧边栏「项目」页把真实文件夹注册为项目（持久化，重启不丢）；新建任务时选择项目，agent 就直接在该目录里读写文件、执行命令——产物留在项目里而不是默认工作目录下。绑定任务的文件后端、run_code 工作目录、沙箱挂载、产物扫描与下载边界全部切换到项目根；未绑定项目的对话统一使用 `<workspace>/default` 工作目录（跨对话共享，见 docs/shared-workspace.md）。项目必须由人注册，agent 无法自选目录。安全：设置 `AGENT_CORE_CONSOLE_TOKEN` 后所有 `/v1` 与 `/console` 请求需携带 token（页面首次提示输入，存 localStorage）；不设置则局域网内开放。前端技术栈见 Phase 25。
 
 ## 本地模型与多模态工具（Phase 18）
 

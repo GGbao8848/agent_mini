@@ -86,7 +86,7 @@ from agent_core.runtime.verification import (
 )
 from agent_core.task_state.domain import TaskState
 from agent_core.task_state.service import TaskStateService
-from agent_core.workspace.layout import skills_root
+from agent_core.workspace.layout import default_root, skills_root
 
 if TYPE_CHECKING:
     # Import-time cycle: agent_core.eval pulls in orchestration → runtime.
@@ -937,7 +937,7 @@ class AgentRuntime:
         merged: dict[str, dict[str, Any]] = {
             str(a["path"]): a for a in claimed_artifacts(run.task_id)
         }
-        root = self.task_root(run.task_id) or workspace
+        root = self.task_root(run.task_id) or default_root(workspace)
         # Explicit claims take precedence: the scan only fills paths that were
         # not claimed, so the artifact contract (sha256/mime/…) is never
         # clobbered by a bare directory listing (I-06).

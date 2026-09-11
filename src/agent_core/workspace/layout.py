@@ -17,12 +17,30 @@ READ_ONLY_DIRS: tuple[str, ...] = ("inputs",)
 
 _WRITABLE_DIRS: tuple[str, ...] = ("workspace", "outputs", "scratch")
 
+DEFAULT_GROUP_NAME = "default"
+"""Working folder for conversations not bound to a project.
+
+The workspace is a *container* of working folders: each bound project works in
+its own directory, and every unbound conversation shares the ``default`` one.
+So the root holds the group folders side by side, with the global ``skills/``
+and the staging ``uploads/`` as siblings of them (never inside a working root).
+"""
+
+
+def default_root(workspace: Path) -> Path:
+    """The shared working folder for unbound conversations (created on demand)."""
+    root = workspace / DEFAULT_GROUP_NAME
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
 
 def skills_root(workspace: Path) -> Path:
     """The shared skills directory for a workspace (created on demand).
 
     One directory per skill, each holding a ``SKILL.md``. This is the single
     source of truth: the registry scans it rather than storing skills itself.
+    Skills are global capabilities, so this sits at the workspace root — a
+    sibling of the group folders, not inside any one of them.
     """
     root = workspace / "skills"
     root.mkdir(parents=True, exist_ok=True)
