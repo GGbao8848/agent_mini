@@ -1,18 +1,21 @@
 """Chat attachment upload: safe persistence of files the user drops in the box.
 
 The console composer lets a user drag files / paste screenshots to hand them
-to the agent. Files land under ``<workspace>/uploads/<task_id>/`` with a
+to the agent. Files land under ``<workspace>/uploads/<batch_id>/`` with a
 sanitized basename (never overwriting, deduped on collision). ``.zip``
 archives are extracted in place so the agent can read every member directly
 with its file tools; every other file is stored as-is. Only the ``uploads``
 subtree is writable this way — a malformed name can never escape it.
+
+The (shared) workspace root is the agent's working directory, so the
+``uploads/<batch>/...`` paths the message hint names resolve directly — no
+per-conversation mirroring is needed.
 """
 
 from __future__ import annotations
 
 import io
 import re
-import shutil
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -159,34 +162,3 @@ def attachment_notes(paths: list[str]) -> str:
     for path in paths:
         lines.append(f"- {path}")
     return "\n".join(lines)
-
-
-def mirror_attachments(
-    workspace: Path, task_id: str, paths: list[str], *, task_root: Path | None = None
-) -> None:
-    """Copy referenced attachment batches into the task's working directory.
-
-    Files are uploaded *before* a task exists (``uploads/<batch_id>/``), but a
-    task's file tools are rooted at its working directory (``tasks/<task_id>/``,
-    or the bound project directory). Mirroring each referenced
-    ``uploads/<batch_id>/`` subtree into the task root — at the same relative
-    path — keeps the ``uploads/<batch>/...`` paths the message hints at
-    resolvable against the task root. Idempotent: already-mirrored batches are
-    skipped.
-    """
-    if not paths:
-        return
-    root = task_root or workspace / "tasks" / task_id
-    for path in paths:
-        parts = Path(path).parts
-        if len(parts) < 2 or parts[0] != "uploads":
-            continue  # not an upload reference
-        batch = parts[1]
-        source = workspace / "uploads" / batch
-        if not source.is_dir():
-            continue
-        dest = root / "uploads" / batch
-        if dest.exists():
-            continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source, dest)

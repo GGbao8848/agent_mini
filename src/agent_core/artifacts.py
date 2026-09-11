@@ -1,15 +1,15 @@
-"""Artifact discovery: which files did a task leave in the workspace?
+"""Artifact discovery: which files did a run leave in the workspace?
 
-Artifacts live under per-task directories — ``<workspace>/tasks/<task_id>/`` —
-so a conversation's deliverables are isolated from every other task and from
-the shared root. Two mechanisms feed the console's 产物 panel:
+Unbound conversations all work in the one shared workspace root (no
+per-conversation folder — see :mod:`agent_core.runtime.paths`); a conversation
+bound to a project works in that project's directory. Either way a run's
+deliverables are the files it created there, discovered two ways:
 
-- **Explicit claim** (preferred): tools that produce files (``run_code``)
-  record them via :func:`register_artifact` as they are written,
-  so nothing depends on timing heuristics.
-- **Fallback scan**: :func:`scan_task_artifacts` walks a task's own directory
-  for files modified since a timestamp, used for live runs that have no
-  manifest yet.
+- **Explicit claim** (preferred): a tool that produces files records them via
+  :func:`register_artifact` as they are written, so nothing depends on timing
+  heuristics.
+- **Fallback scan**: :func:`scan_run_artifacts` walks the root for files
+  modified since the run started, used for live runs that have no manifest yet.
 
 The download endpoint re-resolves and rejects anything that escapes the
 workspace (absolute paths, ``..`` traversal, symlink escapes, dotfiles).
@@ -24,35 +24,34 @@ from agent_core.config.settings import Settings, get_settings
 
 MAX_ARTIFACTS = 200
 
-_TASKS_DIR_NAME = "tasks"
+# Directories under the shared root that never hold deliverables: skills are
+# capability sources, uploads are user-provided inputs (and may belong to
+# another conversation), and ``tasks/`` is the legacy per-conversation layout
+# (kept on disk for old runs, but no longer where new work lands). Excluded
+# from the artifact scan.
+_NON_ARTIFACT_DIRS: frozenset[str] = frozenset({"skills", "uploads", "tasks"})
 
 
-def task_dir_name(task_id: str) -> str:
-    """The on-disk subdirectory that isolates one conversation's artifacts."""
-    return _TASKS_DIR_NAME
-
-
-def task_workspace(workspace: Path, task_id: str) -> Path:
-    """The private directory for ``task_id`` (created on demand)."""
-    root = workspace / _TASKS_DIR_NAME / task_id
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def resolve_task_workspace(task_id: str) -> Path:
-    """The current task's directory from the app settings (created on demand)."""
-    return task_workspace(Path(get_settings().workspace_dir), task_id)
+def default_workspace_root(settings: Settings | None = None) -> Path:
+    """The shared working root every unbound conversation uses."""
+    resolved = settings or get_settings()
+    return Path(resolved.workspace_dir)
 
 
 def scan_workspace_artifacts(
-    workspace: Path, *, since_ts: float, limit: int = MAX_ARTIFACTS
+    workspace: Path,
+    *,
+    since_ts: float,
+    limit: int = MAX_ARTIFACTS,
+    skip_dirs: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Return ``[{path, size, mtime}]`` for files modified after ``since_ts``.
 
     Paths are workspace-relative (portable across hosts — a run started on
     the server can be inspected from any LAN browser later). ``mtime`` is the
     file's modification time as an ISO string so the console can show when the
-    artifact appeared. Hidden entries (dotfiles) are skipped.
+    artifact appeared. Hidden entries (dotfiles) and top-level ``skip_dirs``
+    are skipped.
     """
     if not workspace.is_dir():
         return []
@@ -63,7 +62,10 @@ def scan_workspace_artifacts(
         if not path.is_file():
             continue
         rel = path.relative_to(workspace).as_posix()
-        if any(part.startswith(".") for part in Path(rel).parts):
+        parts = Path(rel).parts
+        if any(part.startswith(".") for part in parts):
+            continue
+        if parts and parts[0] in skip_dirs:
             continue
         try:
             stat = path.stat()
@@ -80,46 +82,41 @@ def scan_workspace_artifacts(
     return found
 
 
-def scan_task_artifacts(
-    workspace: Path,
-    task_id: str,
-    *,
-    since_ts: float,
-    limit: int = MAX_ARTIFACTS,
-    root: Path | None = None,
+def scan_run_artifacts(
+    root: Path, *, since_ts: float, limit: int = MAX_ARTIFACTS
 ) -> list[dict[str, Any]]:
-    """Artifacts of one task only: scan its working root, skip the shared root.
+    """Artifacts of one run, bounded to ``root`` (shared workspace or project).
 
-    This is what keeps concurrent tasks from bleeding into each other's panel:
-    the window is bounded by the task's own directory — or the bound project
-    directory via ``root`` — not the whole workspace.
+    ``skills/`` and ``uploads/`` are excluded: a skill the agent edited is a
+    capability, not a deliverable, and an upload may belong to another
+    conversation sharing the same root.
     """
-    base = root or workspace / _TASKS_DIR_NAME / task_id
-    return scan_workspace_artifacts(base, since_ts=since_ts, limit=limit)
+    return scan_workspace_artifacts(
+        root, since_ts=since_ts, limit=limit, skip_dirs=_NON_ARTIFACT_DIRS
+    )
 
 
 def register_artifact(
-    workspace: Path, task_id: str, path: Path, *, limit: int = MAX_ARTIFACTS
+    root: Path, task_id: str, path: Path, *, limit: int = MAX_ARTIFACTS
 ) -> None:
-    """Explicitly mark ``path`` as an artifact of ``task_id``.
+    """Mark ``path`` as an artifact of ``task_id`` produced under filesystem ``root``.
 
-    ``path`` must live inside the task's private directory. The claim is kept
-    in-memory only — it is persisted when the run finishes (the runtime folds
-    all claims into ``run.metadata["artifacts"]``). ``limit`` is a soft cap so
-    a runaway producer cannot bloat the manifest.
-
-    The record carries the explicit artifact contract (guide Phase R8): a
-    stable ``artifact_id``, ``path``, ``size``, ``mime_type`` and a content
-    ``sha256``, so a download can be verified against the manifest instead of
-    trusting a directory scan.
+    ``root`` is the run's working root (the shared workspace, or a bound project
+    directory); ``task_id`` is the logical claimant, so claims stay per-run even
+    when conversations share one root. ``path`` must live inside ``root``. The
+    claim is in-memory only — it is persisted when the run finishes (the runtime
+    folds all claims into ``run.metadata["artifacts"]``). The record carries the
+    explicit contract (guide R8): a stable ``artifact_id``, ``path``, ``size``,
+    ``mime_type`` and a content ``sha256``, so a download can be verified
+    against the manifest instead of trusting a directory scan.
     """
-    root = (workspace / _TASKS_DIR_NAME / task_id).resolve()
+    resolved_root = root.resolve()
     resolved = path.resolve()
-    if not resolved.is_relative_to(root):
-        return  # outside the task dir: not claimable as a task artifact
+    if not resolved.is_relative_to(resolved_root):
+        return  # outside the root: not claimable as an artifact
     if not resolved.is_file():
         return
-    rel = resolved.relative_to(root).as_posix()
+    rel = resolved.relative_to(resolved_root).as_posix()
     claims = _CLAIMS.setdefault(task_id, [])
     if any(c["path"] == rel for c in claims):
         return
@@ -228,8 +225,3 @@ def guess_media_type(path: Path) -> str:
 def inline_preview(media_type: str) -> bool:
     """Images render inline in the console; everything else downloads."""
     return media_type.startswith("image/") or media_type in {"text/plain", "application/json"}
-
-
-def _task_workspace_for(settings: Settings, task_id: str) -> Path:
-    """Task directory under a given settings workspace (helper for tests)."""
-    return task_workspace(Path(settings.workspace_dir), task_id)

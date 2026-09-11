@@ -2,9 +2,9 @@
 
 Everything is confined to the agent workspace (Phase 20/21): the manifest is
 recorded by the runtime at run finish; the download endpoint re-resolves and
-rejects anything that escapes the workspace directory. Paths in the manifest
-are task-relative (they live under ``workspace/tasks/<task_id>/``), so the
-download URL is ``<run_id>/download?path=<task-relative-path>``.
+rejects anything that escapes the root. Manifest paths are relative to the run
+root — the shared workspace directory, or a bound project directory — so the
+download URL is ``<run_id>/download?path=<root-relative-path>``.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from agent_core.artifacts import (
     artifact_abs_path,
     guess_media_type,
     inline_preview,
-    scan_task_artifacts,
+    scan_run_artifacts,
 )
 from agent_core.config.settings import get_settings
 from agent_core.errors.exceptions import RegistryError
@@ -28,27 +28,22 @@ from agent_core.errors.exceptions import RegistryError
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
 
-def _task_root(service: ServiceDep, task_id: str) -> Path:
-    """The directory holding a conversation's artifacts (project dir if bound)."""
-    return service.task_root(task_id) or (
-        Path(get_settings().workspace_dir) / "tasks" / task_id
-    )
+def _run_root(service: ServiceDep, task_id: str) -> Path:
+    """The directory holding a run's artifacts (shared workspace, or project dir)."""
+    return service.task_root(task_id) or Path(get_settings().workspace_dir)
 
 
 @router.get("/{run_id}", response_model=list[dict[str, Any]])
 def list_artifacts(run_id: str, service: ServiceDep) -> list[dict[str, Any]]:
-    """Files created/modified by this run, task-relative (inside its task dir)."""
+    """Files created/modified by this run, relative to its run root."""
     run = service.get_run(run_id)  # 404 for unknown runs
     manifest: list[dict[str, Any]] | None = run.metadata.get("artifacts")
     if manifest:
         return manifest
-    # Live fallback: the run may still be executing (no manifest yet). Scan
-    # only the run's own task root so other tasks never leak in.
-    return scan_task_artifacts(
-        Path(get_settings().workspace_dir),
-        run.task_id,
-        since_ts=run.created_at.timestamp() - 2.0,
-        root=_task_root(service, run.task_id),
+    # Live fallback: the run may still be executing (no manifest yet). Scan only
+    # the run's own root — never another project's directory.
+    return scan_run_artifacts(
+        _run_root(service, run.task_id), since_ts=run.created_at.timestamp() - 2.0
     )
 
 
@@ -58,7 +53,7 @@ def download_artifact(
 ) -> FileResponse:
     """Serve one artifact file: images/text inline, everything else as download."""
     run = service.get_run(run_id)
-    task_root = _task_root(service, run.task_id).resolve()
+    task_root = _run_root(service, run.task_id).resolve()
     target = artifact_abs_path(task_root, path)
     if target is None:
         raise RegistryError(
@@ -95,7 +90,7 @@ def preview_artifact(
     anything else is ``kind=binary`` with a download link instead.
     """
     run = service.get_run(run_id)
-    task_root = _task_root(service, run.task_id).resolve()
+    task_root = _run_root(service, run.task_id).resolve()
     target = artifact_abs_path(task_root, path)
     if target is None:
         raise RegistryError(

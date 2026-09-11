@@ -169,8 +169,9 @@ class AgentBuilder:
                 fanout=self._fanout,
                 gate=self._gate,
             ),
-            # Read-only mounts and write-path rules: inputs/skills are immutable
-            # to the agent (runtime invariant I-01/I-02).
+            # Read-only mount rule: /inputs is immutable (invariant I-01).
+            # /skills is deliberately writable — a skill is a directory the
+            # agent owns (see docs/skills-as-directory.md).
             permissions=filesystem_permissions(),
             # Resolved lazily: build() runs inside a loop, construction may not.
             checkpointer=self._checkpointer_provider() if self._checkpointer_provider else None,

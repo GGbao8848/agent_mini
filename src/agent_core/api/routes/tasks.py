@@ -11,13 +11,12 @@ terminal.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query
 from sse_starlette import EventSourceResponse
 
-from agent_core.api.attachments import attachment_notes, mirror_attachments
+from agent_core.api.attachments import attachment_notes
 from agent_core.api.deps import ServiceDep
 from agent_core.api.routes.events import SSE_HEADERS
 from agent_core.api.schemas import (
@@ -28,7 +27,6 @@ from agent_core.api.schemas import (
     TaskStateOut,
     TaskUpdateRequest,
 )
-from agent_core.config.settings import get_settings
 from agent_core.domain.task import RunStatus
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -41,17 +39,13 @@ def _conversation_out(service: ServiceDep, task_id: str) -> TaskOut:
     return TaskOut.of(task, status=status, active_run_id=active.id if active else None)
 
 
-def _task_root(service: ServiceDep, task_id: str) -> Path:
-    """The conversation's working directory (project dir when bound)."""
-    return service.task_root(task_id) or (
-        Path(get_settings().workspace_dir) / "tasks" / task_id
-    )
-
-
 @router.post("", response_model=TaskOut, status_code=201)
 async def create_task(
     payload: TaskCreateRequest, service: ServiceDep, wait: bool = Query(default=False)
 ) -> TaskOut:
+    # Uploads live at ``<workspace>/uploads/<batch>/`` and the file tools are
+    # rooted at the (shared) workspace, so the ``uploads/<batch>/...`` paths the
+    # hint names resolve directly — no per-task mirroring needed.
     task = await service.submit_run(
         payload.agent_id,
         _with_attachments(payload.input, payload.attachments),
@@ -61,12 +55,6 @@ async def create_task(
         permission_mode=(
             payload.permission_mode.value if payload.permission_mode else None
         ),
-    )
-    mirror_attachments(
-        Path(get_settings().workspace_dir),
-        task.id,
-        payload.attachments,
-        task_root=_task_root(service, task.id),
     )
     return _conversation_out(service, task.id)
 
@@ -87,12 +75,6 @@ async def send_message(
         permission_mode=(
             payload.permission_mode.value if payload.permission_mode else None
         ),
-    )
-    mirror_attachments(
-        Path(get_settings().workspace_dir),
-        task_id,
-        payload.attachments,
-        task_root=_task_root(service, task_id),
     )
     return _conversation_out(service, task_id)
 

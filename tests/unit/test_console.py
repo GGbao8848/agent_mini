@@ -25,15 +25,13 @@ from agent_core.runtime.runtime import AgentRuntime
 class _StubBuilder:
     class _Graph:
         async def ainvoke(self, state: Any, config: Any = None) -> dict[str, Any]:
-            # The "agent" produces a file inside the task's workspace during
-            # the run (no task context → shared root, mirroring the builder).
-            from agent_core.runtime.context import get_current_task_id
+            # The "agent" produces a file inside its working root during the run.
+            # Unbound conversations share the one workspace root (no task folder).
+            from agent_core.runtime.context import current_task_root
 
-            task_id = get_current_task_id()
-            if task_id:
-                out = Path("workspace") / "tasks" / task_id / "out" / "hello.md"
-            else:
-                out = Path("workspace") / "out" / "hello.md"
+            root = current_task_root.get()
+            base = root if root is not None else Path("workspace")
+            out = base / "out" / "hello.md"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text("# hi")
             return {"messages": [AIMessage(content="done")]}
@@ -206,8 +204,8 @@ class TestArtifactApi:
         client = make_client(service)
         workspace = tmp_path / "workspace"
         run = service.runtime.create_run("helper", "make a deck")
-        task_dir = workspace / "tasks" / run.task_id / "ppt"
-        task_dir.mkdir(parents=True)
+        task_dir = workspace / "ppt"
+        task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "智能体科普扫盲.pptx").write_bytes(b"PK\x03\x04fake")
 
         response = await client.get(

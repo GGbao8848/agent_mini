@@ -1,78 +1,72 @@
-"""Task-isolated artifact storage (feat/artifact-storage) behavior tests.
+"""Shared-workspace artifact behavior tests.
 
-Covers the new contract: every task's artifacts live under
-``workspace/tasks/<task_id>/``, downloads resolve against that task root,
-explicit tool claims feed the manifest, and concurrent tasks cannot leak
-files into each other's panel.
+Every unbound conversation works in the one shared workspace root (no
+per-conversation folder), so a run's deliverables are discovered relative to
+that root; a run bound to a project resolves against the project directory.
+Explicit tool claims feed the manifest, and ``skills/`` / ``uploads/`` are
+never reported as deliverables.
 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
-from tests.unit.test_console import make_client, make_service
+import pytest
+from tests.unit.test_console import make_service
 
-from agent_core.artifacts import (
-    register_artifact,
-    scan_task_artifacts,
-    task_workspace,
-)
+from agent_core.artifacts import register_artifact, scan_run_artifacts
 from agent_core.builtins.code import make_run_code
 from agent_core.runtime.context import current_task_id
 
 
-class TestTaskIsolation:
-    async def test_artifacts_land_under_task_dir(self, tmp_path, monkeypatch) -> None:
+class TestSharedWorkspace:
+    async def test_artifacts_land_in_the_shared_root(self, tmp_path, monkeypatch) -> None:
         service = make_service(tmp_path, monkeypatch)
         run = service.runtime.create_run("helper", "produce a file")
 
         await service.runtime.execute_run(run)
 
         workspace = tmp_path / "workspace"
-        task_dir = workspace / "tasks" / run.task_id
-        assert (task_dir / "out" / "hello.md").is_file()
-        # The task's manifest path is task-relative.
+        assert (workspace / "out" / "hello.md").is_file()
+        # The manifest path is relative to the run root (the shared workspace).
         paths = [a["path"] for a in run.metadata["artifacts"]]
         assert "out/hello.md" in paths
 
-    async def test_concurrent_task_does_not_leak(self, tmp_path, monkeypatch) -> None:
-        """A sibling task writing at the same moment must not show in ours."""
+    async def test_a_second_conversation_sees_the_first_ones_files(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The whole point: no per-conversation sandbox, files persist."""
         service = make_service(tmp_path, monkeypatch)
-        run_a = service.runtime.create_run("helper", "task a")
-        run_b = service.runtime.create_run("helper", "task b")
+        first = service.runtime.create_run("helper", "make a script")
+        await service.runtime.execute_run(first)
 
-        await service.runtime.execute_run(run_a)
-        await service.runtime.execute_run(run_b)
+        second = service.runtime.create_run("helper", "reuse the script")
+        second_root = service.runtime.task_root(second.task_id) or Path("workspace")
 
+        # The second conversation's root is the same shared directory as the
+        # first's, and the file the first one wrote is still there.
+        assert second_root.resolve() == (tmp_path / "workspace").resolve()
+        assert (second_root / "out" / "hello.md").is_file()
+
+    async def test_scan_skips_skills_uploads_and_legacy_tasks(self, tmp_path, monkeypatch) -> None:
         workspace = tmp_path / "workspace"
-        # Each task's scan only sees its own directory.
-        a_paths = [a["path"] for a in scan_task_artifacts(workspace, run_a.task_id, since_ts=0)]
-        b_paths = [a["path"] for a in scan_task_artifacts(workspace, run_b.task_id, since_ts=0)]
-        assert "out/hello.md" in a_paths
-        assert "out/hello.md" in b_paths
-        assert (workspace / "tasks" / run_a.task_id / "out" / "hello.md").is_file()
-        assert (workspace / "tasks" / run_b.task_id / "out" / "hello.md").is_file()
+        for rel in (
+            "skills/demo/SKILL.md",
+            "uploads/batch/x.pdf",
+            "tasks/old-task/out/old.pptx",
+            "out/deck.pptx",
+        ):
+            path = workspace / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x")
 
-    async def test_download_resolves_against_task_root(self, tmp_path, monkeypatch) -> None:
-        service = make_service(tmp_path, monkeypatch)
-        client = make_client(service)
-        run = service.runtime.create_run("helper", "produce a file")
+        found = {a["path"] for a in scan_run_artifacts(workspace, since_ts=0)}
 
-        await service.runtime.execute_run(run)
-
-        response = await client.get(
-            f"/v1/artifacts/{run.id}/download", params={"path": "out/hello.md"}
-        )
-        assert response.status_code == 200
-        assert response.text == "# hi"
-        # A file with the same name in another task must not resolve here.
-        other = tmp_path / "workspace" / "tasks" / "some-other-task" / "out" / "hello.md"
-        other.parent.mkdir(parents=True)
-        other.write_text("other")
-        assert (await client.get(
-            f"/v1/artifacts/{run.id}/download", params={"path": "out/hello.md"}
-        )).text == "# hi"  # still ours, not the sibling's
-        await client.aclose()
+        assert "out/deck.pptx" in found
+        assert "skills/demo/SKILL.md" not in found
+        assert "uploads/batch/x.pdf" not in found
+        assert "tasks/old-task/out/old.pptx" not in found
 
 
 class TestExplicitClaims:
@@ -80,9 +74,8 @@ class TestExplicitClaims:
         from agent_core.artifacts import claimed_artifacts, clear_claims
 
         workspace = tmp_path / "workspace"
-        task_root = task_workspace(workspace, "claim-a")
-        (task_root / "ppt").mkdir(parents=True)
-        deck = task_root / "ppt" / "a.pptx"
+        (workspace / "ppt").mkdir(parents=True)
+        deck = workspace / "ppt" / "a.pptx"
         deck.write_bytes(b"PK")
 
         register_artifact(workspace, "claim-a", deck)
@@ -92,10 +85,11 @@ class TestExplicitClaims:
         assert claims[0]["size"] == 2
         clear_claims("claim-a")
 
-    def test_claim_outside_task_dir_is_ignored(self, tmp_path: Path) -> None:
+    def test_claim_outside_root_is_ignored(self, tmp_path: Path) -> None:
         from agent_core.artifacts import claimed_artifacts
 
         workspace = tmp_path / "workspace"
+        workspace.mkdir()
         outside = tmp_path / "secret.txt"
         outside.write_text("x")
 
@@ -103,8 +97,8 @@ class TestExplicitClaims:
 
         assert claimed_artifacts("claim-b") == []
 
-    def test_run_code_scopes_to_task_dir(self, tmp_path: Path) -> None:
-        """run_code runs with cwd = the current task's directory."""
+    def test_run_code_scopes_to_the_shared_workspace(self, tmp_path: Path) -> None:
+        """run_code runs with cwd = the shared workspace root (no task folder)."""
         from agent_core.config.settings import Settings
 
         settings = Settings(_env_file=None, workspace_dir=str(tmp_path / "workspace"))
@@ -117,47 +111,21 @@ class TestExplicitClaims:
             finally:
                 current_task_id.reset(token)
 
-        import asyncio
-
         output = asyncio.run(run_in_task())
-        assert str(tmp_path / "workspace" / "tasks" / "task-xyz") in output
-
-
-class TestAttachmentMirroring:
-    def test_uploads_mirrored_into_task_dir(self, tmp_path: Path) -> None:
-        from agent_core.api.attachments import mirror_attachments, save_attachments
-
-        workspace = tmp_path / "workspace"
-        saved = save_attachments(workspace, "batch1", [("report.pdf", b"PDF")])
-
-        mirror_attachments(workspace, "task-1", [saved[0]["path"]])
-
-        dest = workspace / "tasks" / "task-1" / saved[0]["path"]
-        assert dest.is_file()
-        assert dest.read_bytes() == b"PDF"
-
-    def test_mirror_skips_missing_and_non_uploads(self, tmp_path: Path) -> None:
-        from agent_core.api.attachments import mirror_attachments
-
-        workspace = tmp_path / "workspace"
-        # A non-upload path and a nonexistent batch are both ignored safely.
-        mirror_attachments(workspace, "task-1", ["ppt/slides.pptx", "uploads/nope/x.pdf"])
-
-        assert not (workspace / "tasks" / "task-1").exists() or not list(
-            (workspace / "tasks" / "task-1").rglob("*")
-        )
+        assert str(tmp_path / "workspace") in output
+        assert "tasks/task-xyz" not in output
 
 
 class TestPreviewEndpoint:
     async def test_text_image_and_binary_kinds(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from tests.unit.test_console import make_client, make_service
+        from tests.unit.test_console import make_client
 
         service = make_service(tmp_path, monkeypatch)
         task = service.runtime.create_conversation("helper", "hi")
-        root = tmp_path / "workspace" / "tasks" / task.id
-        root.mkdir(parents=True)
+        root = tmp_path / "workspace"
+        root.mkdir(parents=True, exist_ok=True)
         (root / "notes.md").write_text("# 标题\n正文", encoding="utf-8")
         (root / "pic.png").write_bytes(b"\x89PNG fake")
         (root / "data.bin").write_bytes(b"\x00\x01\x02")

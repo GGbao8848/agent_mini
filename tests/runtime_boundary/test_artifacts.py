@@ -17,8 +17,7 @@ from agent_core import artifacts
 def test_claimed_artifact_carries_explicit_contract(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     task_id = "t1"
-    root = artifacts.task_workspace(workspace, task_id)
-    target = root / "outputs" / "report.txt"
+    target = workspace / "outputs" / "report.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = b"hello artifact"
     target.write_bytes(payload)
@@ -36,7 +35,7 @@ def test_claimed_artifact_carries_explicit_contract(tmp_path: Path) -> None:
     artifacts.clear_claims(task_id)
 
 
-def test_artifact_outside_task_root_is_not_claimable(tmp_path: Path) -> None:
+def test_artifact_outside_root_is_not_claimable(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     stray = tmp_path / "elsewhere.txt"
     stray.write_text("nope")
@@ -50,14 +49,13 @@ def test_scan_does_not_overwrite_explicit_claim(tmp_path: Path) -> None:
     """The contract survives a scan of the same path (I-06)."""
     workspace = tmp_path / "workspace"
     task_id = "t1"
-    root = artifacts.task_workspace(workspace, task_id)
-    target = root / "outputs" / "result.txt"
+    target = workspace / "outputs" / "result.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("data")
 
     artifacts.register_artifact(workspace, task_id, target)
     claimed = {a["path"]: a for a in artifacts.claimed_artifacts(task_id)}
-    scanned = {a["path"]: a for a in artifacts.scan_workspace_artifacts(root, since_ts=0.0)}
+    scanned = {a["path"]: a for a in artifacts.scan_workspace_artifacts(workspace, since_ts=0.0)}
 
     merged: dict[str, dict[str, object]] = dict(claimed)
     for path, record in scanned.items():

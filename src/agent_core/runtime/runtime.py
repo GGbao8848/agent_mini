@@ -24,8 +24,7 @@ from pydantic import ValidationError
 from agent_core.artifacts import (
     claimed_artifacts,
     clear_claims,
-    scan_task_artifacts,
-    scan_workspace_artifacts,
+    scan_run_artifacts,
 )
 from agent_core.builtins.memory import MemoryWriteContext
 from agent_core.capabilities import CapabilityResolver
@@ -923,12 +922,13 @@ class AgentRuntime:
     def _collect_artifacts(self, run: Run) -> None:
         """Record the files this run created in the task's working directory.
 
-        Only top-level runs collect: nested runs (verifier) share the task
-        root and would double-claim the same files. The scan is bounded to the
-        task's root — ``workspace/tasks/<task_id>/`` or the bound project
-        directory — so a concurrent task's files can never leak in; tools
-        that explicitly claimed artifacts (run_code) are merged in and take
-        precedence.
+        Only top-level runs collect: nested runs (verifier) share the run root
+        and would double-claim the same files. The scan is bounded to the run's
+        root — the shared workspace directory, or the bound project directory —
+        so a concurrent run in a *different* project can never leak in.
+        ``skills/`` and ``uploads/`` are skipped (capability sources and
+        user-provided inputs, never deliverables). Tools that explicitly claimed
+        artifacts (run_code) are merged in and take precedence.
         """
         if run.parent_run_id is not None:
             return
@@ -937,16 +937,12 @@ class AgentRuntime:
         merged: dict[str, dict[str, Any]] = {
             str(a["path"]): a for a in claimed_artifacts(run.task_id)
         }
-        root = self.task_root(run.task_id)
-        if root is not None:
-            # Explicit claims take precedence: the scan only fills paths that
-            # were not claimed, so the artifact contract (sha256/mime/…) is
-            # never clobbered by a bare directory listing (I-06).
-            for a in scan_workspace_artifacts(root, since_ts=since):
-                merged.setdefault(str(a["path"]), a)
-        else:
-            for a in scan_task_artifacts(workspace, run.task_id, since_ts=since):
-                merged.setdefault(str(a["path"]), a)
+        root = self.task_root(run.task_id) or workspace
+        # Explicit claims take precedence: the scan only fills paths that were
+        # not claimed, so the artifact contract (sha256/mime/…) is never
+        # clobbered by a bare directory listing (I-06).
+        for a in scan_run_artifacts(root, since_ts=since):
+            merged.setdefault(str(a["path"]), a)
         clear_claims(run.task_id)
         if merged:
             # Every artifact gets the explicit contract (id/mime/sha256) even
@@ -955,7 +951,7 @@ class AgentRuntime:
             # the only place the manifest can be completed (ART-001).
             from agent_core.artifacts import enrich_artifact
 
-            base = root or (workspace / "tasks" / run.task_id)
+            base = root
             run.metadata["artifacts"] = [
                 enrich_artifact(record, base, task_id=run.task_id, run_id=run.id)
                 for record in merged.values()
