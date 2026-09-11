@@ -37,6 +37,29 @@ ModelFactory = Callable[[str | None], BaseChatModel]
 """Builds the chat model for a spec-level model string (None = default)."""
 
 
+def _liveness_kwargs(settings: Settings) -> dict[str, Any]:
+    """Timeout bounds applied to every chat model we build.
+
+    langchain-openai defaults ``stream_chunk_timeout`` to 120s measured between
+    *parsed* chunks (SSE keepalives do not reset it). A self-hosted model
+    prefilling a long agent context can spend well past that before its first
+    content token, so the default aborts a healthy call as a false "no
+    streaming chunk". These settings raise the ceiling without going unbounded:
+    the per-chunk guard still catches a real stall, and the whole-request
+    timeout caps the total. See :class:`Settings` for the rationale.
+    """
+    kwargs: dict[str, Any] = {}
+    chunk = settings.model_stream_chunk_timeout_seconds
+    if chunk is not None:
+        # 0 disables the guard (documented off switch); pass it through so the
+        # library default of 120 does not silently return.
+        kwargs["stream_chunk_timeout"] = float(chunk)
+    request = settings.model_request_timeout_seconds
+    if request and request > 0:
+        kwargs["request_timeout"] = float(request)
+    return kwargs
+
+
 def parse_model_spec(spec: str) -> tuple[str, str]:
     """Split ``provider:model``; a bare model name defaults to provider ``openai``."""
     provider, sep, model = spec.partition(":")
@@ -59,6 +82,7 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
     resolved = settings or get_settings()
     overrides = get_model_config()
     provider, model = parse_model_spec(spec or overrides.model or resolved.model)
+    liveness = _liveness_kwargs(resolved)
 
     # Endpoints registered (or overridden) on the model-config page win over
     # the built-in provider wiring: "<name>:<model>" builds against the stored
@@ -76,10 +100,16 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
             custom,
             api_key=custom_key,
             streaming=resolved.model_streaming,
+            liveness=liveness,
         )
 
     if provider == "local":
-        return _build_local(model, overrides.local_base_url, streaming=resolved.model_streaming)
+        return _build_local(
+            model,
+            overrides.local_base_url,
+            streaming=resolved.model_streaming,
+            liveness=liveness,
+        )
 
     env_var: str | None = PROVIDER_ENV_VARS.get(provider)
     if env_var is None:
@@ -101,6 +131,7 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
             api_key,
             base_url=OPENROUTER_BASE_URL,
             streaming=resolved.model_streaming,
+            liveness=liveness,
         )
     # The official OpenAI endpoint: langchain-openai already enables streaming
     # usage accounting there, so the default constructor is correct.
@@ -109,6 +140,7 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
         api_key=SecretStr(api_key),
         temperature=0,
         streaming=resolved.model_streaming,
+        **liveness,
     )
 
 
@@ -118,6 +150,7 @@ def _build_custom(
     *,
     api_key: str,
     streaming: bool = True,
+    liveness: dict[str, Any] | None = None,
 ) -> BaseChatModel:
     """Build the client for a console-registered endpoint.
 
@@ -141,6 +174,7 @@ def _build_custom(
         # "responses" targets OpenAI's Responses API; the default stays the
         # broadly-compatible chat-completions shape (vLLM/Ollama/OpenRouter).
         use_responses_api=fmt == "responses",
+        liveness=liveness,
     )
 
 
@@ -185,6 +219,7 @@ def _chat_model(
     streaming: bool = True,
     context_window: int | None = None,
     use_responses_api: bool = False,
+    liveness: dict[str, Any] | None = None,
 ) -> ChatOpenAI:
     """Chat model for self-hosted / OpenAI-compatible endpoints.
 
@@ -208,6 +243,7 @@ def _chat_model(
         streaming=streaming,
         stream_usage=True,
         use_responses_api=use_responses_api,
+        **(liveness or {}),
     )
     if context_window is not None:
         instance.profile = {"max_input_tokens": context_window}
@@ -215,7 +251,11 @@ def _chat_model(
 
 
 def _build_local(
-    model: str, base_url_override: str | None = None, *, streaming: bool = True
+    model: str,
+    base_url_override: str | None = None,
+    *,
+    streaming: bool = True,
+    liveness: dict[str, Any] | None = None,
 ) -> BaseChatModel:
     """Any OpenAI-compatible self-hosted endpoint (vLLM, llama.cpp server, ...).
 
@@ -232,4 +272,6 @@ def _build_local(
         )
     overrides = get_model_config()
     api_key = overrides.api_keys.get("local") or os.environ.get("LOCAL_LLM_API_KEY") or "local"
-    return _chat_model(model, api_key, base_url=base_url, streaming=streaming)
+    return _chat_model(
+        model, api_key, base_url=base_url, streaming=streaming, liveness=liveness
+    )

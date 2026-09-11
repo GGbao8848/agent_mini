@@ -61,6 +61,46 @@ class TestBuildModelOverrides:
         assert model.openai_api_base == "http://10.0.0.9:8000/v1"
 
 
+class TestModelLivenessBounds:
+    """A self-hosted model must not inherit langchain's 120s chunk default.
+
+    Prefilling a long agent context on a local model can take longer than 120s
+    before the first content chunk, which the framework default aborts as a
+    false "no streaming chunk received". The bounds stay configurable and the
+    whole-request timeout is kept so a real stall is still caught.
+    """
+
+    async def test_local_endpoint_gets_raised_liveness_bounds(self) -> None:
+        save_model_config(ModelConfig(local_base_url="http://10.0.0.9:8000/v1"))
+
+        model = build_model("local:qwen-test")
+
+        assert model.stream_chunk_timeout == 300.0
+        assert model.request_timeout == 1800.0
+
+    async def test_liveness_bounds_are_configurable(self) -> None:
+        save_model_config(ModelConfig(local_base_url="http://10.0.0.9:8000/v1"))
+        settings = Settings(
+            _env_file=None,
+            model_stream_chunk_timeout_seconds=45.0,
+            model_request_timeout_seconds=600.0,
+        )
+
+        model = build_model("local:qwen-test", settings=settings)
+
+        assert model.stream_chunk_timeout == 45.0
+        assert model.request_timeout == 600.0
+
+    async def test_chunk_guard_disabled_keeps_request_bound(self) -> None:
+        save_model_config(ModelConfig(local_base_url="http://10.0.0.9:8000/v1"))
+        settings = Settings(_env_file=None, model_stream_chunk_timeout_seconds=0.0)
+
+        model = build_model("local:qwen-test", settings=settings)
+
+        assert model.stream_chunk_timeout == 0.0
+        assert model.request_timeout == 1800.0
+
+
 class TestPersistence:
     def test_roundtrip_through_store(self, tmp_path) -> None:
         # Boot binds the store first, then the page saves (real ordering).

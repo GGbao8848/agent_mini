@@ -36,6 +36,17 @@ class Settings(BaseSettings):
     # console). Turn off if a provider chokes on SSE streaming.
     model_streaming: bool = True
 
+    # Model liveness bounds. langchain-openai measures the gap between *parsed*
+    # chunks (SSE keepalives do not reset it) and defaults it to 120s. A
+    # self-hosted model prefilling a long agent context can spend far longer
+    # than that before emitting its first content token — a healthy call the
+    # 120s default aborts as "no streaming chunk received". Raise the ceiling so
+    # slow prefill is tolerated, and keep a whole-request bound so a genuinely
+    # wedged stream still fails instead of hanging forever.
+    # ``model_stream_chunk_timeout_seconds = 0`` disables the per-chunk guard.
+    model_stream_chunk_timeout_seconds: float = 300.0
+    model_request_timeout_seconds: float = 1800.0
+
     # Optional persistence (Phase 16): set to "sqlite:///./agent_core.db" to
     # mirror registries/runs/approvals/events into SQLite and restore on boot.
     database_url: str | None = None

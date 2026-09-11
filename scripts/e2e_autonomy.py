@@ -73,6 +73,10 @@ def avatar_spec() -> AgentSpec:
         limits=AgentLimits(timeout_seconds=5400),
         resilience=ResiliencePolicy(
             summarization=SummarizationPolicy(trigger_messages=60, keep_messages=20),
+            # A self-hosted model occasionally drops a stream (the 120s
+            # chunk-stall and the TCP "Connection error" both showed up in
+            # production); retry the model call instead of losing the whole run.
+            model_retries=2,
         ),
         autonomy=AutonomyPolicy(
             budget=RunBudget(max_model_calls=400, max_total_tokens=4_000_000),
