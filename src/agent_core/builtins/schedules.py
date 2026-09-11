@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from agent_core.domain.permission_mode import PermissionMode
 from agent_core.domain.schedule import Schedule
 from agent_core.domain.tool import ToolDefinition, ToolSource
 from agent_core.errors.exceptions import RegistryError, ScheduleError, ToolError
@@ -44,6 +45,7 @@ def make_create_schedule(service: "AgentCoreService") -> tuple[ToolDefinition, A
         interval_minutes: int | None = None,
         agent_id: str | None = None,
         enabled: bool = True,
+        permission_mode: str | None = None,
     ) -> str:
         runtime: AgentRuntime = service.runtime
         active_agent = agent_id or _current_agent(runtime)
@@ -56,6 +58,14 @@ def make_create_schedule(service: "AgentCoreService") -> tuple[ToolDefinition, A
             cron_expr=cron_expr,
             interval_minutes=interval_minutes,
             enabled=enabled,
+            # A schedule created while the user is in 完全访问/自动编辑 should
+            # inherit that autonomy for its unattended runs; otherwise fall
+            # back to the schedule default (变更前确认).
+            **(
+                {"permission_mode": PermissionMode(permission_mode)}
+                if permission_mode
+                else _inherited_permission_mode()
+            ),
         )
         try:
             service.create_schedule(schedule)
@@ -96,12 +106,38 @@ def make_create_schedule(service: "AgentCoreService") -> tuple[ToolDefinition, A
                     "description": "Agent to run (defaults to the calling agent)",
                 },
                 "enabled": {"type": "boolean", "description": "Start enabled (default true)"},
+                "permission_mode": {
+                    "type": "string",
+                    "enum": ["confirm", "auto", "plan", "full"],
+                    "description": (
+                        "Autonomy for the scheduled runs. Omit to inherit the "
+                        "current conversation's mode. Unattended jobs often want "
+                        "'auto' (自动编辑) so they never wait on an approval."
+                    ),
+                },
             },
             "required": ["name", "task_input", "schedule_type"],
         },
         metadata={"builtin": True, "available": True},
     )
     return definition, create_schedule
+
+
+def _inherited_permission_mode() -> dict[str, Any]:
+    """The schedule kwargs seeding the mode from the calling conversation.
+
+    Empty when there is no run context, which leaves the model's default
+    (变更前确认) in place.
+    """
+    try:
+        from agent_core.runtime.context import get_current_permission_mode
+
+        mode = get_current_permission_mode()
+        if mode is not None:
+            return {"permission_mode": mode}
+    except Exception:
+        pass
+    return {}
 
 
 def _current_agent(runtime: "AgentRuntime") -> str:

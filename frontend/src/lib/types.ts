@@ -152,6 +152,7 @@ export interface Schedule {
   run_count: number
   trigger_text: string
   model: string | null
+  permission_mode: PermissionMode
   metadata: Record<string, unknown>
 }
 
@@ -164,6 +165,7 @@ export type SchedulePayload = {
   interval_minutes?: number | null
   enabled?: boolean
   model?: string | null
+  permission_mode?: PermissionMode
 }
 
 export interface Skill {

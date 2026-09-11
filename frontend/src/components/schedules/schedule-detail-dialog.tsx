@@ -25,7 +25,8 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useModelConfig, useScheduleManage } from "@/hooks/use-console"
-import type { Schedule } from "@/lib/types"
+import { PERMISSION_MODES, permissionModeLabel } from "@/components/chat/permission-mode-picker"
+import type { PermissionMode, Schedule } from "@/lib/types"
 import { CalendarClockIcon, PencilIcon } from "lucide-react"
 
 const TYPE_LABELS: Record<string, string> = {
@@ -75,6 +76,32 @@ export function ScheduleModelSelect({
   )
 }
 
+/** Permission-mode select for the schedule form (same options as the chat
+ *  composer, but labelled for an unattended run). */
+export function SchedulePermissionModeSelect({
+  value,
+  onChange,
+}: {
+  value: PermissionMode
+  onChange: (mode: PermissionMode) => void
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as PermissionMode)}>
+      <SelectTrigger className="w-full text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {PERMISSION_MODES.map((mode) => (
+          <SelectItem key={mode.value} value={mode.value} className="text-xs">
+            <span className="font-medium">{mode.label}</span>
+            <span className="ml-2 text-muted-foreground">{mode.hint}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 export function ScheduleDetailDialog({
   schedule,
   onClose,
@@ -87,6 +114,7 @@ export function ScheduleDetailDialog({
   const [name, setName] = React.useState("")
   const [taskInput, setTaskInput] = React.useState("")
   const [model, setModel] = React.useState<string | null>(null)
+  const [permissionMode, setPermissionMode] = React.useState<PermissionMode>("confirm")
 
   React.useEffect(() => {
     if (schedule) {
@@ -94,6 +122,7 @@ export function ScheduleDetailDialog({
       setName(schedule.name)
       setTaskInput(schedule.task_input)
       setModel(schedule.model ?? null)
+      setPermissionMode(schedule.permission_mode)
     }
   }, [schedule])
 
@@ -111,6 +140,7 @@ export function ScheduleDetailDialog({
           interval_minutes: schedule.interval_minutes,
           enabled: schedule.enabled,
           model,
+          permission_mode: permissionMode,
         },
       },
       { onSuccess: () => setEditing(false) },
@@ -151,6 +181,15 @@ export function ScheduleDetailDialog({
                 )}
                 <Detail label="任务输入" value={schedule.task_input} multiline />
                 <Detail label="使用模型" value={schedule.model ?? "默认模型"} mono />
+                <Detail
+                  label="权限模式"
+                  value={permissionModeLabel(schedule.permission_mode)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {schedule.permission_mode === "confirm"
+                    ? "无人值守的日程用「变更前确认」会一直等待审批；如需自动执行请改为「自动编辑」或「完全访问」。"
+                    : "日程到点后按该模式自主执行，无需人工确认。"}
+                </p>
                 <div className="grid grid-cols-2 gap-x-2 gap-y-1 pt-1 text-xs text-muted-foreground">
                   <span>
                     上次运行：
@@ -188,6 +227,17 @@ export function ScheduleDetailDialog({
                 <div className="grid gap-1.5">
                   <Label>使用模型</Label>
                   <ScheduleModelSelect value={model} onChange={setModel} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>权限模式</Label>
+                  <SchedulePermissionModeSelect
+                    value={permissionMode}
+                    onChange={setPermissionMode}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    无人值守运行使用该模式：计划模式不写文件、自动编辑直接改、
+                    完全访问连高风险工具也不再确认。
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" onClick={save} disabled={manage.update.isPending || !name.trim() || !taskInput.trim()}>

@@ -21,10 +21,14 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { useScheduleManage, useSchedules, useSubmitTask } from "@/hooks/use-console"
-import type { Schedule, ScheduleType } from "@/lib/types"
+import type { PermissionMode, Schedule, ScheduleType } from "@/lib/types"
 import { ScheduleDetailDialog } from "@/components/schedules/schedule-detail-dialog"
 import { ScheduleToggle } from "@/components/schedules/schedule-toggle"
 import { getSelectedModel } from "@/components/chat/model-picker"
+import {
+  PermissionModePicker,
+  permissionModeLabel,
+} from "@/components/chat/permission-mode-picker"
 import { describeCron } from "@/lib/schedule"
 import { ArrowUpIcon, CalendarClockIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
@@ -59,6 +63,10 @@ function ScheduleRequestDialog({
 }) {
   const submit = useSubmitTask()
   const [input, setInput] = React.useState("")
+  // The schedule the agent creates inherits this conversation's mode, so this
+  // is where an unattended job picks 自动编辑/完全访问 instead of stalling on a
+  // 变更前确认 prompt later.
+  const [mode, setMode] = React.useState<PermissionMode>("auto")
 
   const close = () => {
     if (submit.isPending) return
@@ -70,7 +78,7 @@ function ScheduleRequestDialog({
     const text = input.trim()
     if (!text || submit.isPending) return
     submit.mutate(
-      { input: text, model: getSelectedModel() },
+      { input: text, model: getSelectedModel(), permission_mode: mode },
       {
         onSuccess: (task) => {
           setInput("")
@@ -107,6 +115,10 @@ function ScheduleRequestDialog({
           <p className="text-xs text-muted-foreground">
             支持一次性 / 每天 / 每周 / 每月等重复规则，也支持「每 2 小时」这类间隔。
           </p>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">日程权限模式</span>
+            <PermissionModePicker value={mode} onChange={setMode} />
+          </div>
         </div>
         <DialogFooter>
           <Button onClick={send} disabled={!input.trim() || submit.isPending}>
@@ -252,6 +264,8 @@ export function SchedulesPanel({
                 {schedule.next_run_at
                   ? ` · 下次 ${new Date(schedule.next_run_at).toLocaleString()}`
                   : ""}
+                {" · "}
+                {permissionModeLabel(schedule.permission_mode)}
               </p>
               <div className="mt-auto flex items-center gap-1 pt-1">
                 <Button

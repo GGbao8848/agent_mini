@@ -21,6 +21,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from agent_core.domain.permission_mode import DEFAULT_PERMISSION_MODE, PermissionMode
 from agent_core.errors.exceptions import ScheduleError
 
 ScheduleType = Literal["one_time", "cron", "interval"]
@@ -62,6 +63,10 @@ class Schedule(BaseModel):
     model: str | None = None
     """Model spec (``provider:model``) this schedule's runs use; None = the
     agent's default."""
+    permission_mode: PermissionMode = DEFAULT_PERMISSION_MODE
+    """Autonomy dial its runs use (see :class:`PermissionMode`). An unattended
+    nightly job usually wants 自动编辑/完全访问 so it never blocks on a prompt
+    nobody is there to answer; the default stays 变更前确认."""
     created_at: datetime = Field(default_factory=local_now)
     last_run_at: datetime | None = None
     next_run_at: datetime | None = None

@@ -144,7 +144,14 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     async def _schedule_runner(agent_id: str, text: str, metadata: dict[str, Any] | None) -> Any:
         data = dict(metadata or {})
         model = data.pop("model", None)
-        return await service.submit_run(agent_id, text, metadata=data or None, model=model)
+        permission_mode = data.pop("permission_mode", None)
+        return await service.submit_run(
+            agent_id,
+            text,
+            metadata=data or None,
+            model=model,
+            permission_mode=permission_mode,
+        )
 
     schedules = ScheduleManager(runner=_schedule_runner, store=store)
     if store is not None:

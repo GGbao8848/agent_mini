@@ -613,7 +613,7 @@ function ChatThread({ task }: { task: Task }) {
             pending={followup.isPending}
             running={running}
             taskId={current.id}
-            permissionMode={current.permission_mode}
+            permissionMode={modeForNextTurn}
             onPermissionMode={setPermissionMode}
             onStop={() => setConfirmStop(true)}
             onSubmit={(text, attachments, model) =>

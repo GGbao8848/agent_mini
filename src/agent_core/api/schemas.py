@@ -21,7 +21,7 @@ from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
 from agent_core.domain.memory import Memory
 from agent_core.domain.metrics import RunUsage
-from agent_core.domain.permission_mode import PermissionMode
+from agent_core.domain.permission_mode import DEFAULT_PERMISSION_MODE, PermissionMode
 from agent_core.domain.project import Project
 from agent_core.domain.schedule import Schedule, ScheduleType
 from agent_core.domain.skill import SkillManifest
@@ -367,6 +367,7 @@ class ScheduleBase(BaseModel):
     interval_minutes: int | None = Field(default=None, ge=1)
     enabled: bool = True
     model: str | None = None
+    permission_mode: PermissionMode = DEFAULT_PERMISSION_MODE
 
 
 class ScheduleCreateRequest(ScheduleBase):
@@ -394,6 +395,7 @@ class ScheduleOut(BaseModel):
     run_count: int
     trigger_text: str
     model: str | None = None
+    permission_mode: PermissionMode = DEFAULT_PERMISSION_MODE
     metadata: dict[str, Any]
 
     @classmethod
@@ -415,6 +417,7 @@ class ScheduleOut(BaseModel):
             run_count=schedule.run_count,
             trigger_text=schedule.describe_trigger(),
             model=schedule.model,
+            permission_mode=schedule.permission_mode,
             metadata=schedule.metadata,
         )
 

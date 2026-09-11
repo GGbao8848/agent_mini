@@ -160,6 +160,10 @@ class ScheduleManager:
                 "source_schedule_id": schedule.id,
                 "source_schedule_name": schedule.name,
                 **({"model": schedule.model} if schedule.model else {}),
+                # Unattended runs honour the schedule's own permission mode;
+                # without this a 变更前确认 schedule would park on an approval
+                # no one is there to answer.
+                "permission_mode": schedule.permission_mode.value,
             },
         )
         schedule.last_run_at = local_now()
