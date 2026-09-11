@@ -63,7 +63,9 @@ asks before the agent writes one.
 
 ## Blast radius
 
-Skill writes now originate in the filesystem layer, so `BoundaryBackend` and the
-DeepAgents `FilesystemPermission` list keep only `/inputs/**` read-only.
+Skill writes now originate in the filesystem layer, so there is no separate
+boundary wrapper: `BoundaryBackend` and the `FilesystemPermission` list were
+removed once the pre-created read-only layout went away (see
+`docs/shared-workspace.md`).
 `SkillRegistry` keeps its in-memory API (used by capability tests) but nothing
 in production calls `register`; production populates it via `sync_from_dir`.

@@ -26,7 +26,7 @@ _DESCRIPTION = (
     "steps 列表：已经完成的步骤放在前面、当前正在做的步骤用 current_index 指定、"
     "尚未开始的排在后面。每次进度变化（完成一步、改变下一步）都调用一次，"
     "系统会把这份计划作为权威进度记录注入后续上下文，减少重复劳动。"
-    "步骤要具体、可验证（例如“读取 inputs/report.pdf”“生成 outputs/summary.xlsx”）。"
+    "步骤要具体、可验证（例如“读取 report.pdf 提取数据”“生成 summary.xlsx”）。"
 )
 
 _SCHEMA = {

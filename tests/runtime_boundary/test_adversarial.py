@@ -56,11 +56,11 @@ def test_hidden_runtime_files_are_not_inside_the_agent_root(tmp_path: Path) -> N
     assert not any("checkpoint" in e for e in entries)
 
 
-def test_inputs_writes_are_denied_but_skills_are_writable(tmp_path: Path) -> None:
+def test_working_folder_is_writable_including_a_skills_mount(tmp_path: Path) -> None:
+    """The agent owns its working folder and the /skills mount outright."""
     backend = _backend(tmp_path)
-    assert backend.write("/inputs/x.txt", "no").error  # type: ignore[attr-defined]
-    assert backend.delete("/inputs/x.txt").error  # type: ignore[attr-defined]
-    # /skills is intentionally writable: a skill is a directory the agent owns.
+    assert backend.write("notes/x.txt", "ok").error is None  # type: ignore[attr-defined]
+    # /skills is writable too: a skill is a directory the agent owns.
     assert backend.write("/skills/x/SKILL.md", "ok").error is None  # type: ignore[attr-defined]
 
 

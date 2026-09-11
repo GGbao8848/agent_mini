@@ -30,7 +30,7 @@ from agent_core.runtime.middleware import build_middleware
 from agent_core.runtime.model import ModelFactory, build_model
 from agent_core.runtime.paths import current_task_dir, environment_note
 from agent_core.runtime.tooling import ToolFactory, make_direct_tool
-from agent_core.workspace import WorkspaceLayout, filesystem_permissions, skills_root
+from agent_core.workspace import skills_root
 
 CompiledGraph = CompiledStateGraph[Any, Any, Any, Any]
 """Fully parameterized alias; concrete state types are DeepAgents internals."""
@@ -169,10 +169,6 @@ class AgentBuilder:
                 fanout=self._fanout,
                 gate=self._gate,
             ),
-            # Read-only mount rule: /inputs is immutable (invariant I-01).
-            # /skills is deliberately writable — a skill is a directory the
-            # agent owns (see docs/skills-as-directory.md).
-            permissions=filesystem_permissions(),
             # Resolved lazily: build() runs inside a loop, construction may not.
             checkpointer=self._checkpointer_provider() if self._checkpointer_provider else None,
             name=spec.name,
@@ -216,36 +212,29 @@ class AgentBuilder:
     def _backend_kwargs(self, spec: AgentSpec) -> dict[str, Any]:
         """Build the agent's filesystem backend and skill mount.
 
-        The agent gets a *controlled* working environment, not the raw task
-        directory: the task root is laid out as ``inputs/`` (read-only),
-        ``workspace/``, ``outputs/`` and ``scratch/`` (writable) — see
-        :mod:`agent_core.workspace`.
+        The agent works in one folder — the bound project directory, or the
+        workspace's ``default`` folder — and decides for itself how to organize
+        files inside it. Nothing is pre-created and nothing is write-protected.
 
         Skills are a *directory the agent owns*: ``<workspace>/skills`` is
         mounted read-write at ``/skills`` through a :class:`CompositeBackend`
         route, so the agent reads, adds, edits and deletes skills with its
         ordinary file tools — there is no separate registration step. The
         framework's skill discovery lists ``/skills/`` and reads each
-        ``/skills/<id>/SKILL.md``, which the route serves directly (no index
-        shim needed: the whole directory is one mount).
+        ``/skills/<id>/SKILL.md``, which the route serves directly.
         """
         from deepagents.backends import CompositeBackend
-
-        from agent_core.workspace.backend import BoundaryBackend
 
         settings = self._settings or get_settings()
         workspace = Path(settings.workspace_dir)
         backend_root = current_task_dir(workspace)
-        WorkspaceLayout.ensure(backend_root)
+        backend_root.mkdir(parents=True, exist_ok=True)
         backend: Any = FilesystemBackend(root_dir=backend_root)
         root = skills_root(workspace)
         routes: dict[str, Any] = {
             "/skills/": FilesystemBackend(root_dir=root, virtual_mode=True)
         }
         backend = CompositeBackend(default=backend, routes=routes)
-        # Data-layer enforcement of the read-only mounts (I-01): the middleware
-        # checks the tool wrappers, this also guards direct calls.
-        backend = BoundaryBackend(backend)
         return {"skills": ["/skills/"], "backend": backend}
 
     def _resolve_tool(self, name: str) -> BaseTool:

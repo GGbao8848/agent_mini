@@ -49,7 +49,7 @@ Tool Layer → Permission → Action Gate → Tool Executor → Python Tool / MC
 | 23 | 多轮对话：LangGraph checkpointer + thread_id，**任意 run 可续聊**（AsyncSqliteSaver 持久化，跨重启保留上下文） | ✅ |
 | 24 | Console 工具箱：Skills/MCP 安装与管理 UI（MCP 以 JSON 录入为主 + 表单备选，兼容标准 mcpServers 格式），MCP 连接生命周期修复（owner-task），Agent 工具/技能绑定（PUT /v1/agents/{id} + 工具箱面板） | ✅ |
 | 25 | Console 前端重构：React 19 + shadcn/ui 官方组件（Base UI 内核）+ Tailwind v4 + Vite，任务台改对话式布局（Runs 进侧边栏、聊天输入框沉底、线程气泡流、审批内联、运行详情弹窗），构建产物直出挂载目录，后端零改动 | ✅ |
-| 26 | Runtime Hardening 1.0：Workspace 只读挂载 / Skill 零复制隔离 / 能力强制 / Artifact 契约 / Memory 重建+语义检索 / 纠错闭环 / 长任务心跳 | ✅ |
+| 26 | Runtime Hardening 1.0：Workspace 受控目录 / Skill 零复制隔离 / 能力强制 / Artifact 契约 / Memory 重建+语义检索 / 纠错闭环 / 长任务心跳 | ✅ |
 | 27 | Runtime Hardening 2.0（R20–R24）：Context 分层装配 / Task State 事件投影 / Capability Resolver 唯一事实源 / Memory 治理（scope+owner）/ Execution·Network Policy；外加**工具 schema 治理**（压缩 + 冷工具分层披露，固定成本 5262→2844 token） | ✅ |
 
 ### Runtime Hardening 2.0 明细（已合入 main）
@@ -407,7 +407,7 @@ src/agent_core/
 ├── registries/      # Agent / Tool / Skill / MCP / Team 注册中心（内存实现）
 ├── task_state/      # R21 任务状态：事件投影的显式进度（reducer/service/repository）
 ├── text/            # 领域无关的工具：token 估算等
-├── workspace/       # 逻辑挂载与只读边界（BoundaryBackend / 技能索引 / 权限）
+├── workspace/       # 工作文件夹与技能根（default / 项目目录 / skills）
 └── runtime/         # 模型工厂、AgentBuilder、AgentExecutor、AgentRuntime（DeepAgents）、native middleware 映射、工具分层披露
 
 cli.py               # agent-core 命令行（serve / demo / API 客户端）

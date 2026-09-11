@@ -107,35 +107,25 @@ def test_i03_skill_source_is_reachable_through_the_backend(tmp_path: Path) -> No
     assert "web-research" in read.file_data["content"]
 
 
-# ----------------------------------------------------------- I-01 inputs read-only
+# --------------------------------------------------- I-01 working folder is free
 
 
-def test_i01_backend_denies_writing_inputs(tmp_path: Path) -> None:
-    """The file backend must refuse writes under /inputs (immutable inputs)."""
-    from agent_core.workspace import layout
-
+def test_i01_agent_owns_its_working_folder(tmp_path: Path) -> None:
+    """A working folder is handed to the agent as-is: no pre-created dirs, no
+    write-protected zones. How it organizes files is the agent's decision."""
     workspace = tmp_path / "workspace"
+    default = workspace / "default"
     builder = make_builder(workspace=workspace)
-    layout.WorkspaceLayout.ensure(workspace / "tasks" / "t1")
-    kwargs = builder._backend_kwargs(base_spec())
-    backend = kwargs["backend"]
-
-    result = backend.write("/inputs/important.txt", "tampered")
-
-    assert getattr(result, "error", None), "writing an immutable input must be denied"
-
-
-def test_i01_backend_allows_writing_workspace_and_outputs(tmp_path: Path) -> None:
-    """The writable zones stay writable."""
-    from agent_core.workspace import layout
-
-    workspace = tmp_path / "workspace"
-    builder = make_builder(workspace=workspace)
-    layout.WorkspaceLayout.ensure(workspace / "tasks" / "t1")
     backend = builder._backend_kwargs(base_spec())["backend"]
 
-    assert not getattr(backend.write("/workspace/a.txt", "ok"), "error", None)
-    assert not getattr(backend.write("/outputs/b.txt", "ok"), "error", None)
+    # Empty on delivery — nothing (inputs/outputs/scratch/…) is pre-created.
+    assert list(default.iterdir()) == []
+
+    # The agent decides the layout, and every path under the root is writable.
+    for path in ("inputs/a.txt", "outputs/b.txt", "scratch/c.txt", "notes/d.md"):
+        result = backend.write(f"/{path}", "ok")
+        assert getattr(result, "error", None) is None, (path, result)
+        assert (default / path).is_file()
 
 
 # ------------------------------------------------------------------ I-05 hidden paths

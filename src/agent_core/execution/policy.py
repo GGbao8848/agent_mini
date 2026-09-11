@@ -193,9 +193,9 @@ def _podman_policy(settings: Settings) -> ExecutionPolicy:
         mode=ExecutionMode.PODMAN,
         sandbox_image=settings.sandbox_image,
         filesystem=FilesystemPolicy(
-            readable=["/work（任务目录）", "/skills/<id>（只读）", "/root/.cache/pip（共享缓存）"],
-            writable=["/work"],
-            denied=["/inputs 写入", "/skills 写入"],
+            readable=["/work（工作目录）", "/skills（可读写）", "/root/.cache/pip（共享缓存）"],
+            writable=["/work", "/skills"],
+            denied=[],
             isolated=True,
         ),
         network=NetworkPolicy(

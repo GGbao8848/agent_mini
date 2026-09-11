@@ -924,10 +924,9 @@ class AgentRuntime:
 
         Only top-level runs collect: nested runs (verifier) share the run root
         and would double-claim the same files. The scan is bounded to the run's
-        root — the shared workspace directory, or the bound project directory —
-        so a concurrent run in a *different* project can never leak in.
-        ``skills/`` and ``uploads/`` are skipped (capability sources and
-        user-provided inputs, never deliverables). Tools that explicitly claimed
+        working folder (``default``, or the bound project directory), so a run
+        in a *different* group can never leak in. ``uploads/`` is skipped
+        (mirrored attachments, not deliverables). Tools that explicitly claimed
         artifacts (run_code) are merged in and take precedence.
         """
         if run.parent_run_id is not None:
