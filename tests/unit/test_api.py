@@ -353,6 +353,24 @@ class TestTaskRoutes:
         assert pinned.json()["pinned"] is True
         assert pinned.json()["title"] == "新名字"  # partial update keeps values
 
+    async def test_change_permission_mode_takes_effect_immediately(
+        self, client: Any
+    ) -> None:
+        """Changing the dial persists it on the conversation at once (no send needed)."""
+        body = (
+            await client.post(
+                "/v1/tasks", params={"wait": "true"}, json={"agent_id": "helper", "input": "yo"}
+            )
+        ).json()
+        task_id = body["id"]
+        assert body["permission_mode"] == "confirm"  # default
+
+        resp = await client.patch(f"/v1/tasks/{task_id}", json={"permission_mode": "full"})
+        assert resp.status_code == 200
+        assert resp.json()["permission_mode"] == "full"
+        # Persisted: a fresh read (not the mutation echo) still shows it.
+        assert (await client.get(f"/v1/tasks/{task_id}")).json()["permission_mode"] == "full"
+
     async def test_delete_task(self, client: Any) -> None:
         body = (
             await client.post(

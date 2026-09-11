@@ -162,12 +162,15 @@ async def stream_task_events(task_id: str, service: ServiceDep) -> EventSourceRe
 
 @router.patch("/{task_id}", response_model=TaskOut)
 def update_task(task_id: str, payload: TaskUpdateRequest, service: ServiceDep) -> TaskOut:
-    """Rename, pin/unpin or rebind a conversation."""
+    """Rename, pin/unpin, rebind or re-dial a conversation."""
     task = service.runtime.update_task(
         task_id,
         title=payload.title,
         pinned=payload.pinned,
         project_id=payload.project_id,
+        permission_mode=(
+            payload.permission_mode.value if payload.permission_mode else None
+        ),
     )
     return _conversation_out(service, task.id)
 

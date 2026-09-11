@@ -118,13 +118,17 @@ class TaskMessageRequest(BaseModel):
 
 
 class TaskUpdateRequest(BaseModel):
-    """Editable task fields (rename, pin, rebind); omitted fields keep values."""
+    """Editable task fields (rename, pin, rebind, re-dial); omitted fields keep values."""
 
     title: str | None = Field(default=None, min_length=1)
     pinned: bool | None = None
     project_id: str | None = Field(
         default=None,
         description="Rebind to a project ('' clears the binding; None keeps it)",
+    )
+    permission_mode: PermissionMode | None = Field(
+        default=None,
+        description="Change the conversation's permission/autonomy dial (None keeps it)",
     )
 
 

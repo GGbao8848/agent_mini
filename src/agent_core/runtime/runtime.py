@@ -383,12 +383,15 @@ class AgentRuntime:
         title: str | None = None,
         pinned: bool | None = None,
         project_id: str | None = None,
+        permission_mode: str | None = None,
     ) -> Task:
-        """Rename, pin/unpin or rebind a conversation; returns the updated Task.
+        """Rename, pin/unpin, rebind or re-dial a conversation; returns the Task.
 
         ``project_id`` uses sentinel semantics like the model-config API:
         None keeps the value, "" clears the binding, otherwise it must name a
-        registered project.
+        registered project. ``permission_mode`` changes the conversation's
+        autonomy dial; it applies from the next run onward (a run already in
+        flight keeps the mode it started with).
         """
         task = self.get_task(task_id)
         update: dict[str, Any] = {}
@@ -401,6 +404,8 @@ class AgentRuntime:
             update["title"] = title
         if pinned is not None:
             update["pinned"] = pinned
+        if permission_mode is not None:
+            update["permission_mode"] = PermissionMode(permission_mode)
         if project_id is not None:
             if project_id:
                 self.projects.get(project_id)  # fail fast on unknown projects

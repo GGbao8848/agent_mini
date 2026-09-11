@@ -588,7 +588,16 @@ function ChatThread({ task }: { task: Task }) {
             running={running}
             taskId={current.id}
             permissionMode={modeForNextTurn}
-            onPermissionMode={setPermissionMode}
+            onPermissionMode={(mode) => {
+              // Persist the dial on the conversation immediately, so a reload or
+              // another device sees the change and the next turn needs no
+              // re-send. The send path still carries it as a belt-and-braces.
+              setPermissionMode(mode)
+              updateTask.mutate({
+                taskId: current.id,
+                patch: { permission_mode: mode },
+              })
+            }}
             onStop={() => setConfirmStop(true)}
             onSubmit={(text, attachments, model) =>
               followup.mutate({

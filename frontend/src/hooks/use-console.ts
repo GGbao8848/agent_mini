@@ -281,7 +281,15 @@ export function useUpdateTask() {
   const queryClient = useQueryClient()
   return useToastMutation<
     Task,
-    { taskId: string; patch: { title?: string; pinned?: boolean; project_id?: string } }
+    {
+      taskId: string
+      patch: {
+        title?: string
+        pinned?: boolean
+        project_id?: string
+        permission_mode?: PermissionMode
+      }
+    }
   >({
     mutationFn: ({ taskId, patch }) => api.patch<Task>(`/v1/tasks/${taskId}`, patch),
     onSuccess: () => {
