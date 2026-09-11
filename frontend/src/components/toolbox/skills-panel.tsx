@@ -22,15 +22,17 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { SkillDropzone } from "@/components/toolbox/skill-dropzone"
 import { useSkillManage, useSkills } from "@/hooks/use-console"
 import { PackageIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
 const EMPTY_FORM = { id: "", name: "", version: "0.1.0", description: "", path: "" }
 
-/** Install dialog: upload a skill zip (primary) or register a server dir (fallback). */
-function InstallSkillDialog({
+/** Register dialog: point the registry at a skill directory already on the server disk.
+ *
+ * Installing a *new* skill is the agent's job — it authors the directory and
+ * calls `install_skill`. This dialog only covers the case where the directory
+ * already exists outside the workspace and just needs a manifest. */
+function RegisterSkillDialog({
   open,
   onOpenChange,
 }: {
@@ -38,7 +40,6 @@ function InstallSkillDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const skills = useSkillManage()
-  const [tab, setTab] = React.useState("upload")
   const [form, setForm] = React.useState(EMPTY_FORM)
   const [error, setError] = React.useState("")
 
@@ -48,7 +49,7 @@ function InstallSkillDialog({
     setForm(EMPTY_FORM)
   }
 
-  const submitPath = () => {
+  const submit = () => {
     setError("")
     const payload = {
       id: form.id.trim(),
@@ -70,57 +71,49 @@ function InstallSkillDialog({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && close()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>安装技能</DialogTitle>
+          <DialogTitle>登记技能目录</DialogTitle>
           <DialogDescription>
-            技能目录约定：目录内放 SKILL.md（+ references/ scripts/）。
+            登记一个已在服务器磁盘上的技能目录（目录内需有 SKILL.md，+ references/ scripts/ 可选）。
+            安装新技能请直接在对话里让分身来做。
           </DialogDescription>
         </DialogHeader>
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="upload">上传 zip</TabsTrigger>
-            <TabsTrigger value="path">登记服务器路径</TabsTrigger>
-          </TabsList>
-          <TabsContent value="upload" className="flex justify-center py-2">
-            <SkillDropzone size="compact" onUploaded={close} />
-          </TabsContent>
-          <TabsContent value="path" className="flex flex-col gap-3">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="grid gap-1.5">
-                <Label htmlFor="sk-id">id</Label>
-                <Input id="sk-id" placeholder="my-skill" value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="sk-name">名称</Label>
-                <Input id="sk-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="grid gap-1.5">
-                <Label htmlFor="sk-version">版本</Label>
-                <Input id="sk-version" value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="sk-desc">描述</Label>
-                <Input id="sk-desc" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-              </div>
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="sk-id">id</Label>
+              <Input id="sk-id" placeholder="my-skill" value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="sk-path">服务器上的目录路径</Label>
-              <Input
-                id="sk-path"
-                placeholder="/home/user/skills/my-skill（目录内需有 SKILL.md）"
-                value={form.path}
-                onChange={(e) => setForm({ ...form, path: e.target.value })}
-              />
+              <Label htmlFor="sk-name">名称</Label>
+              <Input id="sk-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <DialogFooter>
-              <Button disabled={skills.install.isPending} onClick={submitPath}>
-                安装
-              </Button>
-            </DialogFooter>
-          </TabsContent>
-        </Tabs>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="sk-version">版本</Label>
+              <Input id="sk-version" value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="sk-desc">描述</Label>
+              <Input id="sk-desc" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="sk-path">服务器上的目录路径</Label>
+            <Input
+              id="sk-path"
+              placeholder="/home/user/skills/my-skill（目录内需有 SKILL.md）"
+              value={form.path}
+              onChange={(e) => setForm({ ...form, path: e.target.value })}
+            />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <DialogFooter>
+            <Button disabled={skills.install.isPending} onClick={submit}>
+              登记
+            </Button>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   )
@@ -134,7 +127,8 @@ export function SkillsPanel() {
 
   const skillList = skills.data ?? []
 
-  // Empty state: a centered dropzone is the whole page.
+  // Empty state: tell the user the agent is the install path; the dialog below
+  // only covers registering a directory that is already on the server disk.
   if (!skills.isLoading && skillList.length === 0) {
     return (
       <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 p-6">
@@ -143,14 +137,16 @@ export function SkillsPanel() {
             <PackageIcon className="size-6 text-muted-foreground" />
           </div>
           <h2 className="text-lg font-medium">还没有安装任何技能</h2>
-          <p className="text-sm text-muted-foreground">上传一个技能 zip 包，或登记服务器上的技能目录</p>
+          <p className="max-w-md text-sm text-muted-foreground">
+            直接在对话里让分身安装即可：它会把技能目录写好并注册进技能库。
+            若技能目录已经放在服务器磁盘上，也可以用下面的按钮直接登记。
+          </p>
         </div>
-        <SkillDropzone size="large" onUploaded={() => undefined} />
         <Button size="sm" variant="outline" onClick={() => setInstallOpen(true)}>
           <PlusIcon data-icon="inline-start" />
           登记服务器目录路径
         </Button>
-        <InstallSkillDialog open={installOpen} onOpenChange={setInstallOpen} />
+        <RegisterSkillDialog open={installOpen} onOpenChange={setInstallOpen} />
       </div>
     )
   }
@@ -159,11 +155,15 @@ export function SkillsPanel() {
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-muted-foreground">Skills 技能（{skillList.length} 个）</h2>
-        <Button size="sm" onClick={() => setInstallOpen(true)}>
+        <Button size="sm" variant="outline" onClick={() => setInstallOpen(true)}>
           <PlusIcon data-icon="inline-start" />
-          安装技能
+          登记技能目录
         </Button>
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        安装新技能：在对话里描述你要的能力，分身会写技能目录并注册（安装动作需你确认）。
+      </p>
 
       {skills.isLoading ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
@@ -223,7 +223,7 @@ export function SkillsPanel() {
         </div>
       )}
 
-      <InstallSkillDialog open={installOpen} onOpenChange={setInstallOpen} />
+      <RegisterSkillDialog open={installOpen} onOpenChange={setInstallOpen} />
 
       <AlertDialog open={removingId !== null} onOpenChange={(isOpen) => !isOpen && setRemovingId(null)}>
         <AlertDialogContent>

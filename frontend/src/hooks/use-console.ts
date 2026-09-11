@@ -369,20 +369,11 @@ export function useSkillManage() {
     mutationFn: ({ id, enabled }) => api.patch(`/v1/skills/${id}`, { enabled }),
     onSuccess: invalidate,
   })
-  const upload = useToastMutation<unknown, { file: File; skillId?: string }>({
-    mutationFn: ({ file, skillId }) => {
-      const form = new FormData()
-      form.append("file", file)
-      if (skillId) form.append("skill_id", skillId)
-      return api.upload("/v1/skills/upload", form)
-    },
-    onSuccess: invalidate,
-  })
   const remove = useToastMutation<unknown, string>({
     mutationFn: (skillId) => api.del(`/v1/skills/${skillId}`),
     onSuccess: invalidate,
   })
-  return { install, update, upload, remove }
+  return { install, update, remove }
 }
 
 export function useUpdateAgent() {
