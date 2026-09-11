@@ -30,7 +30,7 @@ from agent_core.runtime.middleware import build_middleware
 from agent_core.runtime.model import ModelFactory, build_model
 from agent_core.runtime.paths import current_task_dir, environment_note
 from agent_core.runtime.tooling import ToolFactory, make_direct_tool
-from agent_core.workspace import WorkspaceLayout, filesystem_permissions
+from agent_core.workspace import WorkspaceLayout, filesystem_permissions, skills_root
 
 CompiledGraph = CompiledStateGraph[Any, Any, Any, Any]
 """Fully parameterized alias; concrete state types are DeepAgents internals."""
@@ -108,7 +108,7 @@ class AgentBuilder:
         environment_text = environment_note(
             current_task_dir(Path(settings.workspace_dir)),
             settings,
-            self._skill_mounts(),
+            skills_root(Path(settings.workspace_dir)),
         )
         # Retrieved long-term memory: only the few entries relevant to this
         # request (see agent_core.memory), never the whole store (MEM-005).
@@ -202,20 +202,6 @@ class AgentBuilder:
         )
         return static_breakdown(definitions, self._skills.list(), cold_names=cold)
 
-    def _skill_mounts(self) -> list[tuple[str, Path]]:
-        """Enabled ``(skill_id, source_dir)`` pairs for the environment note.
-
-        Mirrors the backend's skill exposure (see ``_backend_kwargs``): only
-        enabled skills with a real on-disk directory. The note renders these as
-        ``/skills/<id>`` under podman and as the real path on the host.
-        """
-        mounts: list[tuple[str, Path]] = []
-        for manifest in self._skills.list():
-            if not manifest.enabled or manifest.path is None or not manifest.path.is_dir():
-                continue
-            mounts.append((manifest.id, manifest.path))
-        return mounts
-
     def _agent_tool_names(self, spec: AgentSpec) -> list[str]:
         """The tool names an agent is bound to (R22: via the resolver).
 
@@ -231,49 +217,35 @@ class AgentBuilder:
 
         The agent gets a *controlled* working environment, not the raw task
         directory: the task root is laid out as ``inputs/`` (read-only),
-        ``workspace/``, ``outputs/`` and ``tmp/`` (writable) — see
-        :mod:`agent_core.workspace`. Skills are **not** copied in: each enabled
-        skill is mounted read-only at ``/skills/<id>`` through a
-        :class:`CompositeBackend` route straight to its registry source, so the
-        agent can read skill material but the source on disk is never mutated
-        (invariants I-02/I-03).
+        ``workspace/``, ``outputs/`` and ``scratch/`` (writable) — see
+        :mod:`agent_core.workspace`.
+
+        Skills are a *directory the agent owns*: ``<workspace>/skills`` is
+        mounted read-write at ``/skills`` through a :class:`CompositeBackend`
+        route, so the agent reads, adds, edits and deletes skills with its
+        ordinary file tools — there is no separate registration step. The
+        framework's skill discovery lists ``/skills/`` and reads each
+        ``/skills/<id>/SKILL.md``, which the route serves directly (no index
+        shim needed: the whole directory is one mount).
         """
         from deepagents.backends import CompositeBackend
 
         from agent_core.workspace.backend import BoundaryBackend
-        from agent_core.workspace.skills_index import SkillsIndexBackend
 
         settings = self._settings or get_settings()
         workspace = Path(settings.workspace_dir)
         backend_root = current_task_dir(workspace)
         WorkspaceLayout.ensure(backend_root)
         backend: Any = FilesystemBackend(root_dir=backend_root)
-        routes: dict[str, Any] = {}
-        skill_ids: list[str] = []
-        for manifest in self._skills.list():
-            if not manifest.enabled:
-                continue
-            source = self._resolve_skill_path(manifest.id)
-            routes[f"/skills/{manifest.id}/"] = FilesystemBackend(
-                root_dir=source, virtual_mode=True
-            )
-            skill_ids.append(manifest.id)
-        if routes:
-            # The parent /skills/ must be listable for the framework's skill
-            # discovery, which lists it before reading each /skills/<id>/SKILL.md.
-            # CompositeBackend routes by longest prefix, so the bare parent has
-            # no route and would fall through to the task root; the index
-            # answers exactly that one listing (see workspace.skills_index).
-            backend = SkillsIndexBackend(
-                skill_ids,
-                fallback=CompositeBackend(default=backend, routes=routes),
-            )
-        # Data-layer enforcement of the read-only mounts (I-01/I-02): the
-        # middleware checks the tool wrappers, this also guards direct calls.
+        root = skills_root(workspace)
+        routes: dict[str, Any] = {
+            "/skills/": FilesystemBackend(root_dir=root, virtual_mode=True)
+        }
+        backend = CompositeBackend(default=backend, routes=routes)
+        # Data-layer enforcement of the read-only mounts (I-01): the middleware
+        # checks the tool wrappers, this also guards direct calls.
         backend = BoundaryBackend(backend)
-        if routes:
-            return {"skills": ["/skills/"], "backend": backend}
-        return {"backend": backend}
+        return {"skills": ["/skills/"], "backend": backend}
 
     def _resolve_tool(self, name: str) -> BaseTool:
         definition = self._tools.get(name)

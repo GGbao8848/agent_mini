@@ -30,7 +30,7 @@ import asyncio
 import os
 import re
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -101,16 +101,16 @@ def build_sandbox_command(
     settings: Settings,
     command: str,
     timeout: float,
-    skill_mounts: Sequence[tuple[str, str]] = (),
+    skill_root: str | None = None,
 ) -> list[str]:
     """Assemble the ``podman run`` argv for one command (pure, unit-testable).
 
-    ``skill_mounts`` are ``(skill_id, source_dir)`` pairs mounted read-only at
-    ``/skills/<id>``. The file tools already expose skills at that virtual path;
-    mounting the same sources here means a skill's documented script path (e.g.
-    ``/skills/txt2img/scripts/txt2img.py``) is runnable from ``run_code`` too —
-    otherwise the sandbox, which only mounts the task root at ``/work``, cannot
-    see them at all.
+    ``skill_root`` is the shared skills directory (``<workspace>/skills``),
+    mounted **read-write** at ``/skills`` so a skill's documented script path
+    (e.g. ``/skills/txt2img/scripts/txt2img.py``) runs from ``run_code`` exactly
+    as the file tools address it. One mount of the whole directory (rather than
+    one per skill) keeps the two namespaces in lockstep — the agent can also add
+    or edit a skill from the shell and the file tools see it immediately.
     """
     del timeout  # the host-side subprocess timeout is applied by the caller
     argv = [
@@ -131,10 +131,8 @@ def build_sandbox_command(
     # Set AGENT_CORE_SANDBOX_NETWORK=private to give the container its own
     # netns (outbound only), or =none to remove networking.
     argv.extend(_network_args(settings))
-    for skill_id, source in skill_mounts:
-        # Read-only: the agent runs skill scripts but must never rewrite the
-        # capability source (invariant I-02).
-        argv.extend(["--volume", f"{source}:/skills/{skill_id}:ro"])
+    if skill_root:
+        argv.extend(["--volume", f"{skill_root}:/skills"])
     for var, value in _sandbox_env(settings).items():
         argv.extend(["--env", f"{var}={value}"])
     argv.extend([settings.sandbox_image, "bash", "-lc", command])
@@ -163,10 +161,10 @@ def _run_host(command: str, workspace: Path, timeout: float) -> str:
 
 def _run_podman(workspace: Path, settings: Settings, command: str, timeout: float) -> str:
     """Sandbox backend: run inside the rootless container."""
-    from agent_core.runtime.context import get_current_skill_mounts
+    from agent_core.workspace.layout import skills_root
 
     argv = build_sandbox_command(
-        workspace, settings, command, timeout, get_current_skill_mounts()
+        workspace, settings, command, timeout, str(skills_root(workspace))
     )
     try:
         process = subprocess.run(

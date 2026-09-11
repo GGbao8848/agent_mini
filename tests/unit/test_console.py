@@ -15,7 +15,6 @@ from agent_core.application.service import AgentCoreService
 from agent_core.artifacts import artifact_abs_path, scan_workspace_artifacts
 from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
-from agent_core.domain.skill import SkillManifest
 from agent_core.mcp.manager import MCPManager
 from agent_core.observability.stream import EventStreamBroker
 from agent_core.observability.trace import InMemoryTracer
@@ -262,42 +261,37 @@ class TestConsoleAuth:
 
 
 class TestSkillApi:
-    """Installing is agent-only; the console exposes read/toggle/delete."""
+    """The skills directory is the source of truth; the console is read-only."""
 
-    async def test_register_and_upload_routes_are_gone(
+    async def test_write_routes_are_gone(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        skill_dir = tmp_path / "skills" / "greet"
-        skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("# Greet")
         client = toolbox_client(tmp_path, monkeypatch)
 
-        # No console write path into the registry: both former POSTs are gone.
-        assert (await client.post("/v1/skills", json={
-            "id": "greet", "name": "Greet", "path": str(skill_dir),
-        })).status_code == 405
+        # No console write path at all — the agent owns the directory, and a
+        # console write would be reverted by the next directory sync.
+        assert (await client.post("/v1/skills")).status_code == 405
         assert (await client.post("/v1/skills/upload")).status_code == 405
+        assert (await client.patch("/v1/skills/greet", json={"enabled": False})).status_code == 405
+        assert (await client.delete("/v1/skills/greet")).status_code == 405
         await client.aclose()
 
-    async def test_list_and_delete_skill(
+    async def test_list_skills_reads_the_directory(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        skill_dir = tmp_path / "skills" / "greet"
-        skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("# Greet")
-        service = make_service(tmp_path, monkeypatch)
-        # Register the way the agent does (a registry call), not via the console.
-        service.runtime.skills.register(
-            SkillManifest(id="greet", name="Greet", version="0.1.0", path=skill_dir)
+        skills_dir = tmp_path / "workspace" / "skills" / "greet"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "SKILL.md").write_text(
+            "---\nname: greet\ndescription: say hi\n---\n# Greet\n", encoding="utf-8"
         )
+        service = make_service(tmp_path, monkeypatch)
+        # The directory is the truth: syncing it populates the registry.
+        service.runtime.sync_skills_from_dir()
         client = make_client(service)
 
         listed = await client.get("/v1/skills")
         assert [s["id"] for s in listed.json()] == ["greet"]
-
-        removed = await client.delete("/v1/skills/greet")
-        assert removed.status_code == 200
-        assert [s["id"] for s in (await client.get("/v1/skills")).json()] == []
+        assert listed.json()[0]["description"] == "say hi"
         await client.aclose()
 
 

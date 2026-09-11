@@ -4,8 +4,8 @@
 filesystem *middleware* — the tool wrappers. That protects ``write_file`` &
 friends, but any code path that reaches the backend directly (a future tool,
 a test, an internal helper) would slip past. This wrapper re-asserts the same
-boundary at the data layer, so ``/inputs/**`` and ``/skills/**`` are immutable
-no matter who calls in.
+boundary at the data layer, so ``/inputs/**`` is immutable no matter who calls
+in. (``/skills`` is *not* here: a skill is a directory the agent owns.)
 
 Write-ish operations on a read-only prefix return the backend's own error
 result (``WriteResult`` / ``EditResult`` / ``DeleteResult`` /
@@ -24,7 +24,7 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 
-READ_ONLY_PREFIXES: tuple[str, ...] = ("/inputs", "/skills")
+READ_ONLY_PREFIXES: tuple[str, ...] = ("/inputs",)
 _WRITE_OP_ERROR = "permission denied: path is read-only"
 
 

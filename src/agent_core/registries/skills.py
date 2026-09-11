@@ -1,8 +1,22 @@
-"""Skill Registry: versioned store of SkillManifest metadata."""
+"""Skill Registry: an in-memory view over the skills *directory*.
+
+The directory is the source of truth (see ``docs/skills-as-directory.md``): one
+sub-directory per skill, each with a ``SKILL.md``. Production populates the
+registry from that directory via :meth:`SkillRegistry.sync_from_dir`; nothing
+registers a skill by hand any more. The versioned/register API that remains is
+kept only for tests and tools that build a manifest in memory — ``sync_from_dir``
+always returns the registry to the directory's contents.
+
+The skill **id** is the directory name; ``name``/``description``/``version``
+come from the ``SKILL.md`` frontmatter.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
+
+import yaml
 
 from agent_core.domain.skill import SkillManifest
 from agent_core.errors.exceptions import RegistryError
@@ -12,6 +26,8 @@ from agent_core.persistence.store import SqliteStore
 # defines a method named ``list`` (class-body scope would otherwise shadow the
 # builtin for signatures declared after it).
 ManifestList = list[SkillManifest]
+
+_SKILL_MD = "SKILL.md"
 
 
 class SkillRegistry:
@@ -118,6 +134,33 @@ class SkillRegistry:
             manifest = SkillManifest.model_validate_json(data)
             self._versions.setdefault(skill_id, {}).setdefault(stored_version, manifest)
 
+    def sync_from_dir(self, root: Path) -> ManifestList:
+        """Make the registry mirror ``root`` — the skills directory is the truth.
+
+        Each immediate sub-directory that contains a ``SKILL.md`` becomes a
+        skill; the directory name is the id. Sub-directories without a
+        ``SKILL.md`` (a half-written skill, or a stray file) are skipped, not
+        fatal — the agent may be mid-edit. This *replaces* the whole registry,
+        so deleting a directory removes its skill. Returns the new contents.
+
+        The registry is a read-through view, not a store: when it is backed by
+        a ``SqliteStore`` this method writes nothing (a derived view must never
+        become a second source of truth), it only reads the directory.
+        """
+        discovered: dict[str, dict[str, SkillManifest]] = {}
+        if root.is_dir():
+            for child in sorted(root.iterdir()):
+                if not child.is_dir():
+                    continue
+                skill_md = child / _SKILL_MD
+                if not skill_md.is_file():
+                    continue
+                discovered[child.name] = {
+                    "0.1.0": _manifest_from_skill_md(child.name, skill_md, child)
+                }
+        self._versions = discovered
+        return self.list()
+
     def _forget(self, skill_id: str, versions: Sequence[str]) -> None:
         if self._store is not None:
             for version in versions:
@@ -128,3 +171,43 @@ class SkillRegistry:
 
     def __len__(self) -> int:
         return len(self._versions)
+
+
+def _manifest_from_skill_md(skill_id: str, skill_md: Path, directory: Path) -> SkillManifest:
+    """Build a manifest from one skill directory's ``SKILL.md``.
+
+    name and description come from the frontmatter; a malformed ``SKILL.md``
+    (bad YAML, no frontmatter) still yields a manifest, because an unreadable
+    skill directory should not take down a run.
+    """
+    try:
+        raw = skill_md.read_text("utf-8")
+    except (OSError, UnicodeDecodeError):
+        raw = ""
+    frontmatter = _parse_frontmatter(raw)
+    name = str(frontmatter.get("name") or skill_id).strip() or skill_id
+    description = str(frontmatter.get("description") or "").strip()
+    version = str(frontmatter.get("version") or "0.1.0").strip() or "0.1.0"
+    return SkillManifest(
+        id=skill_id,
+        name=name,
+        version=version,
+        description=description,
+        path=directory,
+    )
+
+
+def _parse_frontmatter(text: str) -> dict[str, object]:
+    """Parse the YAML frontmatter block of a ``SKILL.md`` (empty dict if absent)."""
+    if not text.startswith("---"):
+        return {}
+    body: list[str] = []
+    for line in text.splitlines()[1:]:
+        if line.strip() == "---":
+            break
+        body.append(line)
+    try:
+        parsed = yaml.safe_load("\n".join(body))
+    except yaml.YAMLError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}

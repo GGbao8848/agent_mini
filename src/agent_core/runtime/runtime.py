@@ -62,7 +62,6 @@ from agent_core.runtime.context import (
     current_permission_mode,
     current_query,
     current_run,
-    current_skill_mounts,
     current_task_id,
     current_task_root,
     current_task_state_block,
@@ -88,6 +87,7 @@ from agent_core.runtime.verification import (
 )
 from agent_core.task_state.domain import TaskState
 from agent_core.task_state.service import TaskStateService
+from agent_core.workspace.layout import skills_root
 
 if TYPE_CHECKING:
     # Import-time cycle: agent_core.eval pulls in orchestration → runtime.
@@ -226,6 +226,17 @@ class AgentRuntime:
             if manifest.path.is_dir():
                 mounts.append((manifest.id, str(manifest.path)))
         return tuple(mounts)
+
+    def sync_skills_from_dir(self) -> None:
+        """Rebuild the skill registry from ``<workspace>/skills`` (the truth).
+
+        Called once at startup and again at the start of every run, so a skill
+        the agent added, edited, or deleted with its file tools takes effect on
+        the next run. The skills directory *is* the registry — there is no other
+        source of truth (see :mod:`agent_core.workspace.layout`).
+        """
+        root = Path(get_settings().workspace_dir)
+        self.skills.sync_from_dir(skills_root(root))
 
     async def _heartbeat(self, run: Run) -> None:
         """Emit a periodic liveness event while ``run`` executes.
@@ -774,14 +785,13 @@ class AgentRuntime:
         self._collectors[run.id] = collector
         heartbeat = asyncio.create_task(self._heartbeat(run))
         memory_token = None
-        skills_token = None
         task_state_token = None
         try:
             await self._ensure_checkpointer_ready()
-            # Enabled skill sources, so run_code can mount the same read-only
-            # /skills/<id> view the file tools see (otherwise a skill script the
-            # SKILL.md tells the agent to run is invisible inside the sandbox).
-            skills_token = current_skill_mounts.set(self._skill_mounts())
+            # Skills are a directory the agent owns; re-read it before every run
+            # so a skill added, edited, or deleted since the last run is picked
+            # up now (the prompt listing is built from the registry just below).
+            self.sync_skills_from_dir()
             # Retrieve relevant long-term memory before building the graph: the
             # build is synchronous but semantic retrieval is async, so compute
             # the block here and publish it via a context var.
@@ -848,8 +858,6 @@ class AgentRuntime:
             current_query.reset(query_token)
             if memory_token is not None:
                 current_memory_block.reset(memory_token)
-            if skills_token is not None:
-                current_skill_mounts.reset(skills_token)
             if task_state_token is not None:
                 current_task_state_block.reset(task_state_token)
             if model_token is not None:

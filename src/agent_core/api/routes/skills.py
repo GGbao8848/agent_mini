@@ -1,17 +1,18 @@
-"""Skill registry endpoints: list, toggle, and remove.
+"""Skill registry endpoints: read-only.
 
-Read/manage-only. Installing a skill is the agent's job (its ``install_skill``
-tool authors the skill directory and registers it), so the console has no
-register/upload channel here — every write enters through the agent and its
-approval queue.
+A skill is a directory under ``<workspace>/skills`` and that directory is the
+source of truth (see ``docs/skills-as-directory.md``). The agent adds, edits,
+and deletes skills with its file tools; the console only *reads* what is on
+disk. There are deliberately no write endpoints — a console write would be
+reverted by the next directory sync, so offering one would be a lie.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 
 from agent_core.api.deps import ServiceDep
-from agent_core.api.schemas import SkillOut, SkillUpdateRequest
+from agent_core.api.schemas import SkillOut
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -24,25 +25,3 @@ def list_skills(service: ServiceDep) -> list[SkillOut]:
 @router.get("/{skill_id}", response_model=SkillOut)
 def get_skill(skill_id: str, service: ServiceDep, version: str | None = None) -> SkillOut:
     return SkillOut.of(service.runtime.skills.get(skill_id, version))
-
-
-@router.get("/{skill_id}/versions", response_model=list[SkillOut])
-def list_skill_versions(skill_id: str, service: ServiceDep) -> list[SkillOut]:
-    return [SkillOut.of(manifest) for manifest in service.runtime.skills.list_versions(skill_id)]
-
-
-@router.delete("/{skill_id}", response_model=SkillOut)
-def uninstall_skill(
-    skill_id: str, service: ServiceDep, version: str | None = Query(default=None)
-) -> SkillOut:
-    """Remove one version, or the whole skill when ``version`` is omitted."""
-    return SkillOut.of(service.runtime.skills.remove(skill_id, version))
-
-
-@router.patch("/{skill_id}", response_model=SkillOut)
-def update_skill(skill_id: str, payload: SkillUpdateRequest, service: ServiceDep) -> SkillOut:
-    """Toggle/edit a skill's registration fields (enabled drives staging)."""
-    manifest = service.runtime.skills.get(skill_id)
-    if payload.enabled is not None:
-        manifest.enabled = payload.enabled
-    return SkillOut.of(service.runtime.skills.update(manifest))

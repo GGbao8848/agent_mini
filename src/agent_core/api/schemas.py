@@ -559,12 +559,6 @@ class ToolOut(BaseModel):
         )
 
 
-class SkillUpdateRequest(BaseModel):
-    """Partial skill-registration update."""
-
-    enabled: bool | None = None
-
-
 class SkillOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

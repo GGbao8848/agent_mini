@@ -71,12 +71,12 @@ class TestSandboxArgv:
         assert argv[-2] == "-lc"
         assert argv[-1] == "echo hi"
 
-    def test_skill_sources_mount_read_only_at_skills(self, tmp_path: Path) -> None:
-        """run_code must see the same /skills/<id> view the file tools do.
+    def test_skill_root_mounts_read_write_at_skills(self, tmp_path: Path) -> None:
+        """run_code must see the same writable /skills view the file tools do.
 
-        Otherwise a skill script the SKILL.md tells the agent to run is
-        invisible inside the sandbox (it only mounts the task root at /work) —
-        the bug behind an agent reporting a skill 'not installed'.
+        One mount of the whole skills directory keeps the two namespaces in
+        lockstep: a skill script's documented path runs in the sandbox, and a
+        skill written from the shell is visible to the file tools immediately.
         """
         settings = code_settings(tmp_path, sandbox="podman")
         workspace = tmp_path / "workspace"
@@ -86,11 +86,11 @@ class TestSandboxArgv:
             settings,
             "echo hi",
             timeout=60.0,
-            skill_mounts=(("txt2img", "/opt/skills/txt2img"),),
+            skill_root="/opt/skills",
         )
 
         volumes = [argv[i + 1] for i, item in enumerate(argv) if item == "--volume"]
-        assert "/opt/skills/txt2img:/skills/txt2img:ro" in volumes
+        assert "/opt/skills:/skills" in volumes
 
     def test_proxy_env_passthrough(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HTTPS_PROXY", "http://10.10.10.214:7890")
@@ -160,36 +160,36 @@ class TestEnvironmentNote:
         assert "/work" in note
         assert str(tmp_path) not in note
 
-    def test_host_note_points_skills_at_their_real_path(self, tmp_path: Path) -> None:
-        """Regression: host mode has NO /skills mount — never claim one.
+    def test_host_note_reads_skills_via_the_file_tool_path(self, tmp_path: Path) -> None:
+        """Regression: the note must point read_file at /skills, not a host path.
 
-        A real task showed the agent reporting the txt2img skill as "未挂载"
-        because the note hard-coded /skills/<id> (a podman-only mount). On the
-        host the note must name the real source directory instead.
+        The old note named the on-disk skill path and told the agent to
+        ``read_file`` it — which the file tools cannot reach, so every run burned
+        its first calls failing to read a skill it had just been told about. The
+        note now separates the two views: /skills for the file tools, the real
+        path only for run_code.
         """
         from agent_core.runtime.paths import environment_note
 
         settings = code_settings(tmp_path)
-        # Sample skills from a directory NOT named "skills" so a real path
-        # cannot accidentally contain the "/skills/" marker we assert against.
-        skill_dir = tmp_path / "capabilities" / "txt2img"
-        note = environment_note(tmp_path, settings, [("txt2img", skill_dir)])
+        skills_dir = tmp_path / "workspace" / "skills"
+        note = environment_note(tmp_path, settings, skills_dir)
 
-        assert str(skill_dir) in note
-        assert "/skills/" not in note  # no container path in host mode
+        assert "/skills/<技能名>/SKILL.md" in note  # file-tool path is named
+        assert str(skills_dir) in note  # the real path is given for run_code
 
-    def test_podman_note_points_skills_at_the_mount(self, tmp_path: Path) -> None:
+    def test_podman_note_uses_the_container_mount(self, tmp_path: Path) -> None:
         from agent_core.runtime.paths import environment_note
 
         settings = code_settings(tmp_path, sandbox="podman")
-        skill_dir = tmp_path / "capabilities" / "txt2img"
-        note = environment_note(tmp_path, settings, [("txt2img", skill_dir)])
+        skills_dir = tmp_path / "workspace" / "skills"
+        note = environment_note(tmp_path, settings, skills_dir)
 
-        assert "/skills/txt2img" in note
-        assert str(skill_dir) not in note
+        assert "/skills/<技能名>/SKILL.md" in note
+        assert "/skills/<技能名>/scripts/xxx.py" in note
 
-    def test_note_omits_skills_when_none_enabled(self, tmp_path: Path) -> None:
+    def test_note_omits_skills_when_no_root(self, tmp_path: Path) -> None:
         from agent_core.runtime.paths import environment_note
 
-        note = environment_note(tmp_path, code_settings(tmp_path), [])
+        note = environment_note(tmp_path, code_settings(tmp_path))
         assert "/skills" not in note

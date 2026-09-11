@@ -355,23 +355,6 @@ export function useMcpAction() {
   return { create, action, update, remove }
 }
 
-export function useSkillManage() {
-  const queryClient = useQueryClient()
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["skills"] })
-    queryClient.invalidateQueries({ queryKey: ["agents"] })
-  }
-  const update = useToastMutation<unknown, { id: string; enabled: boolean }>({
-    mutationFn: ({ id, enabled }) => api.patch(`/v1/skills/${id}`, { enabled }),
-    onSuccess: invalidate,
-  })
-  const remove = useToastMutation<unknown, string>({
-    mutationFn: (skillId) => api.del(`/v1/skills/${skillId}`),
-    onSuccess: invalidate,
-  })
-  return { update, remove }
-}
-
 export function useUpdateAgent() {
   const queryClient = useQueryClient()
   return useToastMutation<Agent, { agentId: string; patch: { tools?: string[]; skills?: string[] } }>({

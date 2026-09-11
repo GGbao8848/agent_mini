@@ -7,9 +7,8 @@ from langchain_openai import ChatOpenAI
 
 from agent_core.domain.agent import AgentLimits, AgentSpec, SubAgentRef
 from agent_core.domain.resilience import ResiliencePolicy, SummarizationPolicy
-from agent_core.domain.skill import SkillManifest
 from agent_core.domain.tool import ToolDefinition
-from agent_core.errors.exceptions import ConfigurationError, RegistryError, SkillError
+from agent_core.errors.exceptions import ConfigurationError, RegistryError
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.builder import AgentBuilder
 
@@ -187,55 +186,44 @@ class TestBuild:
 
         assert builder._agent_tool_names(base_spec()) == []
 
-    def test_skills_mount_read_only_without_copying_into_workspace(self, tmp_path: Path) -> None:
-        skills_root = tmp_path / "skills"
-        skill_dir = skills_root / "web-research"
+    def test_skills_mount_the_shared_directory_without_copying(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "workspace"
+        skill_dir = workspace / "skills" / "web-research"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("# Web Research")
-        second_dir = skills_root / "data-plot"
+        second_dir = workspace / "skills" / "data-plot"
         second_dir.mkdir(parents=True)
         (second_dir / "SKILL.md").write_text("# Data Plot")
-        skills = SkillRegistry()
-        skills.register(SkillManifest(id="web-research", name="Web Research", path=skill_dir))
-        skills.register(SkillManifest(id="data-plot", name="Data Plot", path=second_dir))
-        workspace = tmp_path / "workspace"
-        builder = make_builder(skills=skills, workspace=workspace)
+        builder = make_builder(workspace=workspace)
 
-        # Skills are a shared pool, but they are mounted read-only from their
-        # source — never copied into the (writable) task root. Invariant I-03.
+        # The whole skills directory is one writable mount at /skills; nothing is
+        # copied into a task root. Invariant I-03 (single source of truth).
         spec = base_spec()
         graph = builder.build(spec)
 
         assert hasattr(graph, "ainvoke")
-        assert not (workspace / ".skills").exists()
-        assert list(workspace.rglob("SKILL.md")) == []
         kwargs = builder._backend_kwargs(spec)
         assert kwargs["skills"] == ["/skills/"]
         assert (skill_dir / "SKILL.md").is_file()
+        assert list((workspace / "tasks").rglob("SKILL.md")) == []
 
-    def test_registered_skill_without_path_raises(self, tmp_path: Path) -> None:
-        skills = SkillRegistry()
-        skills.register(SkillManifest(id="floating", name="Floating"))
-        builder = make_builder(skills=skills, workspace=tmp_path / "workspace")
+    def test_skills_mount_is_writable(self, tmp_path: Path) -> None:
+        builder = make_builder(workspace=tmp_path / "workspace")
 
-        with pytest.raises(SkillError):
-            builder.build(base_spec())
+        backend = builder._backend_kwargs(base_spec())["backend"]
 
-    def test_registered_skill_with_missing_directory_raises(self, tmp_path: Path) -> None:
-        skills = SkillRegistry()
-        skills.register(SkillManifest(id="gone", name="Gone", path=Path("/nonexistent/skill")))
-        builder = make_builder(skills=skills, workspace=tmp_path / "workspace")
+        written = backend.write("/skills/new-skill/SKILL.md", "---\nname: new-skill\n---\n")
+        assert written.error is None, written
+        assert (tmp_path / "workspace" / "skills" / "new-skill" / "SKILL.md").is_file()
 
-        with pytest.raises(SkillError):
-            builder.build(base_spec())
-
-    def test_no_registered_skills_returns_backend_only(self, tmp_path: Path) -> None:
+    def test_no_registered_skills_still_mounts_the_skills_dir(self, tmp_path: Path) -> None:
         builder = make_builder(workspace=tmp_path / "workspace")
 
         kwargs = builder._backend_kwargs(base_spec())
 
-        assert kwargs["backend"].cwd == (tmp_path / "workspace").resolve()
-        assert "skills" not in kwargs
+        # The skills mount exists even with no skills yet (the directory is the
+        # source of truth, and the agent writes into it) — not backend-only.
+        assert kwargs["skills"] == ["/skills/"]
 
     def test_resilience_policy_builds_with_middleware(self) -> None:
         spec = base_spec(

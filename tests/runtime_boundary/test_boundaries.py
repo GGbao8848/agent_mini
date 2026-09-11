@@ -22,12 +22,11 @@ from typing import Any
 import pytest
 
 from agent_core.domain.agent import AgentSpec
-from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
-from agent_core.domain.permission import PermissionDecision, PermissionRule, PermissionSpec
+from agent_core.domain.permission import PermissionDecision
 from agent_core.domain.skill import SkillManifest
-from agent_core.domain.tool import RiskLevel, ToolDefinition, ToolSource
+from agent_core.domain.tool import RiskLevel, ToolDefinition
 from agent_core.permissions.policy import ActionPolicy
-from agent_core.registries import AgentRegistry, MCPRegistry, SkillRegistry, ToolRegistry
+from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.builder import AgentBuilder
 
 # --------------------------------------------------------------------------- helpers
@@ -77,37 +76,35 @@ def registered_skill(skills: SkillRegistry, root: Path, skill_id: str = "web-res
 # ------------------------------------------------------------------ I-03 Skill copy
 
 
-def test_i03_skills_are_not_physically_copied_into_task_root(tmp_path: Path) -> None:
-    """Skills are served from their single source, never copied per task."""
-    skills = SkillRegistry()
-    source = registered_skill(skills, tmp_path / "skill-src")
+def test_i03_skills_are_served_from_the_one_skills_directory(tmp_path: Path) -> None:
+    """There is exactly one skills directory; nothing is copied per task."""
     workspace = tmp_path / "workspace"
-    builder = make_builder(skills=skills, workspace=workspace)
-    spec = base_spec()
+    skill_dir = workspace / "skills" / "web-research"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# web-research\n", encoding="utf-8")
+    builder = make_builder(workspace=workspace)
 
-    builder.build(spec)
+    builder.build(base_spec())
 
-    # The source is untouched and no copy exists anywhere under the workspace.
-    assert source.is_dir()
-    copies = list((workspace).rglob("SKILL.md"))
-    assert copies == [], f"skills must not be copied into the workspace: {copies}"
-    # Nor is a staging dir created inside the task root.
-    assert not (workspace / ".skills").exists()
+    # The one directory is the source; no second copy appears in a task root.
+    assert (skill_dir / "SKILL.md").is_file()
+    tasks_root = workspace / "tasks"
+    task_copies = list(tasks_root.rglob("SKILL.md")) if tasks_root.exists() else []
+    assert task_copies == [], f"skills must not be copied into task roots: {task_copies}"
 
 
 def test_i03_skill_source_is_reachable_through_the_backend(tmp_path: Path) -> None:
-    """No copy still means readable: the backend exposes skills read-only."""
-    skills = SkillRegistry()
-    registered_skill(skills, tmp_path / "skill-src", "web-research")
-    builder = make_builder(skills=skills, workspace=tmp_path / "workspace")
-    spec = base_spec()
+    """No copy still means readable: the backend exposes the skills directory."""
+    workspace = tmp_path / "workspace"
+    skill_dir = workspace / "skills" / "web-research"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# web-research\n", encoding="utf-8")
+    builder = make_builder(workspace=workspace)
 
-    kwargs = builder._backend_kwargs(spec)
-
-    backend = kwargs["backend"]
-    listing = backend.ls("/")
-    entry_names = {e["path"] for e in getattr(listing, "entries", listing)}
-    assert any("skills" in name for name in entry_names), entry_names
+    backend = builder._backend_kwargs(base_spec())["backend"]
+    read = backend.read("/skills/web-research/SKILL.md", offset=0, limit=20)
+    assert read.error is None, read
+    assert "web-research" in read.file_data["content"]
 
 
 # ----------------------------------------------------------- I-01 inputs read-only
@@ -207,36 +204,41 @@ def test_i11_agent_tool_allowlist_is_enforced() -> None:
 # ------------------------------------------------------------- I-04 skill self-install
 
 
-def test_i04_install_skill_is_not_a_default_agent_capability() -> None:
-    """Publishing to the global skill registry is a control-plane action."""
+def test_i04_no_skill_install_tool_exists() -> None:
+    """A skill is a directory, not a control-plane action.
+
+    The old design published to a registry through a HIGH-risk ``install_skill``
+    tool. Under "skills as a directory" there is no such tool: the agent edits
+    the skills directory with its ordinary file tools, so there is nothing for
+    an implicit agent to publish.
+    """
     from agent_core.application.bootstrap import default_service
 
     service = default_service()
-    runtime = service.runtime
-    tools = runtime.tools
-    if "install_skill" in tools:
-        definition = tools.get("install_skill")
-        # Either unavailable to implicit agents, or escalated to human approval.
-        flagged_unavailable = definition.metadata.get("available") is False
-        approval_required = definition.risk_level >= RiskLevel.HIGH
-        assert flagged_unavailable or approval_required, (
-            "install_skill must be unavailable to implicit agents or require approval"
-        )
+    assert "install_skill" not in service.runtime.tools
 
 
 # ------------------------------------------------------------------ I-02 skill source
 
 
-def test_i02_skill_source_paths_are_not_writable_via_backend(tmp_path: Path) -> None:
-    """Skill sources live outside the writable root and are mounted read-only."""
-    skills = SkillRegistry()
-    source = registered_skill(skills, tmp_path / "skill-src")
-    builder = make_builder(skills=skills, workspace=tmp_path / "workspace")
+def test_i02_skill_writes_go_to_the_skills_dir_not_outside_it(tmp_path: Path) -> None:
+    """The skills directory is writable; nothing outside it becomes reachable."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("original", encoding="utf-8")
+
+    builder = make_builder(workspace=workspace)
     backend = builder._backend_kwargs(base_spec())["backend"]
 
-    # A write targeting the mounted skill source must be denied (or the path is
-    # simply unreachable) — either way the on-disk source must not change.
-    before = (source / "SKILL.md").read_text()
-    for attempt in ("/skills/web-research/SKILL.md", ".skills/web-research/SKILL.md"):
-        backend.write(attempt, "pwned")
-    assert (source / "SKILL.md").read_text() == before
+    # The skills mount points at <workspace>/skills and is writable.
+    written = backend.write("/skills/new-skill/SKILL.md", "---\nname: new-skill\n---\n")
+    assert written.error is None, written
+    assert (workspace / "skills" / "new-skill" / "SKILL.md").is_file()
+
+    # A path outside the mount still cannot be reached to rewrite it: traversal
+    # is refused outright (ValueError) or returns an error result — never a write.
+    before = outside.read_text()
+    with pytest.raises(ValueError, match="[Tt]raversal|outside"):
+        backend.write("../outside.txt", "pwned")
+    assert outside.read_text() == before

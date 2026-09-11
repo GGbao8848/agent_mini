@@ -1,10 +1,10 @@
 """Physical layout of a task's working root.
 
 Directories are created on demand so the logical mounts (``/inputs``,
-``/workspace``, ``/outputs``, ``/tmp``) always resolve, whether or not a task
-has produced anything yet. The skill mount is *not* here: skill sources stay in
-their registry location and are mounted read-only (see ``builder``), never
-copied into the task root.
+``/workspace``, ``/outputs``, ``/scratch``) always resolve, whether or not a
+task has produced anything yet. The skill mount is *not* here: skills live in
+their own shared root ``<workspace>/skills`` (see :func:`skills_root`), mounted
+read-write at ``/skills`` — a skill is a directory the agent owns.
 """
 
 from __future__ import annotations
@@ -15,7 +15,18 @@ from pathlib import Path
 READ_ONLY_DIRS: tuple[str, ...] = ("inputs",)
 """Logical directories the agent may read but never write."""
 
-_WRITABLE_DIRS: tuple[str, ...] = ("workspace", "outputs", "tmp")
+_WRITABLE_DIRS: tuple[str, ...] = ("workspace", "outputs", "scratch")
+
+
+def skills_root(workspace: Path) -> Path:
+    """The shared skills directory for a workspace (created on demand).
+
+    One directory per skill, each holding a ``SKILL.md``. This is the single
+    source of truth: the registry scans it rather than storing skills itself.
+    """
+    root = workspace / "skills"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 @dataclass(frozen=True)
@@ -37,8 +48,8 @@ class WorkspaceLayout:
         return self.root / "outputs"
 
     @property
-    def tmp(self) -> Path:
-        return self.root / "tmp"
+    def scratch(self) -> Path:
+        return self.root / "scratch"
 
     @classmethod
     def ensure(cls, root: Path) -> WorkspaceLayout:

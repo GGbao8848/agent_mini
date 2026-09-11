@@ -14,7 +14,6 @@ from agent_core.builtins.code import RUN_CODE_TOOL
 from agent_core.builtins.code import register_builtin_tools as register_code_tools
 from agent_core.builtins.packages import ENSURE_PACKAGES_TOOL
 from agent_core.builtins.schedules import CREATE_SCHEDULE_TOOL
-from agent_core.builtins.skills import INSTALL_SKILL_TOOL
 from agent_core.config.settings import Settings
 from agent_core.domain.tool import ToolDefinition
 from agent_core.registries import ToolRegistry
@@ -22,7 +21,6 @@ from agent_core.registries import ToolRegistry
 __all__ = [
     "CREATE_SCHEDULE_TOOL",
     "ENSURE_PACKAGES_TOOL",
-    "INSTALL_SKILL_TOOL",
     "RUN_CODE_TOOL",
     "register_builtin_tools",
 ]

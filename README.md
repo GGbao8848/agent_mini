@@ -96,7 +96,7 @@ uv run --env-file .env uvicorn agent_core.api.app:app --port 8000
 |---|---|---|
 | GET | `/healthz` | 存活探针 |
 | GET | `/v1/agents` `/v1/agents/{id}` | Agent 注册表（只读） |
-| GET | `/v1/skills` `/v1/skills/{id}` `/v1/skills/{id}/versions` | Skill 注册表（只读） |
+| GET | `/v1/skills` `/v1/skills/{id}` | Skill 列表（读 `skills/` 目录，只读） |
 | GET | `/v1/tools` | 工具注册表（MCP 连接后自动出现） |
 | GET/POST | `/v1/mcp/servers` | MCP 服务器注册表 |
 | POST | `/v1/mcp/servers/{id}/connect` `/disconnect` | 连接生命周期（失败 → 503 retryable） |
@@ -249,7 +249,7 @@ Console 顶部切换 **任务台 / 工具箱**。工具箱 = MCP 服务器面板
 
 **MCP（JSON 优先）**：添加服务器默认是 JSON 粘贴框（含模板与校验：transport 只允许 `streamable_http`/`stdio`），表单模式为备选。列表页有状态徽章、连接/断开/删除按钮、发现的工具计数。凭据只存 `auth_ref` 引用名，连接时从服务器环境变量解析，密钥不过前端。
 
-**Skills**：安装由 agent 完成——在对话里描述需要的能力，分身会写好技能目录并调用 `install_skill` 注册（HIGH risk，需人工审批）。工具箱的 Skills 面板只做查看/启停/删除。
+**Skills（目录即真相）**：技能就是 `<workspace>/skills/<id>/` 下的一个普通文件夹（含 `SKILL.md`）。分身用文件工具增删改，改动下次运行生效；没有注册步骤、没有版本表、没有安装工具。在对话里说“加一个 XX 技能”即可，工具箱的 Skills 面板只读展示。
 
 两个底层修复：① MCP 连接改由**专属 owner task** 持有 SDK 会话——uvicorn 每个请求都是新任务，而 anyio 禁止跨任务退出 async 上下文，旧实现跨请求关闭会话必崩；② SqliteStore 开启跨线程访问 + 写锁（同步路由跑在线程池）。
 

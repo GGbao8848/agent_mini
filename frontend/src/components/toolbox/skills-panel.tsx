@@ -1,31 +1,16 @@
-import * as React from "react"
-import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { useSkillManage, useSkills } from "@/hooks/use-console"
-import { PackageIcon, Trash2Icon } from "lucide-react"
+import { useSkills } from "@/hooks/use-console"
+import { PackageIcon } from "lucide-react"
 
-/** The skills page: list, enable/disable, delete.
+/** The skills page: a read-only view of the skills directory.
  *
- * Installing a skill has no console control at all — the agent authors the
- * skill directory and registers it through its `install_skill` tool (behind
- * approval). This page only shows and manages what is already registered.
+ * A skill is a directory under `<workspace>/skills` — the single source of
+ * truth. The agent adds, edits, and deletes skills with its ordinary file
+ * tools (ask it in the conversation); there is no console control here, because
+ * a console write would be reverted by the next directory sync.
  */
 export function SkillsPanel() {
   const skills = useSkills()
-  const manage = useSkillManage()
-  const [removingId, setRemovingId] = React.useState<string | null>(null)
-
   const skillList = skills.data ?? []
 
   if (!skills.isLoading && skillList.length === 0) {
@@ -35,9 +20,11 @@ export function SkillsPanel() {
           <div className="flex size-12 items-center justify-center rounded-xl bg-muted">
             <PackageIcon className="size-6 text-muted-foreground" />
           </div>
-          <h2 className="text-lg font-medium">还没有安装任何技能</h2>
+          <h2 className="text-lg font-medium">还没有任何技能</h2>
           <p className="max-w-md text-sm text-muted-foreground">
-            直接在对话里让分身安装即可：它会写好技能目录并注册进技能库，安装动作会请你确认。
+            技能就是 <code className="text-xs">skills/</code> 目录下的一个普通文件夹。
+            直接在对话里让分身写一个即可——它会建目录、写 SKILL.md（YAML frontmatter 含
+            name/description），下次运行生效。
           </p>
         </div>
       </div>
@@ -51,7 +38,8 @@ export function SkillsPanel() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        安装新技能：在对话里描述你要的能力，分身会写技能目录并注册（安装动作需你确认）。
+        技能是 <code className="text-xs">skills/</code> 目录下的文件夹，分身用文件工具增删改。
+        在对话里说“加一个 XX 技能”即可；这里只读展示。
       </p>
 
       {skills.isLoading ? (
@@ -82,57 +70,10 @@ export function SkillsPanel() {
                   {skill.path}
                 </p>
               )}
-              <div className="mt-auto flex items-center justify-between pt-1">
-                <span
-                  className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
-                  title={skill.enabled ? "已启用：注入分身的技能清单" : "已停用：对分身不可见"}
-                >
-                  <Switch
-                    size="sm"
-                    checked={skill.enabled}
-                    disabled={manage.update.isPending}
-                    onCheckedChange={(checked) =>
-                      manage.update.mutate({ id: skill.id, enabled: checked === true })
-                    }
-                  />
-                  启用
-                </span>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  className="text-destructive"
-                  onClick={() => setRemovingId(skill.id)}
-                >
-                  <Trash2Icon data-icon="inline-start" />
-                  删除
-                </Button>
-              </div>
             </div>
           ))}
         </div>
       )}
-
-      <AlertDialog open={removingId !== null} onOpenChange={(isOpen) => !isOpen && setRemovingId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除技能 {removingId}？</AlertDialogTitle>
-            <AlertDialogDescription>
-              技能目录仍保留在服务器磁盘上，但不再对 agent 生效。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (removingId) manage.remove.mutate(removingId)
-                setRemovingId(null)
-              }}
-            >
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

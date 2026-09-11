@@ -7,7 +7,6 @@ avoids import cycles between the artifacts and runtime packages.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
 
 from agent_core.artifacts import task_workspace
@@ -34,7 +33,7 @@ def current_task_dir(workspace: Path) -> Path:
 def environment_note(
     root: Path,
     settings: Settings,
-    skill_mounts: Sequence[tuple[str, Path]] = (),
+    skill_root: Path | None = None,
 ) -> str:
     """System-prompt addendum describing where the agent actually works.
 
@@ -44,29 +43,34 @@ def environment_note(
     Agents chased ``/work`` and resorted to ``find /`` when the prompt lied
     about the backend; this note is the fix.
 
-    ``skill_mounts`` are the ``(skill_id, source_dir)`` pairs the run exposes.
-    Their *location* depends on the backend and the note must match it:
+    ``skill_root`` is the shared skills directory (``<workspace>/skills``). The
+    note has to be exact about *two different views* of it, because the path
+    that works for the file tools is not always the path that works in a shell:
 
-    - **podman**: each source is mounted read-only at ``/skills/<id>``, so the
-      agent calls scripts through that container path.
-    - **host**: ``run_code`` is a plain shell on the host with no ``/skills``
-      mount — telling the agent to use ``/skills/<id>`` made it report the
-      skill as "未安装" and give up. On the host the real source directory is
-      the script path.
+    - **file tools** always see it at the virtual path ``/skills/<id>/...``
+      (mounted read-write), in every backend.
+    - **run_code** is a plain shell: in podman it sees ``/skills/<id>/...``
+      (mounted), but on the host there is no ``/skills`` mount, so a skill
+      script must be called by its real path under ``skill_root``.
+
+    Getting this wrong is not cosmetic: an earlier note told the agent to open
+    a skill at its *host* path with ``read_file``, which the file tools cannot
+    reach, so every run wasted its first calls failing to read a skill it had
+    just been told about.
     """
     if settings.sandbox == "podman":
         detail = (
             "你在 rootless 容器沙箱里工作：任务目录挂载在 /work，"
             "文件工具与 run_code 的工作目录都是 /work。"
         )
-        if skill_mounts:
-            lines = "、".join(f"/skills/{sid}" for sid, _ in skill_mounts)
+        if skill_root is not None:
             skill_note = (
-                f"- 已安装的技能只读挂载在 /skills/<技能名>（本会话有：{lines}）。"
-                "技能自带脚本请用**绝对路径**调用，例如 "
-                "`python /skills/txt2img/scripts/txt2img.py --prompt ...`——"
-                "不要用 `ls /skills` 去找（工作目录在 /work，两者不是同一棵树），"
-                "技能清单已由系统提示给出。\n"
+                f"- 技能库是目录 {skill_root}，挂载在 /skills（文件工具与 run_code 都看得到）。\n"
+                "- **读技能**：用文件工具读 `/skills/<技能名>/SKILL.md`（例如 "
+                "`read_file('/skills/txt2img/SKILL.md')`）；用 run_code 跑技能脚本时用 "
+                "`/skills/<技能名>/scripts/xxx.py`。\n"
+                "- **增删改技能**：直接对 `/skills/<技能名>/` 用文件工具（写 SKILL.md、"
+                "加脚本、删目录）即可——技能就是一个普通目录，改动下次运行生效。\n"
             )
         else:
             skill_note = ""
@@ -75,14 +79,15 @@ def environment_note(
             f"你的工作目录是 {root}：文件工具和 run_code 的 bash 都在这个目录里执行，"
             "所有文件一律用相对路径读写。"
         )
-        if skill_mounts:
-            lines = "、".join(str(path) for _, path in skill_mounts)
+        if skill_root is not None:
             skill_note = (
-                f"- 已安装的技能就在宿主机上（本会话有：{lines}）。"
-                "技能自带脚本请用**完整绝对路径**调用，例如 "
-                f"`python {skill_mounts[0][1]}/scripts/txt2img.py --prompt ...`；"
-                "host 模式没有 /skills 挂载点，不要访问 /skills，"
-                "技能清单已由系统提示给出。\n"
+                f"- **技能库**：目录 {skill_root}，文件工具里挂载为 /skills（可读写）。\n"
+                "- **读技能统一用文件工具的虚拟路径**：`read_file('/skills/<技能名>/SKILL.md')`"
+                "——不要用宿主机绝对路径去 read_file，文件工具到不了那儿。\n"
+                "- **用 run_code 跑技能脚本**时换用**真实路径**（host 模式没有 /skills 挂载点）："
+                f"`python {skill_root}/<技能名>/scripts/xxx.py`。\n"
+                "- **增删改技能**：对 `/skills/<技能名>/` 用文件工具即可——技能就是一个普通目录，"
+                "写完 SKILL.md（YAML frontmatter 含 name/description）下次运行生效。\n"
             )
         else:
             skill_note = ""

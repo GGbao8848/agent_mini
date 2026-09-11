@@ -25,7 +25,6 @@ from agent_core.builtins.memory import (
 )
 from agent_core.builtins.plan import make_update_plan
 from agent_core.builtins.schedules import make_create_schedule
-from agent_core.builtins.skills import make_install_skill
 from agent_core.config.model_config import load_model_config
 from agent_core.config.settings import Settings, apply_proxy, get_settings
 from agent_core.domain.mcp import MCPServerStatus
@@ -103,8 +102,7 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     tracer: InMemoryTracer | PersistingTracer = memory_tracer
     if store is not None:
         _restore(
-            store, agents=agents, tools=tools, skills=skills, approvals=approvals,
-            projects=projects,
+            store, agents=agents, tools=tools, approvals=approvals, projects=projects
         )
         memories.hydrate()
         tracer = PersistingTracer(memory_tracer, store)
@@ -118,6 +116,10 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
         agents, tools, skills, tracer=tracer, approvals=approvals, store=store,
         projects=projects, memories=memories, task_states=task_states,
     )
+    # The skills directory is the source of truth: populate the registry from it
+    # at boot (and again before every run) so the console and the first run see
+    # what is on disk, not a stale persisted copy.
+    runtime.sync_skills_from_dir()
     if store is not None:
         runtime.hydrate()
     mcp_registry = MCPRegistry(store)
@@ -157,11 +159,11 @@ def default_service(settings: Settings | None = None) -> AgentCoreService:
     if store is not None:
         schedules.restore()
     service.schedules = schedules
-    # Register service-bound tools (schedule + skill creation + memory + plan)
-    # against the fully built service.
+    # Register service-bound tools (schedule + memory + plan) against the
+    # fully built service. Skills are *not* a tool: they are a directory the
+    # agent edits with its file tools (see docs/skills-as-directory.md).
     for definition, handler in (
         make_create_schedule(service),
-        make_install_skill(service),
         make_remember(memories, context_provider=runtime.memory_write_context),
         make_recall_memories(memories),
         make_forget_memories(memories),
@@ -217,13 +219,15 @@ def _restore(
     *,
     agents: AgentRegistry,
     tools: ToolRegistry,
-    skills: SkillRegistry,
     approvals: ApprovalManager,
     projects: ProjectRegistry,
 ) -> None:
-    """Replay persisted facts into the in-memory components."""
+    """Replay persisted facts into the in-memory components.
+
+    Skills are not replayed: their source of truth is the ``skills/`` directory
+    (``runtime.sync_skills_from_dir``), not a persisted registry row.
+    """
     agents.hydrate()
     tools.hydrate()  # definitions only — handlers are process-local callables
-    skills.hydrate()
     approvals.hydrate()
     projects.hydrate()
