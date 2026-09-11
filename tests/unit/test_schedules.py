@@ -191,6 +191,31 @@ def make_api_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AgentCo
     return AgentCoreService(runtime=runtime, mcp=mcp, mcp_registry=mcp_registry, broker=broker)
 
 
+def _api_schedule_runner(service: AgentCoreService) -> Any:
+    """A runner that mirrors bootstrap's: carry model/permission/project through.
+
+    The real ``_schedule_runner`` pops these out of the metadata and passes them
+    as ``submit_run`` kwargs; the test needs the same behaviour or a bound
+    schedule's run would silently ignore its folder.
+    """
+
+    async def runner(agent_id: str, task_input: str, metadata: dict[str, Any] | None) -> Any:
+        data = dict(metadata or {})
+        model = data.pop("model", None)
+        permission_mode = data.pop("permission_mode", None)
+        project_id = data.pop("project_id", None)
+        return await service.submit_run(
+            agent_id,
+            task_input,
+            metadata=data or None,
+            model=model,
+            permission_mode=permission_mode,
+            project_id=project_id,
+        )
+
+    return runner
+
+
 class TestScheduleApi:
     @pytest.fixture()
     async def client(
@@ -200,9 +225,7 @@ class TestScheduleApi:
         from agent_core.application.scheduler import ScheduleManager
 
         service.schedules = ScheduleManager(
-            runner=lambda agent_id, task_input, metadata=None: service.submit_run(
-                agent_id, task_input, metadata=metadata
-            )
+            runner=_api_schedule_runner(service)
         )
         app = create_app(service)
         async with httpx.AsyncClient(
@@ -268,6 +291,46 @@ class TestScheduleApi:
         assert updated["run_count"] == 1
         assert updated["last_task_id"] == task_id
         assert updated["enabled"] is True
+
+    async def test_project_binding_is_stored_and_applied_to_runs(
+        self, client: httpx.AsyncClient, tmp_path: Path
+    ) -> None:
+        """A schedule's runs work in its bound folder; unknown ids are rejected."""
+        folder = tmp_path / "sched-folder"
+        folder.mkdir()
+        project = (await client.post(
+            "/v1/projects", json={"name": "sched-folder", "path": str(folder)}
+        )).json()
+
+        created = (await client.post(
+            "/v1/schedules",
+            json={
+                "name": "bound",
+                "task_input": "echo hi",
+                "schedule_type": "interval",
+                "interval_minutes": 30,
+                "project_id": project["id"],
+            },
+        )).json()
+        assert created["project_id"] == project["id"]
+
+        # The run lands in the bound folder, not the shared default.
+        run = await client.post(f"/v1/schedules/{created['id']}/run")
+        task = (await client.get(f"/v1/tasks/{run.json()['task_id']}")).json()
+        assert task["project_id"] == project["id"]
+
+        # An unknown folder is rejected up front.
+        bad = await client.post(
+            "/v1/schedules",
+            json={
+                "name": "bad",
+                "task_input": "x",
+                "schedule_type": "interval",
+                "interval_minutes": 30,
+                "project_id": "nope",
+            },
+        )
+        assert bad.status_code == 404
 
     async def test_delete_schedule(self, client: httpx.AsyncClient) -> None:
         created = (

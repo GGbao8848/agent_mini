@@ -24,7 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { useModelConfig, useScheduleManage } from "@/hooks/use-console"
+import { useModelConfig, useProjects, useScheduleManage } from "@/hooks/use-console"
+import { FolderControl } from "@/components/folder-control"
 import { PERMISSION_MODES, permissionModeLabel } from "@/components/chat/permission-mode-picker"
 import type { PermissionMode, Schedule } from "@/lib/types"
 import { CalendarClockIcon, PencilIcon } from "lucide-react"
@@ -121,11 +122,13 @@ export function ScheduleDetailDialog({
   onClose: () => void
 }) {
   const manage = useScheduleManage()
+  const projects = useProjects()
   const [editing, setEditing] = React.useState(false)
   const [name, setName] = React.useState("")
   const [taskInput, setTaskInput] = React.useState("")
   const [model, setModel] = React.useState<string | null>(null)
   const [permissionMode, setPermissionMode] = React.useState<PermissionMode>("confirm")
+  const [projectId, setProjectId] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (schedule) {
@@ -134,6 +137,7 @@ export function ScheduleDetailDialog({
       setTaskInput(schedule.task_input)
       setModel(schedule.model ?? null)
       setPermissionMode(schedule.permission_mode)
+      setProjectId(schedule.project_id ?? null)
     }
   }, [schedule])
 
@@ -152,6 +156,7 @@ export function ScheduleDetailDialog({
           enabled: schedule.enabled,
           model,
           permission_mode: permissionMode,
+          project_id: projectId,
         },
       },
       { onSuccess: () => setEditing(false) },
@@ -192,6 +197,13 @@ export function ScheduleDetailDialog({
                 )}
                 <Detail label="任务输入" value={schedule.task_input} multiline />
                 <Detail label="使用模型" value={schedule.model ?? "默认模型"} mono />
+                <Detail
+                  label="工作文件夹"
+                  value={
+                    projects.data?.find((p) => p.id === schedule.project_id)?.name ??
+                    "default"
+                  }
+                />
                 <Detail
                   label="权限模式"
                   value={permissionModeLabel(schedule.permission_mode)}
@@ -238,6 +250,14 @@ export function ScheduleDetailDialog({
                 <div className="grid gap-1.5">
                   <Label>使用模型</Label>
                   <ScheduleModelSelect value={model} onChange={setModel} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>工作文件夹</Label>
+                  <FolderControl currentProjectId={projectId} onSelect={setProjectId} />
+                  <p className="text-xs text-muted-foreground">
+                    日程每次运行都是一个新对话；绑定文件夹后它们都写进这个文件夹，
+                    不绑定则用共享的 default 文件夹。
+                  </p>
                 </div>
                 <div className="grid gap-1.5">
                   <Label>权限模式</Label>

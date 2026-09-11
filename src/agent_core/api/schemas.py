@@ -371,6 +371,10 @@ class ScheduleBase(BaseModel):
     enabled: bool = True
     model: str | None = None
     permission_mode: PermissionMode = DEFAULT_PERMISSION_MODE
+    project_id: str | None = Field(
+        default=None,
+        description="Folder the scheduled runs work in (None = the default folder)",
+    )
 
 
 class ScheduleCreateRequest(ScheduleBase):
@@ -399,6 +403,7 @@ class ScheduleOut(BaseModel):
     trigger_text: str
     model: str | None = None
     permission_mode: PermissionMode = DEFAULT_PERMISSION_MODE
+    project_id: str | None = None
     metadata: dict[str, Any]
 
     @classmethod
@@ -421,6 +426,7 @@ class ScheduleOut(BaseModel):
             trigger_text=schedule.describe_trigger(),
             model=schedule.model,
             permission_mode=schedule.permission_mode,
+            project_id=schedule.project_id,
             metadata=schedule.metadata,
         )
 

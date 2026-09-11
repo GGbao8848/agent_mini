@@ -46,6 +46,7 @@ def make_create_schedule(service: "AgentCoreService") -> tuple[ToolDefinition, A
         agent_id: str | None = None,
         enabled: bool = True,
         permission_mode: str | None = None,
+        project_id: str | None = None,
     ) -> str:
         runtime: AgentRuntime = service.runtime
         active_agent = agent_id or _current_agent(runtime)
@@ -66,6 +67,9 @@ def make_create_schedule(service: "AgentCoreService") -> tuple[ToolDefinition, A
                 if permission_mode
                 else _inherited_permission_mode()
             ),
+            # Default the folder to the project the calling conversation is in,
+            # so a recurring job's files stay where the user is working.
+            project_id=project_id or _inherited_project_id(runtime),
         )
         try:
             service.create_schedule(schedule)
@@ -115,12 +119,39 @@ def make_create_schedule(service: "AgentCoreService") -> tuple[ToolDefinition, A
                         "'auto' (自动编辑) so they never wait on an approval."
                     ),
                 },
+                "project_id": {
+                    "type": "string",
+                    "description": (
+                        "Folder the scheduled runs work in. Omit to inherit the "
+                        "current conversation's folder; if that is the default "
+                        "folder the runs land there too."
+                    ),
+                },
             },
             "required": ["name", "task_input", "schedule_type"],
         },
         metadata={"builtin": True, "available": True},
     )
     return definition, create_schedule
+
+
+def _inherited_project_id(runtime: AgentRuntime) -> str | None:
+    """The project the calling conversation is bound to, or None (default folder).
+
+    Read from the in-flight run's task so a schedule created mid-conversation
+    keeps writing where the user is working, instead of scattering into the
+    shared default folder.
+    """
+    try:
+        from agent_core.runtime.context import current_run
+
+        run = current_run.get()
+        if run is None:
+            return None
+        task = runtime.get_task(run.task_id)
+        return task.project_id
+    except Exception:
+        return None
 
 
 def _inherited_permission_mode() -> dict[str, Any]:

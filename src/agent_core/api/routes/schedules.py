@@ -27,6 +27,12 @@ def _to_model(schedule: Schedule) -> ScheduleOut:
     return ScheduleOut.of(schedule)
 
 
+def _check_project(service: ServiceDep, project_id: str | None) -> None:
+    """Fail fast on an unknown project folder instead of silently defaulting."""
+    if project_id:
+        service.runtime.projects.get(project_id)  # 404 on an unknown id
+
+
 @router.get("", response_model=list[ScheduleOut])
 def list_schedules(service: ServiceDep) -> list[ScheduleOut]:
     return [_to_model(s) for s in service.list_schedules()]
@@ -34,6 +40,7 @@ def list_schedules(service: ServiceDep) -> list[ScheduleOut]:
 
 @router.post("", response_model=ScheduleOut, status_code=201)
 def create_schedule(payload: ScheduleCreateRequest, service: ServiceDep) -> ScheduleOut:
+    _check_project(service, payload.project_id)
     data = payload.model_dump()
     data["agent_id"] = service.default_agent()  # schedules always use the default agent
     schedule = Schedule(**data)
@@ -54,6 +61,7 @@ def get_schedule(schedule_id: str, service: ServiceDep) -> ScheduleOut:
 def update_schedule(
     schedule_id: str, payload: ScheduleUpdateRequest, service: ServiceDep
 ) -> ScheduleOut:
+    _check_project(service, payload.project_id)
     existing = service.get_schedule(schedule_id)
     data = payload.model_dump()
     data["agent_id"] = existing.agent_id  # agent is fixed at creation

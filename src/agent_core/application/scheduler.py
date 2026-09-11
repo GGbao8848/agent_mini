@@ -164,6 +164,9 @@ class ScheduleManager:
                 # without this a 变更前确认 schedule would park on an approval
                 # no one is there to answer.
                 "permission_mode": schedule.permission_mode.value,
+                # Bound folder so a recurring job's files stay together across
+                # firings (each firing is its own conversation).
+                **({"project_id": schedule.project_id} if schedule.project_id else {}),
             },
         )
         schedule.last_run_at = local_now()

@@ -67,6 +67,12 @@ class Schedule(BaseModel):
     """Autonomy dial its runs use (see :class:`PermissionMode`). An unattended
     nightly job usually wants 自动编辑/完全访问 so it never blocks on a prompt
     nobody is there to answer; the default stays 变更前确认."""
+    project_id: str | None = None
+    """Project folder its runs work in; None means the shared ``default`` folder.
+
+    A schedule's runs are separate conversations, so without this every firing
+    would land in ``default``. Binding a folder keeps a recurring job's files
+    together (and out of everyone else's)."""
     created_at: datetime = Field(default_factory=local_now)
     last_run_at: datetime | None = None
     next_run_at: datetime | None = None

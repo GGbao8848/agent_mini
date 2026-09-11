@@ -153,6 +153,7 @@ export interface Schedule {
   trigger_text: string
   model: string | null
   permission_mode: PermissionMode
+  project_id: string | null
   metadata: Record<string, unknown>
 }
 
@@ -166,6 +167,7 @@ export type SchedulePayload = {
   enabled?: boolean
   model?: string | null
   permission_mode?: PermissionMode
+  project_id?: string | null
 }
 
 export interface Skill {

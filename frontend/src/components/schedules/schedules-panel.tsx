@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Textarea } from "@/components/ui/textarea"
+import { FolderControl } from "@/components/folder-control"
 import { useScheduleManage, useSchedules, useSubmitTask } from "@/hooks/use-console"
 import type { PermissionMode, Schedule, ScheduleType } from "@/lib/types"
 import { ScheduleDetailDialog } from "@/components/schedules/schedule-detail-dialog"
@@ -67,6 +68,10 @@ function ScheduleRequestDialog({
   // is where an unattended job picks 自动编辑/完全访问 instead of stalling on a
   // 变更前确认 prompt later.
   const [mode, setMode] = React.useState<PermissionMode>("auto")
+  // The folder the schedule's runs will work in (null = the default folder).
+  // The conversation that creates the schedule is bound here, so the agent
+  // inherits it; scheduled runs then keep their files in that folder.
+  const [projectId, setProjectId] = React.useState<string | null>(null)
 
   const close = () => {
     if (submit.isPending) return
@@ -78,7 +83,12 @@ function ScheduleRequestDialog({
     const text = input.trim()
     if (!text || submit.isPending) return
     submit.mutate(
-      { input: text, model: getSelectedModel(), permission_mode: mode },
+      {
+        input: text,
+        model: getSelectedModel(),
+        permission_mode: mode,
+        project_id: projectId,
+      },
       {
         onSuccess: (task) => {
           setInput("")
@@ -115,9 +125,11 @@ function ScheduleRequestDialog({
           <p className="text-xs text-muted-foreground">
             支持一次性 / 每天 / 每周 / 每月等重复规则，也支持「每 2 小时」这类间隔。
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground">日程权限模式</span>
             <PermissionModePicker value={mode} onChange={setMode} />
+            <span className="ml-2 text-xs text-muted-foreground">工作文件夹</span>
+            <FolderControl currentProjectId={projectId} onSelect={setProjectId} />
           </div>
         </div>
         <DialogFooter>
