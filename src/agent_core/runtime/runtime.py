@@ -179,6 +179,7 @@ class AgentRuntime:
             checkpointer_provider=lambda: self.checkpointer,
             memory_enabled=self.memories is not None,
             capabilities=self.capabilities,
+            fanout=self.fanout,
         )
         self.executor = AgentExecutor(self.fanout)
         self._runs: dict[str, Run] = {}

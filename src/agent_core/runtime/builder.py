@@ -23,6 +23,7 @@ from agent_core.context.builder import ContextBuilder
 from agent_core.domain.agent import AgentSpec, SubAgentRef
 from agent_core.domain.metrics import RunUsage
 from agent_core.errors.exceptions import ConfigurationError, SkillError
+from agent_core.observability.emitter import EventFanout
 from agent_core.registries import AgentRegistry, SkillRegistry, ToolRegistry
 from agent_core.runtime.help_tool import autonomy_prompt_addendum
 from agent_core.runtime.middleware import build_middleware
@@ -52,11 +53,13 @@ class AgentBuilder:
         checkpointer_provider: Callable[[], Any] | None = None,
         memory_enabled: bool = False,
         capabilities: CapabilityResolver | None = None,
+        fanout: EventFanout | None = None,
     ) -> None:
         self._agents = agents
         self._tools = tools
         self._skills = skills
         self._settings = settings
+        self._fanout = fanout
         self._model_factory: ModelFactory = model_factory or self._default_model_factory
         self._tool_factory = tool_factory or make_direct_tool
         self._usage_provider = usage_provider
@@ -157,7 +160,11 @@ class AgentBuilder:
             subagents=[self._resolve_subagent(ref, parent_id=spec.id) for ref in spec.subagents]
             or None,
             middleware=build_middleware(
-                spec, self._model_factory, self._usage_provider, cold_tools=cold
+                spec,
+                self._model_factory,
+                self._usage_provider,
+                cold_tools=cold,
+                fanout=self._fanout,
             ),
             # Read-only mounts and write-path rules: inputs/skills are immutable
             # to the agent (runtime invariant I-01/I-02).

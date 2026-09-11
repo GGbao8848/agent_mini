@@ -25,7 +25,7 @@ from agent_core.domain.autonomy import (
 from agent_core.domain.metrics import RunUsage
 from agent_core.domain.task import Run, RunStatus
 from agent_core.domain.tool import ToolDefinition
-from agent_core.errors.exceptions import ApprovalRejectedError, StateError, ToolError
+from agent_core.errors.exceptions import StateError, ToolError
 from agent_core.permissions.approval import ApprovalManager
 from agent_core.permissions.loop_guard import LoopGuard
 from agent_core.persistence.store import SqliteStore
@@ -214,7 +214,13 @@ class TestGateLoopGuard:
         assert run.status is RunStatus.RUNNING
         current_run.reset(token)
 
-    async def test_escalation_rejection_aborts_the_call(self) -> None:
+    async def test_escalation_rejection_continues_instead_of_aborting(self) -> None:
+        """Declining a help escalation is guidance, not a kill switch.
+
+        The human saying "no" to "how should I proceed?" means "stop asking and
+        carry on" — the run must keep its work and finish, not die. The refusal
+        is handed back as a tool message the model can act on.
+        """
         runtime = gated_runtime(AutonomyPolicy(loop_guard=LoopGuardPolicy()), lambda **_: "ok")
         run = running_run()
         token = current_run.set(run)
@@ -227,8 +233,11 @@ class TestGateLoopGuard:
         await asyncio.sleep(0.01)
         (pending,) = runtime.approvals.list_pending()
         runtime.approvals.resolve(pending.id, ApprovalStatus.REJECTED)
-        with pytest.raises(ApprovalRejectedError):
-            await escalated
+
+        result = await escalated
+        assert isinstance(result, str) and "declined" in result
+        # The run is still alive: it can reach a terminal state itself.
+        assert run.status is RunStatus.RUNNING
         current_run.reset(token)
 
     async def test_tool_failures_become_soft_messages_then_escalate(self) -> None:
@@ -281,6 +290,33 @@ class TestRequestHelpTool:
         assert "API key" in pending.question
         runtime.approvals.resolve(pending.id, ApprovalStatus.APPROVED, note="use the staging key")
         assert await pending_answer == "use the staging key"
+        assert run.status is RunStatus.RUNNING
+        current_run.reset(token)
+
+    async def test_declined_help_returns_guidance_and_keeps_run_alive(self) -> None:
+        """Rejecting a help question must not abort the run.
+
+        Hitting "no" on "can I continue?" is the human telling the agent to
+        press on by itself — the agent gets a tool result saying so and the run
+        stays RUNNING, instead of dying with "rejected by console" after all
+        the work it had already done.
+        """
+        runtime = gated_runtime(AutonomyPolicy(), lambda **_: "ok")
+        run = running_run()
+        token = current_run.set(run)
+        help_tool = make_help_tool(runtime.gate)
+
+        pending_answer = asyncio.create_task(
+            help_tool.coroutine(  # type: ignore[attr-defined]
+                question="May I continue?", context="everything else is done"
+            )
+        )
+        await asyncio.sleep(0.01)
+        (pending,) = runtime.approvals.list_pending()
+        runtime.approvals.resolve(pending.id, ApprovalStatus.REJECTED)
+
+        result = await pending_answer
+        assert isinstance(result, str) and "declined" in result
         assert run.status is RunStatus.RUNNING
         current_run.reset(token)
 

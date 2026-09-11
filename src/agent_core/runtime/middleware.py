@@ -26,6 +26,7 @@ from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import RunBudget
 from agent_core.domain.metrics import RunUsage
 from agent_core.domain.resilience import SummarizationPolicy
+from agent_core.observability.emitter import EventFanout
 from agent_core.runtime.budget import BudgetMiddleware
 from agent_core.runtime.model import ModelFactory
 
@@ -38,13 +39,20 @@ def build_middleware(
     usage_provider: UsageProvider | None = None,
     *,
     cold_tools: set[str] | None = None,
+    fanout: EventFanout | None = None,
 ) -> list[AgentMiddleware]:
     """Build the middleware list for ``spec.resilience`` and ``spec.autonomy``.
 
     ``cold_tools`` names the tools to advertise as cheap stubs (their full
     schema expands on first use — see :mod:`agent_core.runtime.tool_tiering`).
-    """
+    ``fanout``, when given, adds the observer that surfaces deepagents' built-in
+    filesystem tools in the trace (they bypass the ActionGate)."""
     middlewares: list[Any] = []
+
+    if fanout is not None:
+        from agent_core.runtime.file_tool_trace import FileToolTraceMiddleware
+
+        middlewares.append(FileToolTraceMiddleware(fanout))
 
     policy = spec.resilience
     if policy is not None and policy.enabled:

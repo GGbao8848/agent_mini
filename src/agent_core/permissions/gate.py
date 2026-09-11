@@ -127,14 +127,25 @@ class ActionGate:
         except AgentError as exc:
             failures = self._loop_guard.record_result(run.id, ok=False)
             if failures >= guard_policy.max_consecutive_failures:
-                return await self.request_help(
-                    run=run,
-                    question=(
-                        f"Tool '{tool_name}' failed {failures} times in a row; last error: "
-                        f"{exc.message}. How should I proceed?"
-                    ),
-                    reason=f"consecutive tool failures ({failures})",
-                )
+                try:
+                    return await self.request_help(
+                        run=run,
+                        question=(
+                            f"Tool '{tool_name}' failed {failures} times in a row; last error: "
+                            f"{exc.message}. How should I proceed?"
+                        ),
+                        reason=f"consecutive tool failures ({failures})",
+                    )
+                except ApprovalRejectedError as rejected:
+                    # Declining the escalation is guidance ("stop asking
+                    # permission, keep going"), not an instruction to abort.
+                    # Hand the refusal back as a tool message so the model can
+                    # finish with what it already has.
+                    return (
+                        f"[tool error] '{tool_name}' failed {failures} times; the human "
+                        f"declined the help request ({rejected.message}). Continue without "
+                        "this tool — use what you already have and answer."
+                    )
             return (
                 f"[tool error] '{tool_name}' failed: {exc.message} "
                 f"(consecutive failures: {failures}/{guard_policy.max_consecutive_failures}). "
@@ -160,15 +171,23 @@ class ActionGate:
             return verdict.message
         action.status = ActionStatus.REJECTED
         action.reason = verdict.message
-        return await self.request_help(
-            run=run,
-            question=(
-                f"{verdict.message} I appear to be stuck in a loop "
-                f"(limit: {policy.max_identical_calls} identical calls). "
-                "What should I do differently?"
-            ),
-            reason="loop guard escalation",
-        )
+        try:
+            return await self.request_help(
+                run=run,
+                question=(
+                    f"{verdict.message} I appear to be stuck in a loop "
+                    f"(limit: {policy.max_identical_calls} identical calls). "
+                    "What should I do differently?"
+                ),
+                reason="loop guard escalation",
+            )
+        except ApprovalRejectedError as rejected:
+            # A declined escalation means "carry on", not "abort": tell the
+            # model the nudge stands and let it try a different approach.
+            return (
+                f"{verdict.message} (The human declined to advise; do not repeat "
+                f"the call — change approach.) {rejected.message}"
+            )
 
     async def request_help(self, *, run: Run, question: str, reason: str = "") -> str:
         """Park the run in NEEDS_INPUT until a human answers; returns the guidance.

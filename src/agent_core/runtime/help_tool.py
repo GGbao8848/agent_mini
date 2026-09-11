@@ -7,6 +7,11 @@ of guessing. This tool is deliberately NOT registered in the ToolRegistry:
 it is a meta-tool whose handler is the ActionGate itself — putting it
 through the normal gate path would double-gate it and subject it to tool
 policies that exist for external side effects, not for asking questions.
+
+A **declined** help request is guidance, not a verdict: "no" means "don't wait
+on me, decide yourself and carry on". It is returned as an ordinary tool
+result so the run keeps going and finishes with what it has — only a rejected
+*action approval* (a risky tool the human vetoed) fails closed.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from __future__ import annotations
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from agent_core.errors.exceptions import StateError
+from agent_core.errors.exceptions import ApprovalRejectedError, StateError
 from agent_core.permissions.gate import ActionGate
 from agent_core.runtime.context import current_run
 
@@ -40,7 +45,17 @@ def make_help_tool(gate: ActionGate) -> StructuredTool:
         if run is None:
             raise StateError("request_help can only be called inside a run")
         full_question = question if not context else f"{question}\n\nContext: {context}"
-        return await gate.request_help(run=run, question=full_question, reason="agent request")
+        try:
+            return await gate.request_help(
+                run=run, question=full_question, reason="agent request"
+            )
+        except ApprovalRejectedError:
+            # The human declined to answer: proceed without them rather than
+            # aborting a run that may already hold finished work.
+            return (
+                "The human declined to answer. Proceed with your best judgment "
+                "using what you already have, and finish the task."
+            )
 
     return StructuredTool.from_function(
         coroutine=_ask,
