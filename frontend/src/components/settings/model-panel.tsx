@@ -316,7 +316,11 @@ function ProviderDetail({
 
       <div className="grid gap-1.5">
         <Label>API 格式</Label>
-        <Select value={apiFormat} onValueChange={(v) => setApiFormat(v ?? "openai")}>
+        <Select
+          value={apiFormat}
+          onValueChange={(v) => setApiFormat(v ?? "openai")}
+          items={API_FORMAT_LABELS}
+        >
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>

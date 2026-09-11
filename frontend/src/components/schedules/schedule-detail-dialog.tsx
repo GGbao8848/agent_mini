@@ -53,6 +53,13 @@ export function ScheduleModelSelect({
     <Select
       value={value ?? "__default"}
       onValueChange={(v) => onChange(v === "__default" ? null : v)}
+      items={[
+        {
+          value: "__default",
+          label: `默认模型${config.data?.effective_model ? `（${config.data.effective_model}）` : ""}`,
+        },
+        ...options.map((option) => ({ value: option.spec, label: option.model })),
+      ]}
     >
       <SelectTrigger className="w-full font-mono text-xs">
         <SelectValue />
@@ -86,7 +93,11 @@ export function SchedulePermissionModeSelect({
   onChange: (mode: PermissionMode) => void
 }) {
   return (
-    <Select value={value} onValueChange={(v) => onChange(v as PermissionMode)}>
+    <Select
+      value={value}
+      onValueChange={(v) => onChange(v as PermissionMode)}
+      items={PERMISSION_MODES.map((mode) => ({ value: mode.value, label: mode.label }))}
+    >
       <SelectTrigger className="w-full text-xs">
         <SelectValue />
       </SelectTrigger>

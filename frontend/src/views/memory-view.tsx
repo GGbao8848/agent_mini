@@ -157,7 +157,7 @@ export function MemoryView() {
           }}
         />
         <div className="flex items-center gap-2">
-          <Select value={scope} onValueChange={(v) => setScope(v ?? "user")}>
+          <Select value={scope} onValueChange={(v) => setScope(v ?? "user")} items={SCOPES}>
             <SelectTrigger size="sm" className="w-28">
               <SelectValue />
             </SelectTrigger>
@@ -169,7 +169,7 @@ export function MemoryView() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={type} onValueChange={(v) => setType(v ?? "fact")}>
+          <Select value={type} onValueChange={(v) => setType(v ?? "fact")} items={TYPES}>
             <SelectTrigger size="sm" className="w-28">
               <SelectValue />
             </SelectTrigger>
