@@ -24,6 +24,7 @@ from pydantic import SecretStr
 from agent_core.config.model_config import get_model_config
 from agent_core.config.settings import Settings, get_settings
 from agent_core.errors.exceptions import ConfigurationError
+from agent_core.runtime.reasoning import ReasoningChatOpenAI
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -135,7 +136,7 @@ def build_model(spec: str | None, *, settings: Settings | None = None) -> BaseCh
         )
     # The official OpenAI endpoint: langchain-openai already enables streaming
     # usage accounting there, so the default constructor is correct.
-    return ChatOpenAI(
+    return ReasoningChatOpenAI(
         model=model,
         api_key=SecretStr(api_key),
         temperature=0,
@@ -235,7 +236,7 @@ def _chat_model(
     fraction instead of the 170k flat default that assumes giant frontier
     models.
     """
-    instance = ChatOpenAI(
+    instance = ReasoningChatOpenAI(
         model=model,
         api_key=SecretStr(api_key),
         base_url=base_url,
