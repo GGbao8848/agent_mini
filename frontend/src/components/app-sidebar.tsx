@@ -4,6 +4,7 @@ import * as React from "react"
 
 import { NavMain } from "@/components/nav-main"
 import { Button } from "@/components/ui/button"
+import { FolderPicker } from "@/components/folder-picker"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   AlertDialog,
@@ -37,7 +38,6 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 import {
-  useBrowseDir,
   useDeleteTask,
   useProjectManage,
   useProjects,
@@ -562,6 +562,7 @@ function WorkspaceSection({
       {/* folder picker: add project by choosing a server folder */}
       {pickerOpen && (
         <FolderPicker
+          allowCreate
           onPick={(path) => {
             const name = path.split("/").filter(Boolean).pop() || path
             manage.create.mutate(
@@ -708,89 +709,6 @@ function WorkspaceSection({
         </AlertDialogContent>
       </AlertDialog>
     </SidebarGroup>
-  )
-}
-
-/** Server folder picker: browse subdirectories, then confirm. Projects are
- *  host folders so the browser cannot open a native picker — this walks the
- *  server tree instead (read-only). The project name becomes the folder name.
- *  ``path`` state is the source of truth for navigation and submission; the
- *  fetched entry list only feeds the tree. */
-function FolderPicker({
-  onPick,
-  onClose,
-}: {
-  onPick: (path: string) => void
-  onClose: () => void
-}) {
-  const [path, setPath] = React.useState("") // "" = home, served by the backend
-  const browse = useBrowseDir(path)
-  const data = browse.data
-  const folderName = path.split("/").filter(Boolean).pop()
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex max-h-[80vh] flex-col gap-3 sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>选择工作文件夹</DialogTitle>
-          <DialogDescription>
-            项目名使用所选文件夹的名称。绑定后，该项目的对话直接在这个文件夹里读写文件。
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex items-center gap-1 rounded-md border bg-muted/40 px-1 py-0.5 font-mono text-xs">
-          <button
-            type="button"
-            onClick={() => data?.parent && setPath(data.parent)}
-            disabled={!data?.parent || browse.isFetching}
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
-            title="上一级"
-          >
-            <ChevronRightIcon className="size-3.5 -rotate-90" />
-          </button>
-          <span className="min-w-0 flex-1 truncate px-1" title={data?.path ?? path}>
-            {data?.path ?? (path || "…")}
-          </span>
-        </div>
-        <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-          {browse.isFetching && <Skeleton className="h-10 w-full" />}
-          {browse.error && (
-            <p className="px-1 py-2 text-xs text-destructive">
-              {browse.error instanceof Error ? browse.error.message : String(browse.error)}
-            </p>
-          )}
-          {!browse.isFetching && data && data.entries.length === 0 && (
-            <p className="px-1 py-2 text-xs text-muted-foreground">这个文件夹里没有子目录</p>
-          )}
-          {(data?.entries ?? []).map((entry) => (
-            <button
-              key={entry.path}
-              type="button"
-              onClick={() => setPath(entry.path)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
-              title={entry.path}
-            >
-              <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            </button>
-          ))}
-        </div>
-        <DialogFooter className="items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            将添加：{folderName || "…"}
-          </span>
-          <Button variant="outline" size="sm" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            size="sm"
-            disabled={!folderName || browse.isFetching}
-            onClick={() => folderName && onPick(path)}
-          >
-            选择此文件夹
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }
 

@@ -222,6 +222,53 @@ class TestMCPRoutes:
             assert response.json()["error"]["retryable"] is True
 
 
+class TestDirRoutes:
+    """The console's folder picker: browse the host tree, create one folder."""
+
+    async def test_browse_lists_only_subdirectories(self, client: Any, tmp_path: Any) -> None:
+        (tmp_path / "alpha").mkdir()
+        (tmp_path / "beta").mkdir()
+        (tmp_path / "note.txt").write_text("x")
+
+        response = await client.get("/v1/dirs/browse", params={"path": str(tmp_path)})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert [e["name"] for e in body["entries"]] == ["alpha", "beta"]
+        assert body["parent"]
+
+    async def test_create_makes_one_folder(self, client: Any, tmp_path: Any) -> None:
+        response = await client.post(
+            "/v1/dirs", json={"parent": str(tmp_path), "name": "new-folder"}
+        )
+
+        assert response.status_code == 201
+        assert response.json()["name"] == "new-folder"
+        assert (tmp_path / "new-folder").is_dir()
+
+    async def test_create_rejects_separators_and_traversal(
+        self, client: Any, tmp_path: Any
+    ) -> None:
+        for name in ("a/b", "..", ".", "~root", "a\\b"):
+            response = await client.post(
+                "/v1/dirs", json={"parent": str(tmp_path), "name": name}
+            )
+            assert response.status_code == 400, (name, response.text)
+        assert list(tmp_path.iterdir()) == []
+
+    async def test_create_conflict_and_missing_parent(self, client: Any, tmp_path: Any) -> None:
+        (tmp_path / "taken").mkdir()
+        clash = await client.post(
+            "/v1/dirs", json={"parent": str(tmp_path), "name": "taken"}
+        )
+        assert clash.status_code == 409
+
+        missing = await client.post(
+            "/v1/dirs", json={"parent": str(tmp_path / "nope"), "name": "x"}
+        )
+        assert missing.status_code == 404
+
+
 class TestTaskRoutes:
     async def test_create_task_wait_returns_completed_with_output(self, client: Any) -> None:
         response = await client.post(

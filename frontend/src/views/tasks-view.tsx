@@ -2,6 +2,7 @@ import * as React from "react"
 import { getSelectedModel, ModelPicker } from "@/components/chat/model-picker"
 import { PermissionModePicker } from "@/components/chat/permission-mode-picker"
 import { ContextGauge } from "@/components/chat/context-gauge"
+import { FolderControl } from "@/components/folder-control"
 import { Markdown } from "@/components/chat/markdown"
 import { ApprovalCard } from "@/components/runs/approval-card"
 import { RunActivity, RunArtifacts } from "@/components/runs/run-activity"
@@ -17,7 +18,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
   useApprovals,
@@ -27,6 +27,7 @@ import {
   useRun,
   useSendFollowup,
   useSubmitTask,
+  useUpdateTask,
   useTask,
   useTaskArtifacts,
   useTaskEvents,
@@ -39,7 +40,6 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CircleStopIcon,
-  FolderIcon,
   PaperclipIcon,
   XIcon,
 } from "lucide-react"
@@ -288,10 +288,12 @@ function NewTaskComposer({
   const [projectId, setProjectId] = React.useState<string | null>(initialProjectId ?? null)
   const [mode, setMode] = React.useState<PermissionMode>("confirm")
   // The sidebar's project-row "+" updates the preset while the composer is
-  // already mounted — follow it (the user can still change the select).
+  // already mounted — follow it (the user can still change the folder).
   React.useEffect(() => {
     setProjectId(initialProjectId ?? null)
   }, [initialProjectId])
+  const projectPath =
+    projects.data?.find((p) => p.id === projectId)?.path ?? ""
   return (
     <Composer
       placeholder="给分身派个任务，例如：把画册的冬天板块加两张图…"
@@ -300,34 +302,14 @@ function NewTaskComposer({
       onPermissionMode={setMode}
       onSubmit={(text, paths, model) => onSubmit(text, paths, projectId, model, mode)}
     >
-      {(projects.data?.length ?? 0) > 0 && (
-        <div className="flex items-center gap-2 px-1 pt-1">
-          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <Select
-            value={projectId ?? "none"}
-            onValueChange={(value) => setProjectId(value === "none" ? null : value)}
-          >
-            <SelectTrigger className="h-7 w-auto gap-1 border-0 bg-muted px-2 text-xs shadow-none">
-              <SelectValue>
-                {(() => {
-                  const selected = projects.data?.find((p) => p.id === projectId)
-                  return selected ? selected.name : "无项目（产物放任务目录）"
-                })()}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none" className="text-xs">
-                无项目（产物放任务目录）
-              </SelectItem>
-              {projects.data!.map((project) => (
-                <SelectItem key={project.id} value={project.id} className="text-xs">
-                  {project.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
+      <div className="flex items-center gap-2 px-1 pt-1">
+        <FolderControl
+          currentPath={projectPath}
+          onSelect={(path) =>
+            setProjectId(path ? (projects.data?.find((p) => p.path === path)?.id ?? null) : null)
+          }
+        />
+      </div>
     </Composer>
   )
 }
@@ -389,6 +371,8 @@ function ChatThread({ task }: { task: Task }) {
   const cancel = useCancelTask()
   const events = useTaskEvents(task.id)
   const taskArtifacts = useTaskArtifacts(task.id)
+  const projects = useProjects()
+  const updateTask = useUpdateTask()
   const [confirmStop, setConfirmStop] = React.useState(false)
   // The dial shown in the composer, seeded from the conversation. ChatThread is
   // keyed by task id (see TasksView), so switching conversations remounts this
@@ -625,7 +609,28 @@ function ChatThread({ task }: { task: Task }) {
                 permission_mode: modeForNextTurn,
               })
             }
-          />
+          >
+            <div className="flex items-center gap-2 px-1 pt-1">
+              <FolderControl
+                readonly={running}
+                currentPath={
+                  projects.data?.find((p) => p.id === current.project_id)?.path ?? ""
+                }
+                onSelect={(path) =>
+                  updateTask.mutate({
+                    taskId: current.id,
+                    patch: {
+                      project_id:
+                        (path && projects.data?.find((p) => p.path === path)?.id) || "",
+                    },
+                  })
+                }
+              />
+              {running && (
+                <span className="text-xs text-muted-foreground">运行中不可切换</span>
+              )}
+            </div>
+          </Composer>
         </div>
       </div>
 

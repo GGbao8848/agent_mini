@@ -1,9 +1,10 @@
-"""Host-directory browsing for the console's folder picker.
+"""Host-directory browsing + folder creation for the console's folder picker.
 
-The sidebar "add project" flow needs a native folder picker, but the browser
-has no access to the server's filesystem — this read-only endpoint lets the
-console walk the host tree and register a directory as a project. Projects
-must still be registered by a human; nothing here writes to disk.
+A working folder is a real host directory, but the browser has no access to the
+server's filesystem — this endpoint pair lets the console walk the host tree and
+create a new folder while picking. Browsing is read-only; creation makes exactly
+one directory under an existing parent (one path component, no traversal), and
+nothing else on disk is touched.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/dirs", tags=["dirs"])
 
@@ -69,3 +70,38 @@ def browse_dir(
         except OSError:
             parent = None
     return DirBrowseOut(path=str(root), parent=parent, entries=entries)
+
+
+class DirCreateRequest(BaseModel):
+    parent: str = Field(min_length=1, description="Existing directory to create inside")
+    name: str = Field(min_length=1, description="New folder name (a single path component)")
+
+
+@router.post("", response_model=DirEntry, status_code=201)
+def create_dir(payload: DirCreateRequest) -> DirEntry:
+    """Create one subfolder under ``parent`` and return it (folder picker's "新建")."""
+    name = payload.name.strip()
+    # A folder name is one path component: no separators, no traversal, no
+    # absolute path, no shell-isms. This is the only write this router does.
+    if not name or name in {".", ".."} or name.startswith("~"):
+        raise HTTPException(status_code=400, detail="文件夹名不合法")
+    if "/" in name or "\\" in name or "\0" in name:
+        raise HTTPException(status_code=400, detail="文件夹名不能包含路径分隔符")
+
+    try:
+        parent = Path(payload.parent).expanduser().resolve()
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=f"invalid parent path: {exc}") from exc
+    if not parent.is_dir():
+        raise HTTPException(status_code=404, detail=f"parent is not a directory: {parent}")
+
+    target = (parent / name).resolve()
+    if not target.is_relative_to(parent):  # defensive: resolve() should prevent this
+        raise HTTPException(status_code=400, detail="文件夹名不合法")
+    try:
+        target.mkdir()
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"文件夹已存在：{name}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=403, detail=f"无法创建文件夹：{exc}") from exc
+    return DirEntry(name=name, path=str(target))

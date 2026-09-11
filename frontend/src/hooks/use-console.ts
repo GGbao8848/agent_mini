@@ -12,6 +12,7 @@ import {
   type Approval,
   type Artifact,
   type DirBrowse,
+  type DirEntry,
   type MCPServer,
   type Memory,
   type ModelConfig,
@@ -278,7 +279,10 @@ export function useUploadAttachments() {
 
 export function useUpdateTask() {
   const queryClient = useQueryClient()
-  return useToastMutation<Task, { taskId: string; patch: { title?: string; pinned?: boolean } }>({
+  return useToastMutation<
+    Task,
+    { taskId: string; patch: { title?: string; pinned?: boolean; project_id?: string } }
+  >({
     mutationFn: ({ taskId, patch }) => api.patch<Task>(`/v1/tasks/${taskId}`, patch),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
@@ -575,6 +579,16 @@ export function useBrowseDir(path: string | null) {
     queryFn: () =>
       api.get<DirBrowse>(`/v1/dirs/browse?path=${encodeURIComponent(path ?? "")}`),
     staleTime: 10_000,
+  })
+}
+
+/** Create one subfolder while picking a working folder. */
+export function useCreateDir() {
+  const queryClient = useQueryClient()
+  return useToastMutation<DirEntry, { parent: string; name: string }>({
+    mutationFn: ({ parent, name }) =>
+      api.post<DirEntry>("/v1/dirs", { parent, name }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dirs"] }),
   })
 }
 
