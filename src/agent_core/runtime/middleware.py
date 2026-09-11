@@ -40,19 +40,21 @@ def build_middleware(
     *,
     cold_tools: set[str] | None = None,
     fanout: EventFanout | None = None,
+    gate: Any | None = None,
 ) -> list[AgentMiddleware]:
     """Build the middleware list for ``spec.resilience`` and ``spec.autonomy``.
 
     ``cold_tools`` names the tools to advertise as cheap stubs (their full
     schema expands on first use — see :mod:`agent_core.runtime.tool_tiering`).
     ``fanout``, when given, adds the observer that surfaces deepagents' built-in
-    filesystem tools in the trace (they bypass the ActionGate)."""
+    filesystem tools in the trace and gates their writes by permission mode
+    (``gate`` supplies the approval path for 变更前确认)."""
     middlewares: list[Any] = []
 
     if fanout is not None:
         from agent_core.runtime.file_tool_trace import FileToolTraceMiddleware
 
-        middlewares.append(FileToolTraceMiddleware(fanout))
+        middlewares.append(FileToolTraceMiddleware(fanout, gate))
 
     policy = spec.resilience
     if policy is not None and policy.enabled:

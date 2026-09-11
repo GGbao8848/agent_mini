@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections import deque
 from collections.abc import AsyncIterator
 
 from agent_core.domain.trace import TraceEvent
@@ -24,14 +25,22 @@ StreamFilter = tuple[str | None, str | None]
 
 
 class EventStream:
-    """One subscriber's live view of events, backed by a bounded queue."""
+    """One subscriber's live view of events, backed by a bounded queue.
+
+    Live events go through a bounded queue and are dropped if this consumer
+    falls behind (a slow viewer must never stall the run). *Replayed history*
+    is different: it is already recorded, so it is never dropped — a reconnect
+    (page refresh) must always see the full timeline. Replay accumulates in a
+    plain list and is drained before the live queue.
+    """
 
     def __init__(self, maxsize: int = 1000) -> None:
         self._queue: asyncio.Queue[TraceEvent | None] = asyncio.Queue(maxsize=maxsize)
+        self._replay: deque[TraceEvent] = deque()
         self.dropped = 0
 
     def push(self, event: TraceEvent) -> None:
-        """Enqueue ``event``; drop it if this consumer cannot keep up."""
+        """Enqueue a live ``event``; drop it if this consumer cannot keep up."""
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
@@ -39,12 +48,19 @@ class EventStream:
             logger.debug("Event stream dropped event (consumer too slow)")
 
     def replay(self, events: list[TraceEvent]) -> None:
-        """Seed the stream with past events (e.g. from the tracer)."""
-        for event in events:
-            self.push(event)
+        """Seed the stream with recorded events, unbounded and loss-free.
+
+        Routing these through the live queue would drop everything past its
+        capacity — a long run's trace easily exceeds it (reasoning deltas alone
+        run to thousands), and a refresh would then silently lose the newest
+        work while the older steps still showed.
+        """
+        self._replay.extend(events)
 
     async def events(self) -> AsyncIterator[TraceEvent]:
-        """Yield events until the stream is closed."""
+        """Yield replayed history first, then live events, until closed."""
+        while self._replay:
+            yield self._replay.popleft()
         while True:
             event = await self._queue.get()
             if event is None:  # close sentinel

@@ -33,6 +33,7 @@ from agent_core.config.settings import get_settings
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.autonomy import VerificationPolicy
 from agent_core.domain.metrics import RunUsage
+from agent_core.domain.permission_mode import PermissionMode
 from agent_core.domain.task import Run, RunStatus, Task, make_title, new_id
 from agent_core.domain.trace import EventType, TraceEvent
 from agent_core.errors.exceptions import (
@@ -58,6 +59,7 @@ from agent_core.runtime.builder import AgentBuilder
 from agent_core.runtime.context import (
     current_memory_block,
     current_model_override,
+    current_permission_mode,
     current_query,
     current_run,
     current_skill_mounts,
@@ -180,6 +182,7 @@ class AgentRuntime:
             memory_enabled=self.memories is not None,
             capabilities=self.capabilities,
             fanout=self.fanout,
+            gate=self.gate,
         )
         self.executor = AgentExecutor(self.fanout)
         self._runs: dict[str, Run] = {}
@@ -645,12 +648,19 @@ class AgentRuntime:
         *,
         metadata: dict[str, Any] | None = None,
         project_id: str | None = None,
+        permission_mode: str | None = None,
     ) -> Task:
         """Start a new conversation: create its Task and the first root run."""
         spec = self.agents.get(agent_id)  # fail fast on unknown agents
         if project_id is not None:
             self.projects.get(project_id)  # fail fast on unknown projects
-        task = self._new_task(spec.id, text, metadata=metadata, project_id=project_id)
+        task = self._new_task(
+            spec.id,
+            text,
+            metadata=metadata,
+            project_id=project_id,
+            permission_mode=permission_mode,
+        )
         self.create_run(spec.id, text, task=task)
         return task
 
@@ -707,6 +717,7 @@ class AgentRuntime:
         *,
         metadata: dict[str, Any] | None = None,
         project_id: str | None = None,
+        permission_mode: str | None = None,
     ) -> Task:
         """Create and register a fresh conversation owned by ``agent_id``."""
         task = Task(
@@ -716,6 +727,11 @@ class AgentRuntime:
             thread_id=new_id(),
             project_id=project_id,
             metadata=dict(metadata or {}),
+            **(
+                {"permission_mode": PermissionMode(permission_mode)}
+                if permission_mode is not None
+                else {}
+            ),
         )
         self._tasks[task.id] = task
         self._save_task(task)
@@ -748,6 +764,12 @@ class AgentRuntime:
         model_token = (
             current_model_override.set(str(override)) if override else None
         )
+        # Permission mode: the run's explicit metadata wins (the composer sends
+        # it per turn); otherwise inherit the conversation's last choice.
+        mode = run.metadata.get("permission_mode")
+        if mode is None:
+            mode = task.permission_mode.value
+        permission_token = current_permission_mode.set(PermissionMode(mode))
         collector = UsageCollector()
         self._collectors[run.id] = collector
         heartbeat = asyncio.create_task(self._heartbeat(run))
@@ -832,6 +854,7 @@ class AgentRuntime:
                 current_task_state_block.reset(task_state_token)
             if model_token is not None:
                 current_model_override.reset(model_token)
+            current_permission_mode.reset(permission_token)
         return run
 
     def task_root(self, task_id: str) -> Path | None:

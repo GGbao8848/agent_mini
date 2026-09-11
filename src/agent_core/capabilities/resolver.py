@@ -167,15 +167,27 @@ class CapabilityResolver:
         return decision
 
     def decide_with_reason(
-        self, spec: AgentSpec, definition: ToolDefinition
+        self,
+        spec: AgentSpec,
+        definition: ToolDefinition,
+        *,
+        lift_risk_floor: bool = False,
     ) -> tuple[PermissionDecision, str]:
-        """The decision plus a human-readable reason (shared by all callers)."""
+        """The decision plus a human-readable reason (shared by all callers).
+
+        ``lift_risk_floor`` (完全访问 permission mode) stops the risk floor from
+        turning an allow into an approval prompt. Explicit deny rules and
+        capability bindings still win — the mode reduces prompts, it does not
+        grant new or forbidden capabilities.
+        """
         if spec.tools and definition.name not in spec.tools:
             return PermissionDecision.DENY, "不在该 agent 的工具绑定中"
         skill_cap = self._skill_ceiling(spec)
         if skill_cap is not None and definition.name not in skill_cap:
             return PermissionDecision.DENY, "超出所绑技能的 allowed_tools 范围"
-        return self._policy_decision(spec, definition)
+        return self._policy_decision(
+            spec, definition, lift_risk_floor=lift_risk_floor
+        )
 
     def explain(self, spec: AgentSpec, tool_name: str) -> str:
         """Why ``tool_name`` has its state for ``spec`` (for errors/UI)."""
@@ -208,7 +220,11 @@ class CapabilityResolver:
         return allowed if restricted else None
 
     def _policy_decision(
-        self, spec: AgentSpec, definition: ToolDefinition
+        self,
+        spec: AgentSpec,
+        definition: ToolDefinition,
+        *,
+        lift_risk_floor: bool = False,
     ) -> tuple[PermissionDecision, str]:
         if spec.permissions is not None:
             decision = spec.permissions.evaluate(definition.name)
@@ -217,7 +233,8 @@ class CapabilityResolver:
             decision = PermissionDecision.ALLOW
             reason = "默认允许"
         if (
-            decision is PermissionDecision.ALLOW
+            not lift_risk_floor
+            and decision is PermissionDecision.ALLOW
             and _RISK_ORDER[definition.risk_level] >= _RISK_ORDER[self._floor]
         ):
             return PermissionDecision.REQUIRE_APPROVAL, "风险等级达到审批阈值"

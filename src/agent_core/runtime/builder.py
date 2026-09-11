@@ -54,12 +54,14 @@ class AgentBuilder:
         memory_enabled: bool = False,
         capabilities: CapabilityResolver | None = None,
         fanout: EventFanout | None = None,
+        gate: Any | None = None,
     ) -> None:
         self._agents = agents
         self._tools = tools
         self._skills = skills
         self._settings = settings
         self._fanout = fanout
+        self._gate = gate
         self._model_factory: ModelFactory = model_factory or self._default_model_factory
         self._tool_factory = tool_factory or make_direct_tool
         self._usage_provider = usage_provider
@@ -165,6 +167,7 @@ class AgentBuilder:
                 self._usage_provider,
                 cold_tools=cold,
                 fanout=self._fanout,
+                gate=self._gate,
             ),
             # Read-only mounts and write-path rules: inputs/skills are immutable
             # to the agent (runtime invariant I-01/I-02).

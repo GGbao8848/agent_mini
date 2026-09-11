@@ -16,6 +16,7 @@ from agent_core.domain.action import ApprovalRequest, ApprovalStatus
 from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition
 from agent_core.domain.metrics import RunUsage
+from agent_core.domain.permission_mode import PermissionMode
 from agent_core.domain.project import Project
 from agent_core.domain.schedule import Schedule
 from agent_core.domain.task import Run, Task, new_id
@@ -78,11 +79,16 @@ class AgentCoreService:
         metadata: dict[str, Any] | None = None,
         project_id: str | None = None,
         model: str | None = None,
+        permission_mode: str | None = None,
     ) -> Task:
         """Start a new conversation; with ``wait`` return it fully answered."""
         resolved_agent = agent_id or self.default_agent()
         task = self.runtime.create_conversation(
-            resolved_agent, task_input, metadata=metadata, project_id=project_id
+            resolved_agent,
+            task_input,
+            metadata=metadata,
+            project_id=project_id,
+            permission_mode=permission_mode,
         )
         run = self.runtime.task_active_run(task.id)
         if run is not None:
@@ -149,12 +155,20 @@ class AgentCoreService:
         return self.runtime.get_task(task_id)
 
     async def send_message(
-        self, task_id: str, text: str, *, wait: bool = False, model: str | None = None
+        self,
+        task_id: str,
+        text: str,
+        *,
+        wait: bool = False,
+        model: str | None = None,
+        permission_mode: str | None = None,
     ) -> Task:
         """Continue the conversation of ``task_id`` with a new user turn.
 
         The follow-up run reuses the conversation's thread, so the agent
-        continues where it left off with the whole history in context.
+        continues where it left off with the whole history in context. A
+        ``permission_mode`` here updates the conversation's dial for this turn
+        onward (the composer can change autonomy mid-conversation).
         """
         conversation = self.runtime.get_task(task_id)
         run = self.runtime.create_run(
@@ -162,6 +176,11 @@ class AgentCoreService:
         )
         if model:
             run.metadata["model"] = model
+        if permission_mode is not None:
+            conversation.permission_mode = PermissionMode(permission_mode)
+            run.metadata["permission_mode"] = permission_mode
+            self.runtime._save_task(conversation)
+        if model or permission_mode is not None:
             self.runtime._save_run(run)
         execution = self.runtime.submit_run(run)
         if wait:

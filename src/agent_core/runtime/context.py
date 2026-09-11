@@ -12,6 +12,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agent_core.domain.permission_mode import PermissionMode
 from agent_core.domain.task import Run
 
 if TYPE_CHECKING:
@@ -61,6 +62,22 @@ Set by the runtime from the run's metadata; the model factory reads it so a
 conversation can pin a specific endpoint model without touching the agent
 spec. Sub-agent invocations inherit it like the other context vars.
 """
+
+
+current_permission_mode: ContextVar[PermissionMode | None] = ContextVar(
+    "current_permission_mode", default=None
+)
+"""The in-flight run's permission mode (see :class:`PermissionMode`), or None.
+
+Set by the runtime from the run metadata / conversation, read by the gate and
+the file-tool middleware so autonomy is per-conversation and can change between
+turns.
+"""
+
+
+def get_current_permission_mode() -> PermissionMode | None:
+    """The permission mode of the current run, or None outside a run."""
+    return current_permission_mode.get()
 
 
 current_query: ContextVar[str | None] = ContextVar("current_query", default=None)

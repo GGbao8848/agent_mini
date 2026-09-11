@@ -1,5 +1,6 @@
 import * as React from "react"
 import { getSelectedModel, ModelPicker } from "@/components/chat/model-picker"
+import { PermissionModePicker } from "@/components/chat/permission-mode-picker"
 import { ContextGauge } from "@/components/chat/context-gauge"
 import { Markdown } from "@/components/chat/markdown"
 import { ApprovalCard } from "@/components/runs/approval-card"
@@ -32,9 +33,10 @@ import {
   useTasks,
   useUploadAttachments,
 } from "@/hooks/use-console"
-import { TERMINAL_RUN_STATUSES, type Artifact, type RunEvent, type Task } from "@/lib/types"
+import { TERMINAL_RUN_STATUSES, type Artifact, type PermissionMode, type RunEvent, type Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
+  ArrowDownIcon,
   ArrowUpIcon,
   CircleStopIcon,
   FolderIcon,
@@ -111,6 +113,8 @@ function Composer({
   onStop,
   children,
   taskId,
+  permissionMode,
+  onPermissionMode,
 }: {
   placeholder: string
   pending: boolean
@@ -121,10 +125,16 @@ function Composer({
   children?: React.ReactNode
   /** Set in an existing conversation: shows the context-capacity gauge. */
   taskId?: string
+  /** Autonomy dial shown next to the model picker. */
+  permissionMode?: PermissionMode
+  onPermissionMode?: (mode: PermissionMode) => void
 }) {
   const [text, setText] = React.useState("")
   const [files, setFiles] = React.useState<PendingFile[]>([])
   const [dragging, setDragging] = React.useState(false)
+  const [localMode, setLocalMode] = React.useState<PermissionMode>("confirm")
+  const activeMode = permissionMode ?? localMode
+  const setActiveMode = onPermissionMode ?? setLocalMode
   const inputRef = React.useRef<HTMLInputElement>(null)
   const upload = useUploadAttachments()
 
@@ -211,6 +221,7 @@ function Composer({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1">
           <ModelPicker />
+          <PermissionModePicker value={activeMode} onChange={setActiveMode} />
           <span className="hidden text-xs text-muted-foreground sm:inline">
             Enter 发送 · Shift+Enter 换行 · 拖拽/粘贴上传
           </span>
@@ -269,11 +280,13 @@ function NewTaskComposer({
     attachmentPaths: string[],
     projectId: string | null,
     model: string | null,
+    permissionMode: PermissionMode,
   ) => void
   initialProjectId?: string | null
 }) {
   const projects = useProjects()
   const [projectId, setProjectId] = React.useState<string | null>(initialProjectId ?? null)
+  const [mode, setMode] = React.useState<PermissionMode>("confirm")
   // The sidebar's project-row "+" updates the preset while the composer is
   // already mounted — follow it (the user can still change the select).
   React.useEffect(() => {
@@ -283,7 +296,9 @@ function NewTaskComposer({
     <Composer
       placeholder="给分身派个任务，例如：把画册的冬天板块加两张图…"
       pending={pending}
-      onSubmit={(text, paths, model) => onSubmit(text, paths, projectId, model)}
+      permissionMode={mode}
+      onPermissionMode={setMode}
+      onSubmit={(text, paths, model) => onSubmit(text, paths, projectId, model, mode)}
     >
       {(projects.data?.length ?? 0) > 0 && (
         <div className="flex items-center gap-2 px-1 pt-1">
@@ -345,9 +360,15 @@ function EmptyState({
         <NewTaskComposer
           pending={submit.isPending}
           initialProjectId={presetProjectId}
-          onSubmit={(text, attachments, projectId, model) =>
+          onSubmit={(text, attachments, projectId, model, permissionMode) =>
             submit.mutate(
-              { input: text, attachments, project_id: projectId, model },
+              {
+                input: text,
+                attachments,
+                project_id: projectId,
+                model,
+                permission_mode: permissionMode,
+              },
               { onSuccess: onSubmitted },
             )
           }
@@ -369,6 +390,12 @@ function ChatThread({ task }: { task: Task }) {
   const events = useTaskEvents(task.id)
   const taskArtifacts = useTaskArtifacts(task.id)
   const [confirmStop, setConfirmStop] = React.useState(false)
+  // The dial shown in the composer, seeded from the conversation. ChatThread is
+  // keyed by task id (see TasksView), so switching conversations remounts this
+  // component and the state re-seeds from that conversation's own choice.
+  const [modeForNextTurn, setPermissionMode] = React.useState<PermissionMode>(
+    task.permission_mode,
+  )
 
   // Group the conversation-wide feeds by the run that produced them, so each
   // assistant turn shows exactly its own activity and deliverables.
@@ -427,33 +454,52 @@ function ChatThread({ task }: { task: Task }) {
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const prevTurnsRef = React.useRef(current.turns.length)
   const prevEventsRef = React.useRef(events.length)
+  // Auto-follow is opt-OUT: it stays on while the user is at the bottom, but
+  // scrolling up to read history turns it off so a streaming run cannot yank
+  // the view back down. The jump-to-bottom button re-arms it.
+  const [following, setFollowing] = React.useState(true)
+
+  const scrollToBottom = React.useCallback((smooth = false) => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" })
+  }, [])
 
   // On conversation switch the thread remounts with scrollTop=0 (top). Pin to
   // the latest message instantly — an animated scrollIntoView here is what
   // caused the old "从头滚到底一次" yank; a silent scrollTop assignment paints
-  // once, already at the bottom.
+  // once, already at the bottom. `following` starts true, so no state write.
   React.useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [])
+    scrollToBottom()
+  }, [scrollToBottom])
 
-  // A new turn — or new live events while a run streams — sticks the view to
-  // the bottom; while reading history the scroll stays put.
+  // While a run streams, new events only auto-scroll if the user is following
+  // (i.e. already at the bottom). Reading history is never interrupted.
   React.useEffect(() => {
-    const el = scrollRef.current
     const prevTurns = prevTurnsRef.current
     const prevEvents = prevEventsRef.current
     prevTurnsRef.current = current.turns.length
     prevEventsRef.current = events.length
-    if (!el) return
     if (current.turns.length <= prevTurns && events.length <= prevEvents) return
-    el.scrollTop = el.scrollHeight
-  }, [current.turns.length, events.length])
+    if (following) scrollToBottom()
+  }, [current.turns.length, events.length, following, scrollToBottom])
+
+  const onScroll = React.useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    setFollowing(atBottom)
+  }, [])
 
   return (
     <>
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col-reverse gap-3 p-4">
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="h-full overflow-y-auto"
+        >
+          <div className="mx-auto flex w-full max-w-3xl flex-col-reverse gap-3 p-4">
           {/* flex-col-reverse renders DOM order bottom-up: the FIRST DOM child
               is visually at the BOTTOM, so the in-flight reply bubble leads the
               DOM and lands right under the conversation, where the answer will
@@ -534,7 +580,24 @@ function ChatThread({ task }: { task: Task }) {
           {!current.turns.length && !running && (
             <p className="text-center text-sm text-muted-foreground">这条对话还没有内容</p>
           )}
+          </div>
         </div>
+        {!following && (
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="outline"
+            aria-label="回到最新"
+            title="回到最新"
+            onClick={() => {
+              setFollowing(true)
+              scrollToBottom(true)
+            }}
+            className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-md"
+          >
+            <ArrowDownIcon />
+          </Button>
+        )}
       </div>
       {pendingHere.length > 0 && (
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pb-2">
@@ -550,9 +613,17 @@ function ChatThread({ task }: { task: Task }) {
             pending={followup.isPending}
             running={running}
             taskId={current.id}
+            permissionMode={current.permission_mode}
+            onPermissionMode={setPermissionMode}
             onStop={() => setConfirmStop(true)}
             onSubmit={(text, attachments, model) =>
-              followup.mutate({ taskId: current.id, input: text, attachments, model })
+              followup.mutate({
+                taskId: current.id,
+                input: text,
+                attachments,
+                model,
+                permission_mode: modeForNextTurn,
+              })
             }
           />
         </div>

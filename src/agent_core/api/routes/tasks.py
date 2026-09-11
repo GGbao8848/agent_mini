@@ -58,6 +58,9 @@ async def create_task(
         wait=wait,
         project_id=payload.project_id,
         model=payload.model,
+        permission_mode=(
+            payload.permission_mode.value if payload.permission_mode else None
+        ),
     )
     mirror_attachments(
         Path(get_settings().workspace_dir),
@@ -81,6 +84,9 @@ async def send_message(
         _with_attachments(payload.input, payload.attachments),
         wait=wait,
         model=payload.model,
+        permission_mode=(
+            payload.permission_mode.value if payload.permission_mode else None
+        ),
     )
     mirror_attachments(
         Path(get_settings().workspace_dir),

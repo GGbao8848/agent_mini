@@ -43,6 +43,14 @@ class ActionPolicy:
         """The capability resolver this policy delegates to (single truth)."""
         return self._resolver
 
-    def evaluate(self, spec: AgentSpec, tool: ToolDefinition) -> PermissionDecision:
-        """Return the gate decision for invoking ``tool`` as ``spec``."""
-        return self._resolver.decide_with_reason(spec, tool)[0]
+    def evaluate(
+        self, spec: AgentSpec, tool: ToolDefinition, *, lift_risk_floor: bool = False
+    ) -> PermissionDecision:
+        """Return the gate decision for invoking ``tool`` as ``spec``.
+
+        ``lift_risk_floor`` (完全访问 mode) suppresses the risk-floor approval
+        upgrade; deny rules and bindings are unaffected.
+        """
+        return self._resolver.decide_with_reason(
+            spec, tool, lift_risk_floor=lift_risk_floor
+        )[0]

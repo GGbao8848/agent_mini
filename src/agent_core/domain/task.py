@@ -21,6 +21,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, model_validator
 
 from agent_core.domain.metrics import RunUsage
+from agent_core.domain.permission_mode import DEFAULT_PERMISSION_MODE, PermissionMode
 from agent_core.errors.exceptions import StateError
 
 
@@ -112,6 +113,9 @@ class Task(BaseModel):
     turns: list[Turn] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
     pinned: bool = False
+    permission_mode: PermissionMode = DEFAULT_PERMISSION_MODE
+    """Autonomy dial for this conversation (see :class:`PermissionMode`). The
+    composer can change it per turn; the latest choice is what persists."""
     last_read_turn_id: str | None = None
     """Turn id up to which the human has read this conversation. Tracks "unread"
     state for the sidebar: turns (or a running status) after this marker make

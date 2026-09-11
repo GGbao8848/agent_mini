@@ -60,8 +60,12 @@ export interface Task {
   created_at: string
   pinned: boolean
   has_unread?: boolean
+  permission_mode: PermissionMode
   metadata: Record<string, unknown>
 }
+
+/** Autonomy dial for a conversation, chosen in the composer. */
+export type PermissionMode = 'confirm' | 'auto' | 'plan' | 'full'
 
 export interface RunEvent {
   id: string

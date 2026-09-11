@@ -20,7 +20,13 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from agent_core.domain.action import Action, ActionStatus, ApprovalKind, ApprovalStatus
+from agent_core.domain.action import (
+    Action,
+    ActionStatus,
+    ApprovalKind,
+    ApprovalStatus,
+    RiskLevel,
+)
 from agent_core.domain.autonomy import LoopGuardPolicy
 from agent_core.domain.permission import PermissionDecision
 from agent_core.domain.task import Run, RunStatus
@@ -87,7 +93,18 @@ class ActionGate:
         )
 
         spec = self._agents.get(run.agent_id)
-        decision = self._policy.evaluate(spec, definition)
+        # 完全访问 mode: don't let the risk floor demand approval. The argument
+        # rule below still applies (a system package install is exactly the
+        # "reduce prompts, but this one is genuinely consequential" case), so
+        # only the plain floor is lifted here. Imported locally: runtime.context
+        # loads after the permissions package (runtime/__init__ → builder →
+        # help_tool → gate), so a top-level import would close a cycle.
+        from agent_core.runtime.context import get_current_permission_mode
+
+        mode = get_current_permission_mode()
+        decision = self._policy.evaluate(
+            spec, definition, lift_risk_floor=bool(mode and mode.lifts_risk_floor)
+        )
         if (
             decision is PermissionDecision.ALLOW
             and needs_argument_approval(tool_name, arguments)
@@ -233,6 +250,66 @@ class ActionGate:
             },
         )
         return resolved.resolved_note or ""
+
+    async def request_approval_for(
+        self,
+        *,
+        run: Run,
+        tool_name: str,
+        arguments: dict[str, Any],
+        reason: str = "",
+    ) -> None:
+        """Ask the human to approve one invocation; raise on rejection.
+
+        The public seam for callers that govern a call outside :meth:`execute`
+        — notably the built-in file tools, which bypass the gate entirely but
+        must still honour 变更前确认 mode. Reuses the same approval records,
+        events and wake-up path as :meth:`_request_approval`.
+        """
+        action = Action(
+            run_id=run.id,
+            agent_id=run.agent_id,
+            tool_name=tool_name,
+            arguments=dict(arguments),
+            risk_level=RiskLevel.MEDIUM,
+            reason=reason,
+        )
+        request = self._approvals.create(action, reason=reason)
+        self._transition(run, RunStatus.WAITING_APPROVAL)
+        self._fanout.emit(
+            EventType.ACTION_PENDING,
+            run=run,
+            agent_id=run.agent_id,
+            tool=tool_name,
+            input=arguments,
+            metadata={"approval_id": request.id, "risk": action.risk_level.value},
+        )
+        resolved = await self._approvals.wait(request.id)
+        self._transition(run, RunStatus.RUNNING)
+        if resolved.status in (ApprovalStatus.REJECTED, ApprovalStatus.CANCELLED):
+            action.status = ActionStatus.REJECTED
+            action.reason = (
+                f"Approval '{request.id}' {resolved.status.value} by {resolved.resolved_by}"
+            )
+            self._fanout.emit(
+                EventType.ACTION_REJECTED,
+                run=run,
+                agent_id=run.agent_id,
+                tool=tool_name,
+                error=action.reason,
+                metadata={"approval_id": request.id},
+            )
+            raise ApprovalRejectedError(request.id, resolved.resolved_by or "user")
+        action.status = (
+            ActionStatus.EDITED if resolved.edited_arguments is not None else ActionStatus.APPROVED
+        )
+        self._fanout.emit(
+            EventType.ACTION_APPROVED,
+            run=run,
+            agent_id=run.agent_id,
+            tool=tool_name,
+            metadata={"approval_id": request.id},
+        )
 
     async def _request_approval(
         self, run: Run, action: Action, arguments: dict[str, Any]

@@ -21,6 +21,7 @@ from agent_core.domain.agent import AgentSpec
 from agent_core.domain.mcp import MCPServerDefinition, MCPTransport
 from agent_core.domain.memory import Memory
 from agent_core.domain.metrics import RunUsage
+from agent_core.domain.permission_mode import PermissionMode
 from agent_core.domain.project import Project
 from agent_core.domain.schedule import Schedule, ScheduleType
 from agent_core.domain.skill import SkillManifest
@@ -89,6 +90,13 @@ class TaskCreateRequest(BaseModel):
             "works directly inside the project's directory."
         ),
     )
+    permission_mode: PermissionMode | None = Field(
+        default=None,
+        description=(
+            "Autonomy dial for this conversation: confirm / auto / plan / full. "
+            "Omitted means the server default (confirm)."
+        ),
+    )
 
 
 class TaskMessageRequest(BaseModel):
@@ -103,6 +111,10 @@ class TaskMessageRequest(BaseModel):
             "Optional workspace-relative paths of files uploaded with this message; "
             "the agent can read them with its file tools."
         ),
+    )
+    permission_mode: PermissionMode | None = Field(
+        default=None,
+        description="Change the conversation's autonomy dial for this turn onward.",
     )
 
 
@@ -146,6 +158,7 @@ class TaskOut(BaseModel):
     pinned: bool = False
     has_unread: bool = False
     """A newer assistant reply exists past the human's read marker (sidebar dot)."""
+    permission_mode: PermissionMode
     metadata: dict[str, Any]
 
     @classmethod
@@ -162,6 +175,7 @@ class TaskOut(BaseModel):
             created_at=task.created_at,
             pinned=task.pinned,
             has_unread=task.has_unread,
+            permission_mode=task.permission_mode,
             metadata=task.metadata,
         )
 

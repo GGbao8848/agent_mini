@@ -18,6 +18,7 @@ import {
   type ModelConfigUpdate,
   type ModelDiscover,
   type ModelVerify,
+  type PermissionMode,
   type Project,
   type ProjectPayload,
   type Run,
@@ -215,14 +216,21 @@ export function useSubmitTask() {
   const queryClient = useQueryClient()
   return useToastMutation<
     Task,
-    { input: string; attachments?: string[]; project_id?: string | null; model?: string | null }
+    {
+      input: string
+      attachments?: string[]
+      project_id?: string | null
+      model?: string | null
+      permission_mode?: PermissionMode
+    }
   >({
-    mutationFn: ({ input, attachments, project_id, model }) =>
+    mutationFn: ({ input, attachments, project_id, model, permission_mode }) =>
       api.post<Task>("/v1/tasks", {
         input,
         ...(attachments?.length ? { attachments } : {}),
         ...(project_id ? { project_id } : {}),
         ...(model ? { model } : {}),
+        ...(permission_mode ? { permission_mode } : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
@@ -235,13 +243,20 @@ export function useSendFollowup() {
   const queryClient = useQueryClient()
   return useToastMutation<
     Task,
-    { taskId: string; input: string; attachments?: string[]; model?: string | null }
+    {
+      taskId: string
+      input: string
+      attachments?: string[]
+      model?: string | null
+      permission_mode?: PermissionMode
+    }
   >({
-    mutationFn: ({ taskId, input, attachments, model }) =>
+    mutationFn: ({ taskId, input, attachments, model, permission_mode }) =>
       api.post<Task>(`/v1/tasks/${taskId}/messages`, {
         input,
         ...(attachments?.length ? { attachments } : {}),
         ...(model ? { model } : {}),
+        ...(permission_mode ? { permission_mode } : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })

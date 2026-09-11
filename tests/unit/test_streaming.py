@@ -108,6 +108,24 @@ class TestEventStreamBroker:
 
         assert await collect(stream, 2) == [past, live]
 
+    async def test_replay_is_lossless_past_queue_capacity(self) -> None:
+        """A long run's history must survive a reconnect (page refresh).
+
+        Replayed events used to go through the bounded live queue, so a run
+        with more events than its capacity silently lost the newest ones on
+        refresh while older steps still showed. History is never dropped.
+        """
+        bus = EventBus()
+        broker = EventStreamBroker(bus)
+        stream = broker.subscribe(maxsize=10)
+        events = [make_event("run-1") for _ in range(250)]
+
+        stream.replay(events)
+
+        got = await collect(stream, 250)
+        assert got == events
+        assert stream.dropped == 0
+
 
 class TestThinkingStreamHandler:
     def test_tokens_buffer_into_deltas(self) -> None:
