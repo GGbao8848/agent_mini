@@ -1,9 +1,9 @@
-"""Skill registry endpoints: list, register a server-side directory, and remove.
+"""Skill registry endpoints: list, toggle, and remove.
 
-Registering points the registry at an existing directory following the skill
-layout convention (the directory must contain ``SKILL.md``). Installing a
-*new* skill is the agent's job (its ``install_skill`` tool authors the
-directory and registers it), so there is no console upload channel here.
+Read/manage-only. Installing a skill is the agent's job (its ``install_skill``
+tool authors the skill directory and registers it), so the console has no
+register/upload channel here — every write enters through the agent and its
+approval queue.
 """
 
 from __future__ import annotations
@@ -11,8 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 
 from agent_core.api.deps import ServiceDep
-from agent_core.api.schemas import SkillCreateRequest, SkillOut, SkillUpdateRequest
-from agent_core.domain.skill import SkillManifest
+from agent_core.api.schemas import SkillOut, SkillUpdateRequest
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -30,21 +29,6 @@ def get_skill(skill_id: str, service: ServiceDep, version: str | None = None) ->
 @router.get("/{skill_id}/versions", response_model=list[SkillOut])
 def list_skill_versions(skill_id: str, service: ServiceDep) -> list[SkillOut]:
     return [SkillOut.of(manifest) for manifest in service.runtime.skills.list_versions(skill_id)]
-
-
-@router.post("", response_model=SkillOut, status_code=201)
-def install_skill(payload: SkillCreateRequest, service: ServiceDep) -> SkillOut:
-    """Install a skill from a server-side directory (must contain SKILL.md)."""
-    path = payload.validate_directory()
-    manifest = SkillManifest(
-        id=payload.id,
-        name=payload.name,
-        version=payload.version,
-        description=payload.description,
-        path=path,
-    )
-    service.runtime.skills.register(manifest)
-    return SkillOut.of(manifest)
 
 
 @router.delete("/{skill_id}", response_model=SkillOut)

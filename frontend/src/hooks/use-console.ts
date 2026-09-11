@@ -361,10 +361,6 @@ export function useSkillManage() {
     queryClient.invalidateQueries({ queryKey: ["skills"] })
     queryClient.invalidateQueries({ queryKey: ["agents"] })
   }
-  const install = useToastMutation<unknown, Record<string, unknown>>({
-    mutationFn: (payload) => api.post("/v1/skills", payload),
-    onSuccess: invalidate,
-  })
   const update = useToastMutation<unknown, { id: string; enabled: boolean }>({
     mutationFn: ({ id, enabled }) => api.patch(`/v1/skills/${id}`, { enabled }),
     onSuccess: invalidate,
@@ -373,7 +369,7 @@ export function useSkillManage() {
     mutationFn: (skillId) => api.del(`/v1/skills/${skillId}`),
     onSuccess: invalidate,
   })
-  return { install, update, remove }
+  return { update, remove }
 }
 
 export function useUpdateAgent() {
